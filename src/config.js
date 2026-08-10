@@ -58,6 +58,22 @@ export const CONFIG = {
     baseRate: 0.62,      // eventos/seg base (bosque ≈ 37/min a plena actividad)
     ambientProb: 0.35,   // fracción de sonidos sin agente (texturas)
   },
+  // Bichitos voladores que van de flor en flor; algunos agentes los cazan.
+  bugs: {
+    count: 90,
+    speed: 0.10,         // velocidad de vuelo (coords normalizadas/seg)
+    arrive: 0.02,        // distancia para posarse en la flor
+    hoverMin: 0.6, hoverMax: 2.2,  // segundos posado
+    jitter: 0.45,        // zigzag del vuelo
+    height: 3.4,         // altura de vuelo sobre el suelo
+    bob: 0.9,            // cabeceo vertical
+    fleeRadius: 0.06,    // huyen si un cazador entra aquí
+    hunters: 3,          // agentes que cazan
+    huntRadius: 0.22,    // radio de detección del cazador
+    huntPull: 0.12,      // fuerza con que persigue
+    catchRadius: 0.02,   // distancia para atrapar
+    respawn: 2.5,        // segundos hasta reaparecer
+  },
   ecosystem: {
     dayLengthSec: 540,   // día completo en 9 min → 45 s por fase
     weatherMinSec: 55,
