@@ -11,18 +11,18 @@ export const WEATHERS = ['dry still', 'light rain', 'frost', 'after rain', 'heav
 
 // Perfil por fase: actividad base, temperatura (°C), color de luz y brillo.
 const PHASE = [
-  { act: 0.15, temp: -3, light: [0.34, 0.44, 0.78], gain: 0.52 }, // night
-  { act: 0.25, temp: -2, light: [0.48, 0.44, 0.82], gain: 0.58 }, // pre-dawn
-  { act: 0.88, temp: 0, light: [1.00, 0.70, 0.48], gain: 0.62 }, // dawn chorus
-  { act: 0.76, temp: 2, light: [1.00, 0.84, 0.68], gain: 0.78 }, // first light
-  { act: 0.70, temp: 5, light: [1.00, 0.94, 0.84], gain: 0.90 }, // early morning
-  { act: 0.62, temp: 8, light: [1.00, 0.99, 0.94], gain: 1.00 }, // mid-morning
-  { act: 0.56, temp: 10, light: [1.00, 1.00, 1.00], gain: 1.05 }, // morning
-  { act: 0.50, temp: 13, light: [1.00, 1.00, 0.99], gain: 1.08 }, // midday
-  { act: 0.46, temp: 14, light: [1.00, 0.99, 0.95], gain: 1.04 }, // early afternoon
-  { act: 0.52, temp: 13, light: [1.00, 0.96, 0.88], gain: 0.96 }, // afternoon
-  { act: 0.68, temp: 10, light: [1.00, 0.76, 0.46], gain: 0.80 }, // golden hour
-  { act: 0.50, temp: 6, light: [0.72, 0.56, 0.72], gain: 0.62 }, // dusk
+  { act: 0.15, temp: -3, light: [0.34, 0.44, 0.78], gain: 0.72 }, // night
+  { act: 0.25, temp: -2, light: [0.48, 0.44, 0.82], gain: 0.80 }, // pre-dawn
+  { act: 0.88, temp: 0, light: [1.00, 0.70, 0.48], gain: 0.86 }, // dawn chorus
+  { act: 0.76, temp: 2, light: [1.00, 0.84, 0.68], gain: 1.08 }, // first light
+  { act: 0.70, temp: 5, light: [1.00, 0.94, 0.84], gain: 1.24 }, // early morning
+  { act: 0.62, temp: 8, light: [1.00, 0.99, 0.94], gain: 1.35 }, // mid-morning
+  { act: 0.56, temp: 10, light: [1.00, 1.00, 1.00], gain: 1.35 }, // morning
+  { act: 0.50, temp: 13, light: [1.00, 1.00, 0.99], gain: 1.35 }, // midday
+  { act: 0.46, temp: 14, light: [1.00, 0.99, 0.95], gain: 1.35 }, // early afternoon
+  { act: 0.52, temp: 13, light: [1.00, 0.96, 0.88], gain: 1.32 }, // afternoon
+  { act: 0.68, temp: 10, light: [1.00, 0.76, 0.46], gain: 1.10 }, // golden hour
+  { act: 0.50, temp: 6, light: [0.72, 0.56, 0.72], gain: 0.86 }, // dusk
 ]
 
 // Efecto del clima sobre actividad, tensión, temperatura, lluvia y niebla.
