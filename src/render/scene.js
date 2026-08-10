@@ -751,21 +751,15 @@ export function createScene(container, cfg, agentNames = []) {
         color: TREE_EDGE, transparent: true, opacity: 0.55, fog: true,
       }),
     ))
-    // Punteado sobre la corteza: un punto por vértice del tubo → el tronco se lee
-    // como red de puntos (como en murmur), no como un sólido liso.
-    const tpg = new THREE.BufferGeometry()
-    tpg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
-    scene.add(new THREE.Points(tpg, new THREE.PointsMaterial({
-      color: TREE_EDGE, size: 0.3, sizeAttenuation: true,
-      transparent: true, opacity: 0.7, fog: true,
-    })))
+    // (Sin punteado sobre el tronco: se veía feo. El árbol se lee por sus aristas.)
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
   // Rocas: MALLA (esfera deformada por ruido, base aplanada) → silueta dura.
   // Encima, puntos de musgo solo en las caras que miran hacia arriba.
-  const ROCK_LO = [0.30, 0.185, 0.15]
-  const ROCK_HI = [0.64, 0.47, 0.40]
+  // Marrón más uniforme (antes el HI era muy claro → la roca se veía en dos colores).
+  const ROCK_LO = [0.26, 0.17, 0.13]
+  const ROCK_HI = [0.42, 0.29, 0.23]
   const rockSpots = []
   // Formación agrupada: un monolito alto rodeado de bloques medianos y chicos.
   const hubX = (rnd() * 2 - 1) * 11, hubZ = (rnd() * 2 - 1) * 11
@@ -832,42 +826,29 @@ export function createScene(container, cfg, agentNames = []) {
     const baseY = cy + hh * 0.05
     mesh.position.set(cx, baseY, cz)
     scene.add(mesh)
-    // La roca se lee por sus PUNTOS (un punto por vértice + punteado denso), no
-    // por aristas de wireframe (se quitaron a pedido: no queremos ver líneas en
-    // las piedras, solo el punteado que las funde con el detalle).
-    const rpts = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 0.5, sizeAttenuation: true, vertexColors: true,
-      transparent: true, opacity: 0.75, fog: true,
-    }))
-    rpts.position.copy(mesh.position)
-    scene.add(rpts)
-    // Punteado DENSO extra: muestreo por baricéntrico sobre las caras deformadas
-    // → muchos más puntos sobre la roca (paridad con murmur) sin recargar el mesh.
+    // La roca NO va cubierta de puntos (se veía como dos colores/red encima). El
+    // único punteado es en la BASE: un faldón esparcido donde la roca toca el
+    // suelo → disuelve el borde (la "fusión con el suelo" que sí gusta).
     {
-      const dn = spec.mono ? 1500 : 520
-      const dp = new Float32Array(dn * 3), dc = new Float32Array(dn * 3)
-      const pc = geo.attributes.position, cc = geo.attributes.color
-      const tris = pc.count / 3
-      for (let k = 0; k < dn; k++) {
-        const tri = ((rnd() * tris) | 0) * 3
-        let u = rnd(), v = rnd()
-        if (u + v > 1) { u = 1 - u; v = 1 - v }
-        const w = 1 - u - v, a = tri, b = tri + 1, c2 = tri + 2
-        for (let j = 0; j < 3; j++) {
-          const gx = j === 0 ? 'getX' : j === 1 ? 'getY' : 'getZ'
-          dp[k * 3 + j] = pc[gx](a) * u + pc[gx](b) * v + pc[gx](c2) * w
-          dc[k * 3 + j] = cc[gx](a) * u + cc[gx](b) * v + cc[gx](c2) * w
-        }
+      const fn = spec.mono ? 460 : 190
+      const fp = new Float32Array(fn * 3), fc = new Float32Array(fn * 3)
+      const rr = Math.max(radX, radZ)
+      for (let k = 0; k < fn; k++) {
+        const ang = rnd() * 6.2832
+        const rad = rr * (0.55 + rnd() * 0.6) // anillo alrededor de la base
+        const px = cx + Math.cos(ang) * rad, pz = cz + Math.sin(ang) * rad
+        const up = Math.pow(rnd(), 2.2) * 2.2 // densos abajo, ralos hacia arriba
+        fp[k * 3] = px; fp[k * 3 + 1] = G + terrainHeight(px, pz) + up; fp[k * 3 + 2] = pz
+        const t = 0.45 + rnd() * 0.4
+        fc[k * 3] = 0.17 * t; fc[k * 3 + 1] = 0.12 * t; fc[k * 3 + 2] = 0.09 * t
       }
-      const dg = new THREE.BufferGeometry()
-      dg.setAttribute('position', new THREE.BufferAttribute(dp, 3))
-      dg.setAttribute('color', new THREE.BufferAttribute(dc, 3))
-      const dpts = new THREE.Points(dg, new THREE.PointsMaterial({
-        size: 0.42, sizeAttenuation: true, vertexColors: true,
-        transparent: true, opacity: 0.85, fog: true,
-      }))
-      dpts.position.copy(mesh.position)
-      scene.add(dpts)
+      const fg = new THREE.BufferGeometry()
+      fg.setAttribute('position', new THREE.BufferAttribute(fp, 3))
+      fg.setAttribute('color', new THREE.BufferAttribute(fc, 3))
+      scene.add(new THREE.Points(fg, new THREE.PointsMaterial({
+        size: 0.4, sizeAttenuation: true, vertexColors: true,
+        transparent: true, opacity: 0.75, fog: true,
+      })))
     }
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
     // Cima como posado + cúpula para caminar por encima (coords de mundo).
