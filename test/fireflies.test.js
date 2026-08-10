@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { stepPhases, phaseVariance } from '../src/sim/fireflies.js'
+import { stepPhases, phaseVariance, createSwarm, updateSwarm } from '../src/sim/fireflies.js'
+import { CONFIG } from '../src/config.js'
 
 describe('stepPhases (Kuramoto)', () => {
   it('dos osciladores acoplados convergen en fase', () => {
@@ -26,5 +27,29 @@ describe('stepPhases (Kuramoto)', () => {
 
   it('phaseVariance es 0 con fases idénticas', () => {
     expect(phaseVariance([1.3, 1.3, 1.3])).toBeCloseTo(0, 6)
+  })
+})
+
+describe('swarm', () => {
+  it('createSwarm respeta el count y llena arrays', () => {
+    const s = createSwarm(CONFIG.fireflies, () => 0.5)
+    expect(s.count).toBe(CONFIG.fireflies.count)
+    expect(s.pos.length).toBe(CONFIG.fireflies.count * 3)
+    expect(s.phases.length).toBe(CONFIG.fireflies.count)
+  })
+
+  it('updateSwarm retorna destellos con coordenadas', () => {
+    const cfg = { ...CONFIG.fireflies, count: 40 }
+    const s = createSwarm(cfg, () => 0.9) // fases altas → cruzan pronto
+    let seen = 0
+    for (let f = 0; f < 200; f++) {
+      const flashes = updateSwarm(s, cfg, 0.05)
+      for (const fl of flashes) {
+        expect(typeof fl.x).toBe('number')
+        expect(fl.intensity).toBeGreaterThan(0)
+        seen++
+      }
+    }
+    expect(seen).toBeGreaterThan(0)
   })
 })
