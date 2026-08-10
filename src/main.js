@@ -65,6 +65,7 @@ async function start() {
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
     const eco = ecosystem.update(dt)
     hud.update(eco)
+    audio.setMood(eco.tension)
 
     // Motor de eventos: alimenta el log, la píldora y un acento de sonido.
     const evs = events.update(dt, {
