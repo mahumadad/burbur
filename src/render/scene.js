@@ -4,6 +4,7 @@ import { createHaze } from './engine/haze.js'
 import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
 import { createAgentKit, updateAgentMotion } from './engine/agents3d.js'
 import { createDraw } from './engine/points.js'
+import { createTrails } from './engine/trails.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -998,27 +999,7 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   // ─── ESTELAS: puntos de tamaño-mundo que persisten ────────────────────────
-  const TRAIL = rc.trailLen
-  const tPos = new Float32Array(n * TRAIL * 3)
-  const tCol = new Float32Array(n * TRAIL * 3)
-  const tSize = new Float32Array(n * TRAIL)
-  const tmpC = new THREE.Color()
-  for (let i = 0; i < n; i++) {
-    tmpC.set(AGENT_COLORS[i % AGENT_COLORS.length])
-    for (let s = 0; s < TRAIL; s++) {
-      const k = (i * TRAIL + s) * 3
-      tCol[k] = tmpC.r; tCol[k + 1] = tmpC.g; tCol[k + 2] = tmpC.b
-    }
-  }
-  const trailGeom = new THREE.BufferGeometry()
-  trailGeom.setAttribute('position', new THREE.BufferAttribute(tPos, 3))
-  trailGeom.setAttribute('hcol', new THREE.BufferAttribute(tCol, 3))
-  trailGeom.setAttribute('hsize', new THREE.BufferAttribute(tSize, 1))
-  trailGeom.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(n * TRAIL), 1))
-  const trail = new THREE.Points(trailGeom, pointMaterial)
-  trail.frustumCulled = false
-  scene.add(trail)
-  let tHead = 0, tFrame = 0
+  const trails = createTrails(scene, n, AGENT_COLORS, rc, pointMaterial)
 
   // ─── BICHITOS: van de flor en flor, huyen de los cazadores ────────────────
   const bugCfg = cfg.bugs
@@ -1277,20 +1258,7 @@ export function createScene(container, cfg, agentNames = []) {
     }
 
     // Estelas: siembra espaciada y desvanecido lento → puntos separados, no manchones.
-    for (let k = 0; k < n * TRAIL; k++) tSize[k] *= 0.997
-    if (tFrame % 7 === 0) {
-      for (let i = 0; i < n; i++) {
-        const slot = (i * TRAIL + tHead) * 3
-        tPos[slot] = worldPos[i * 3]
-        tPos[slot + 1] = worldPos[i * 3 + 1] - 1.2
-        tPos[slot + 2] = worldPos[i * 3 + 2]
-        tSize[i * TRAIL + tHead] = rc.trailSize * 0.13
-      }
-      tHead = (tHead + 1) % TRAIL
-    }
-    tFrame++
-    trailGeom.getAttribute('position').needsUpdate = true
-    trailGeom.getAttribute('hsize').needsUpdate = true
+    trails.update(worldPos)
 
     // Relámpago: el overlay se apaga rápido tras el destello.
     // El escenario cierra el frame: destello, respiración de la vista y render.
