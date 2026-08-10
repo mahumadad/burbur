@@ -1,6 +1,7 @@
 import { CONFIG } from './config.js'
 import { createSwarm, updateSwarm } from './sim/fireflies.js'
 import { createScene } from './render/scene.js'
+import { applyFraming } from './render/framing.js'
 
 const overlay = document.getElementById('overlay')
 const app = document.getElementById('app')
@@ -13,6 +14,7 @@ function start() {
 
   const swarm = createSwarm(CONFIG.fireflies)
   const scene = createScene(app, CONFIG)
+  applyFraming(app)
 
   let last = performance.now()
   function frame(now) {
