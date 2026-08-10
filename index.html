@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>murmur · bosque</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      #overlay {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: #05070a; color: #cfe8d8; font: 500 18px/1.4 system-ui, sans-serif;
+        cursor: pointer; z-index: 10; letter-spacing: .02em;
+      }
+      #overlay.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="overlay">click para entrar</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
