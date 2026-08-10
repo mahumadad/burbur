@@ -1085,6 +1085,56 @@ export function createScene(container, cfg, agentNames = []) {
     scene.add(fmesh)
   }
 
+  // ─── HOJAS QUE CAEN: pool reciclable (como la nieve). Se desprenden de las
+  // ramas en otoño y con la lluvia, y bajan con vaivén hasta el suelo.
+  const leafAnchors = []
+  for (let i = 0; i < folKind.length; i++) {
+    if (folKind[i] === 0) leafAnchors.push(folPos[i * 3], folPos[i * 3 + 1], folPos[i * 3 + 2], folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2])
+  }
+  const FALL_N = 280
+  const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
+  const fallCol = new Float32Array(FALL_N * 3)
+  const fallVy = new Float32Array(FALL_N)
+  const fallPh = new Float32Array(FALL_N)
+  const fallActive = new Uint8Array(FALL_N)
+  let fallHead = 0, fallBudget = 0
+  const fallGeo = new THREE.BufferGeometry()
+  fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
+  fallGeo.setAttribute('color', new THREE.BufferAttribute(fallCol, 3))
+  const fallMesh = new THREE.Points(fallGeo, new THREE.PointsMaterial({
+    size: 0.7, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.92, depthWrite: false, fog: true,
+  }))
+  fallMesh.frustumCulled = false
+  scene.add(fallMesh)
+  const AMBER = [0.82, 0.42, 0.06]
+  function updateFallingLeaves(step, rate, autumn) {
+    // Emisión: presupuesto fraccional (hojas/seg) desde las ramas.
+    if (leafAnchors.length && rate > 0) {
+      fallBudget += rate * step
+      while (fallBudget >= 1) {
+        fallBudget -= 1
+        const a = ((Math.random() * (leafAnchors.length / 6)) | 0) * 6
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = leafAnchors[a]; fallPos[i * 3 + 1] = leafAnchors[a + 1]; fallPos[i * 3 + 2] = leafAnchors[a + 2]
+        // En otoño la hoja que cae ya viene virada a ámbar.
+        fallCol[i * 3] = leafAnchors[a + 3] + (AMBER[0] - leafAnchors[a + 3]) * autumn
+        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (AMBER[1] - leafAnchors[a + 4]) * autumn
+        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (AMBER[2] - leafAnchors[a + 5]) * autumn
+        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
+      }
+    }
+    for (let i = 0; i < FALL_N; i++) {
+      if (!fallActive[i]) continue
+      fallPos[i * 3 + 1] -= fallVy[i] * step
+      fallPos[i * 3] += Math.sin(clock * 2.0 + fallPh[i]) * 1.5 * step
+      fallPos[i * 3 + 2] += Math.cos(clock * 1.7 + fallPh[i] * 1.3) * 1.5 * step
+      if (fallPos[i * 3 + 1] < G - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 } // toca suelo → recicla
+    }
+    fallGeo.attributes.position.needsUpdate = true
+    fallGeo.attributes.color.needsUpdate = true
+  }
+
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
   const hazeUniforms = {
     uProj: { value: 1000 },
@@ -1608,7 +1658,11 @@ export function createScene(container, cfg, agentNames = []) {
       foliageUniforms.uSeason.value = seasonT
       foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
       foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
-      foliageUniforms.uAutumn.value = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
+      const autumn = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
+      foliageUniforms.uAutumn.value = autumn
+      // Hojas que se desprenden: en otoño y con lluvia (si aún hay hojas).
+      const shedRate = leafAmt > 0.05 ? (autumn * 34 + eco.rain * 46 * leafAmt) : 0
+      updateFallingLeaves(step, shedRate, autumn)
     }
 
     mapPositions(step)
