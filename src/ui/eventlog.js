@@ -39,16 +39,15 @@ export function createEventLog(accent = '#8fe04a', max = 14) {
   style.textContent = CSS
   document.head.appendChild(style)
 
+  // El acento lo controla :root (--accent) según el mundo activo.
   const pill = document.createElement('div')
   pill.className = 'pill'
-  pill.style.setProperty('--accent', accent)
   pill.innerHTML = `<span class="lvl"><i></i><i></i><i></i><i></i></span><span class="tx" data-f="now">—</span>`
   document.body.appendChild(pill)
   const nowEl = pill.querySelector('[data-f="now"]')
 
   const box = document.createElement('div')
   box.className = 'evlog'
-  box.style.setProperty('--accent', accent)
   box.innerHTML = `<h4>EVENTS LOG</h4><div data-f="rows"></div>`
   document.body.appendChild(box)
   const rowsEl = box.querySelector('[data-f="rows"]')
