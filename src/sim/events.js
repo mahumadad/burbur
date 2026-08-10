@@ -73,7 +73,7 @@ export function createEventEngine(pop, cfg, rand = Math.random) {
       rand,
     )
     return {
-      t: world.time, type, agent, agentIdx, dir,
+      t: world.time, type, agent, agentType, agentIdx, dir,
       log: text.log, short: text.short, source,
     }
   }

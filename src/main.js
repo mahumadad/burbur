@@ -58,6 +58,7 @@ async function start() {
   })
 
   let last = performance.now()
+  let lightningCooldown = 4
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
@@ -75,9 +76,23 @@ async function start() {
       const label = clockLabel(eco)
       for (const ev of evs) {
         eventLog.push(ev, label)
-        if (ev.dir && (ev.type === 'sound' || ev.type === 'interaction' || ev.type === 'conflict')) {
-          audio.accent(ev.dir, (ev.agentIdx ?? ev.log.length))
-        }
+        // Cada tipo de agente tiene su voz; el ambiente usa un acento suave.
+        if (ev.agentType) audio.fauna(ev.agentType, ev.dir)
+        else if (ev.dir && ev.type === 'sound') audio.accent(ev.dir, ev.log.length)
+      }
+    }
+
+    // Tormenta: relámpagos y truenos cuando llueve fuerte.
+    if (eco.rain > 0.55) {
+      lightningCooldown -= dt
+      if (lightningCooldown <= 0 && Math.random() < 0.5 * dt * eco.rain) {
+        lightningCooldown = 3 + Math.random() * 6
+        const strength = 0.6 + eco.rain * 0.4
+        scene.flash(0.7 * strength)
+        // El trueno llega tras el destello (según "distancia").
+        const delay = 300 + Math.random() * 1600
+        setTimeout(() => audio.thunder(strength), delay)
+        if (Math.random() < 0.5) setTimeout(() => scene.flash(0.4 * strength), 90)
       }
     }
 
@@ -100,7 +115,7 @@ async function start() {
         const ev = { type: 'conflict', agent: who.name, agentIdx: p.hunterIdx, dir: p.dir }
         const text = narrate({ ...ev, agentType: who.type }, { phase: eco.phase, weather: eco.weather })
         eventLog.push({ ...ev, ...text }, label)
-        audio.accent(p.dir, p.hunterIdx)
+        audio.fauna(who.type, p.dir)
       }
     }
     requestAnimationFrame(frame)
