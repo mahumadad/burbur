@@ -2,9 +2,10 @@ import * as Tone from 'tone'
 import { CONFIG } from './config.js'
 import { createSwarm, updateSwarm, attract, perturbPhases } from './sim/fireflies.js'
 import { createAmbient } from './sim/ambient.js'
+import { createEcosystem } from './sim/ecosystem.js'
 import { createScene } from './render/scene.js'
 import { createAudio } from './audio/engine.js'
-import { createPanel } from './ui/panel.js'
+import { createHud } from './ui/hud.js'
 
 const overlay = document.getElementById('overlay')
 const app = document.getElementById('app')
@@ -20,10 +21,11 @@ async function start() {
   const scene = createScene(app, CONFIG)
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
-  createPanel(CONFIG, {
-    onFlashVol: audio.setFlashVol,
-    onDroneVol: audio.setDroneVol,
-    onBedVol: audio.setBedVol,
+  const ecosystem = createEcosystem(CONFIG.ecosystem)
+  const hud = createHud('#8fe04a', {
+    // MUSIC = latidos + drone; WORLD = cama atmosférica.
+    onMusic: (db) => { audio.setFlashVol(db); audio.setDroneVol(db - 4) },
+    onWorld: (db) => audio.setBedVol(db - 8),
   })
 
   // Interacción: el mouse atrae a los individuos cercanos.
@@ -45,13 +47,18 @@ async function start() {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
+    const eco = ecosystem.update(dt)
+    hud.update(eco)
+    // La actividad del mundo modula cuántos individuos llegan a latir.
     const flashes = updateSwarm(swarm, CONFIG.fireflies, dt)
-    for (const fl of flashes) audio.triggerFlash(fl.y, fl.intensity)
+    for (const fl of flashes) {
+      if (Math.random() < 0.25 + eco.activity * 0.75) audio.triggerFlash(fl.y, fl.intensity)
+    }
     const env = ambient.update(dt)
-    audio.setWind(env.wind)
-    if (env.cricket) audio.cricket()
+    audio.setWind(Math.max(env.wind, eco.rain * 0.85))
+    if (env.cricket && Math.random() < eco.activity) audio.cricket()
     if (env.owl) audio.owl()
-    scene.update(swarm, dt)
+    scene.update(swarm, dt, eco)
     requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame)

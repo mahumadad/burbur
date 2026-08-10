@@ -41,11 +41,14 @@ export function createScene(container, cfg) {
 
   const scene = new THREE.Scene()
   scene.background = new THREE.Color(0x000000)
+  // Niebla negra: la distancia se funde en la oscuridad. La densidad la fija el clima.
+  scene.fog = new THREE.FogExp2(0x000000, 0.004)
+  let grassMat, floraMat
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
   // Órbita esférica inicial (r=118, theta=0.62, phi=0.92) — vista aérea 3/4.
-  const orbR = 118, th = 0.62, ph = 0.92
+  const orbR = 96, th = 0.62, ph = 0.86
   camera.position.set(
     orbR * Math.sin(ph) * Math.cos(th),
     orbR * Math.cos(ph),
@@ -131,7 +134,8 @@ export function createScene(container, cfg) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(gp.slice(0, n * 12), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(gc.slice(0, n * 12), 3))
-    scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true })))
+    grassMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
+    scene.add(new THREE.LineSegments(geo, grassMat))
   }
 
   // ─── FLORES: tallo curvo de 2 segmentos + 1 cabeza o racimo de 2–4 ────────
@@ -247,7 +251,8 @@ export function createScene(container, cfg) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePos), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lineCol), 3))
-    scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true })))
+    floraMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
+    scene.add(new THREE.LineSegments(geo, floraMat))
   }
 
   // Shader de puntos: tamaño en unidades de MUNDO + balanceo + DOF falso.
@@ -307,7 +312,11 @@ export function createScene(container, cfg) {
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
-  const hazeUniforms = { uProj: { value: 1000 } }
+  const hazeUniforms = {
+    uProj: { value: 1000 },
+    uColor: { value: new THREE.Vector3(...rc.hazeColor) },
+    uAlpha: { value: rc.hazeAlpha },
+  }
   {
     const pos = [], siz = []
     for (let i = 0; i < rc.hazeCount; i++) {
@@ -320,7 +329,6 @@ export function createScene(container, cfg) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
     geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(siz), 1))
-    const c = rc.hazeColor
     const mat = new THREE.ShaderMaterial({
       uniforms: hazeUniforms,
       blending: THREE.AdditiveBlending,
@@ -335,11 +343,12 @@ export function createScene(container, cfg) {
         }`,
       fragmentShader: `
         precision mediump float;
+        uniform vec3 uColor; uniform float uAlpha;
         void main() {
           vec2 uv = gl_PointCoord - 0.5; float d2 = dot(uv, uv);
           if (d2 > 0.25) discard;
-          float a = 1.0 - sqrt(d2) * 2.0; a = a * a * ${rc.hazeAlpha.toFixed(3)};
-          gl_FragColor = vec4(${c[0].toFixed(3)}, ${c[1].toFixed(3)}, ${c[2].toFixed(3)}, 1.0) * a;
+          float a = 1.0 - sqrt(d2) * 2.0; a = a * a * uAlpha;
+          gl_FragColor = vec4(uColor, 1.0) * a;
         }`,
     })
     const h = new THREE.Points(geo, mat)
@@ -459,6 +468,46 @@ export function createScene(container, cfg) {
     }
   }
 
+  // ─── LLUVIA: líneas que caen, recicladas al llegar al suelo ───────────────
+  const RAIN_N = 1400
+  const rainPos = new Float32Array(RAIN_N * 6)
+  const rainTop = new Float32Array(RAIN_N * 3)
+  const RAIN_H = 46
+  for (let i = 0; i < RAIN_N; i++) {
+    const a = rnd() * 6.2832
+    const rr = Math.sqrt(rnd()) * R * 1.1
+    rainTop[i * 3] = Math.cos(a) * rr
+    rainTop[i * 3 + 1] = G + rnd() * RAIN_H
+    rainTop[i * 3 + 2] = Math.sin(a) * rr
+  }
+  const rainGeom = new THREE.BufferGeometry()
+  rainGeom.setAttribute('position', new THREE.BufferAttribute(rainPos, 3))
+  const rainMat = new THREE.LineBasicMaterial({
+    color: 0xbcd6e8, transparent: true, opacity: 0, depthWrite: false,
+  })
+  const rainMesh = new THREE.LineSegments(rainGeom, rainMat)
+  rainMesh.frustumCulled = false
+  rainMesh.visible = false
+  scene.add(rainMesh)
+
+  function updateRain(dt, intensity) {
+    rainMesh.visible = intensity > 0.01
+    if (!rainMesh.visible) return
+    rainMat.opacity = 0.16 + 0.34 * intensity
+    const fall = (26 + 42 * intensity) * dt
+    const streak = 1.6 + 3.4 * intensity
+    for (let i = 0; i < RAIN_N; i++) {
+      let y = rainTop[i * 3 + 1] - fall
+      if (y < G - 4) y = G + RAIN_H
+      rainTop[i * 3 + 1] = y
+      const x = rainTop[i * 3], z = rainTop[i * 3 + 2]
+      const k = i * 6
+      rainPos[k] = x;             rainPos[k + 1] = y;           rainPos[k + 2] = z
+      rainPos[k + 3] = x + 0.5;   rainPos[k + 4] = y - streak;  rainPos[k + 5] = z
+    }
+    rainGeom.getAttribute('position').needsUpdate = true
+  }
+
   // ─── Post-proceso: el "lente" (fisheye + cromática + viñeta) ──────────────
   const composer = new EffectComposer(renderer)
   composer.addPass(new RenderPass(scene, camera))
@@ -517,10 +566,29 @@ export function createScene(container, cfg) {
   resize()
   window.addEventListener('resize', resize)
 
+  const tintC = new THREE.Color()
   let clock = 0
-  function update(swarm, dt) {
+  function update(swarm, dt, eco) {
     clock += dt || 0.016
     pointUniforms.uT.value = clock
+
+    // El ecosistema pinta el mundo: luz de la hora, niebla y neblina del clima.
+    if (eco) {
+      const L = eco.light, g = eco.gain
+      tintC.setRGB(L[0] * g, L[1] * g, L[2] * g)
+      if (grassMat) grassMat.color.copy(tintC)
+      if (floraMat) floraMat.color.copy(tintC)
+      scene.fog.density = 0.003 + eco.fog * 0.012
+      // La neblina toma el color de la luz y se espesa con la niebla.
+      hazeUniforms.uColor.value.set(
+        rc.hazeColor[0] * 0.4 + L[0] * 0.6,
+        rc.hazeColor[1] * 0.4 + L[1] * 0.6,
+        rc.hazeColor[2] * 0.6 + L[2] * 0.4,
+      )
+      hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.5 + eco.fog * 1.3) * (0.45 + g * 0.75)
+      updateRain(dt || 0.016, eco.rain)
+    }
+
     mapPositions(swarm)
 
     for (let i = 0; i < n; i++) {

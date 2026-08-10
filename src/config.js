@@ -27,6 +27,11 @@ export const CONFIG = {
     bounds: { x: 12, y: 7, z: 10 },
     driftSpeed: 0.4,
   },
+  ecosystem: {
+    dayLengthSec: 540,   // día completo en 9 min → 45 s por fase
+    weatherMinSec: 55,
+    weatherMaxSec: 130,
+  },
   ambient: {
     windPeriodSec: 23,
     cricketBaseRate: 6,
