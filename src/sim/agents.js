@@ -40,6 +40,30 @@ export const FOREST_CENSUS = [
   { name: 'dog walker', type: 'human' },
 ]
 
+/** Censo de ciudad: fauna urbana + actores humanos (según ng.city del bundle). */
+export const CITY_CENSUS = [
+  { name: 'feral pigeon', type: 'flying_animal' },
+  { name: 'carrion crow', type: 'flying_animal' },
+  { name: 'magpie', type: 'flying_animal' },
+  { name: 'herring gull', type: 'flying_animal' },
+  { name: 'starling', type: 'flying_animal' },
+  { name: 'peregrine falcon', type: 'flying_animal' },
+  { name: 'swift', type: 'flying_animal' },
+  { name: 'red fox', type: 'walking_animal', night: true },
+  { name: 'brown rat', type: 'walking_animal', night: true },
+  { name: 'grey squirrel', type: 'walking_animal' },
+  { name: 'urban hedgehog', type: 'walking_animal', night: true },
+  { name: 'the fountain', type: 'static_object' },
+  { name: 'traffic hum', type: 'static_object' },
+  { name: 'neon sign', type: 'static_object' },
+  { name: 'skateboarder', type: 'human' },
+  { name: 'cyclist', type: 'human' },
+  { name: 'busker', type: 'human' },
+  { name: 'market trader', type: 'human' },
+  { name: 'tram', type: 'human' },
+  { name: 'ambulance', type: 'human', night: true },
+]
+
 /**
  * Construye el censo del mundo y asigna identidad a los agentes VISIBLES.
  * Devuelve { census, visible } donde `visible[i]` = { name, type, idx, memory, state }.
