@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { createStage } from './stage.js'
 import { createDraw } from './engine/points.js'
 import { cityLayout } from './cityLayout.js'
-import { noise2, fbm } from './noise.js'
+import { fbm } from './noise.js'
 
 const rnd = Math.random
 
@@ -15,6 +15,19 @@ const R_CITY = Wt * 1.18
 // valor de paridad fijo, no expuesto todavía como opción.
 const STREETS = 2
 
+// Paleta de edificios (`$t` en el bundle original), 6 colores RGB exactos.
+const BUILDING_PALETTE = [
+  [0.99, 0.86, 0.66],   // crema/arena
+  [1, 0.58, 0.14],      // naranja
+  [0.985, 0.71, 0.52],  // durazno
+  [0.72, 0.55, 0.96],   // lavanda
+  [1, 0.84, 0.79],      // rosa pálido
+  [0.99, 0.45, 0.12],   // rojo-naranja
+]
+// `p.towers` del original: multiplicador global de la probabilidad de torre
+// por bloque. Valor de paridad = 1 (no expuesto como opción todavía).
+const TOWERS = 1
+
 // Mundo CIUDAD ("Block ecosystem"). Usa el stage compartido; el terreno es la
 // retícula real de calles/manzanas con look "matrix" (malla + wireframe +
 // nube de puntos mate), igual que el suelo del bosque en scene.js. Edificios,
@@ -24,6 +37,13 @@ export function createCityScene(container, cfg, agentNames = []) {
   const stage = createStage(container, cfg)
   const { scene } = stage
   const draw = createDraw(rc)
+
+  // Puntos de interés registrados para tareas siguientes (coordenadas
+  // normalizadas por R_CITY, igual que el bosque normaliza por su radio):
+  // cima de cada torre para que los agentes se posen ahí (Task 13/B8) y
+  // posiciones de techo para que la nieve los cubra (Task 14/B9).
+  const poiPerch = []
+  const capPos = []
 
   // Retícula de calles → manzanas. Se mantiene en el scope de la factory:
   // las tareas siguientes (edificios, pasto, polvo, rutas de agentes) la
@@ -131,6 +151,125 @@ export function createCityScene(container, cfg, agentNames = []) {
       const T = i * 3
       draw.pushPoint(spos[T], spos[T + 1], spos[T + 2], [scol[T], scol[T + 1], scol[T + 2]], 0.45, 0)
     }
+  }
+
+  // ─── EDIFICIOS: torres translúcidas en capas ("matrix") ────────────────
+  // Cada torre es una pila de losas finas (pisos), no una caja sólida.
+  // El glow no usa luces ni post-proceso: es la superposición de losas
+  // semitransparentes con blending aditivo (igual que el resto del proyecto),
+  // más el wireframe + nube de puntos por vértice que funde la silueta con
+  // el punteado del suelo, tal como hacen las rocas del bosque (scene.js).
+  {
+    // Cachés por tinte: la paleta tiene solo 6 colores, así que se reusa un
+    // material de losa y uno de wireframe por tinte en vez de crear uno por
+    // losa/torre (con ~12 bloques × hasta 2 torres × varios pisos, crear un
+    // material por losa dispararía el conteo sin cambiar el look).
+    const slabMatCache = new Map()
+    const wireMatCache = new Map()
+    function slabMaterial(tint) {
+      let m = slabMatCache.get(tint)
+      if (!m) {
+        m = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(tint[0], tint[1], tint[2]),
+          transparent: true, opacity: 0.13,
+          blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
+        })
+        slabMatCache.set(tint, m)
+      }
+      return m
+    }
+    function wireMaterial(tint) {
+      let m = wireMatCache.get(tint)
+      if (!m) {
+        m = new THREE.LineBasicMaterial({
+          color: new THREE.Color(tint[0] * 0.6, tint[1] * 0.6, tint[2] * 0.6),
+          transparent: true, opacity: 0.2, fog: true,
+        })
+        wireMatCache.set(tint, m)
+      }
+      return m
+    }
+
+    // Geometría de losa compartida: un cubo unitario escalado por instancia
+    // (mesh.scale) en vez de una BoxGeometry nueva por losa — mismo look,
+    // muchas menos geometrías en memoria. El wireframe se deriva del mismo
+    // cubo y se escala igual; sus 8 vértices (esquinas del cubo unitario)
+    // son la base de los puntos "matrix" por losa.
+    const unitBox = new THREE.BoxGeometry(1, 1, 1)
+    const unitWire = new THREE.WireframeGeometry(unitBox)
+    const UNIT_CORNERS = [
+      [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5],
+      [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5],
+    ]
+
+    const TOWER_INSET = 4.5   // margen desde el borde de la manzana (pasto/flores de B7)
+    const FLOOR_GAP = 3.2     // separación vertical entre pisos (centro a centro)
+    const SLAB_THICK = 1.0    // grosor de cada losa
+    const TAPER_MIN = 0.55    // angostamiento del piso más alto vs. la base (setback)
+
+    function buildTower(block, blockTint) {
+      const r = Math.min(block.hx, block.hz) * 2
+      // Footprint: proporcional a r, con jitter, inscripto con margen dentro
+      // del bloque para dejar sitio al borde (pasto/flores, tarea B7).
+      const maxHalfX = Math.max(2, block.hx - TOWER_INSET)
+      const maxHalfZ = Math.max(2, block.hz - TOWER_INSET)
+      const w = Math.min(maxHalfX * 2, r * (0.35 + rnd() * 0.3))
+      const d = Math.min(maxHalfZ * 2, r * (0.35 + rnd() * 0.3))
+      // Offset dentro del bloque (no siempre centrada).
+      const freeX = Math.max(0, maxHalfX - w / 2)
+      const freeZ = Math.max(0, maxHalfZ - d / 2)
+      const cx = block.cx + (rnd() * 2 - 1) * freeX
+      const cz = block.cz + (rnd() * 2 - 1) * freeZ
+      // Altura: mayor en bloques grandes, con jitter para variar la silueta.
+      const H = (12 + r * 0.85) * (0.65 + rnd() * 0.7)
+      const floors = Math.max(3, Math.min(20, Math.round(H / FLOOR_GAP)))
+      const baseY = we + Kt
+      const tint = rnd() < 0.66 ? blockTint : BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
+      const mat = slabMaterial(tint)
+      const wmat = wireMaterial(tint)
+      let roofY = baseY
+      for (let i = 0; i < floors; i++) {
+        const tFloor = floors > 1 ? i / (floors - 1) : 0
+        const taper = 1 - (1 - TAPER_MIN) * tFloor
+        const sw = w * taper
+        const sd = d * taper
+        const y = baseY + SLAB_THICK / 2 + i * FLOOR_GAP
+        // Jitter leve por piso: rompe el aspecto de bloque perfecto, ayuda a
+        // que la torre se lea orgánica y se "derrita" hacia el suelo.
+        const px = cx + (rnd() * 2 - 1) * 0.3
+        const pz = cz + (rnd() * 2 - 1) * 0.3
+
+        const mesh = new THREE.Mesh(unitBox, mat)
+        mesh.position.set(px, y, pz)
+        mesh.scale.set(sw, SLAB_THICK, sd)
+        scene.add(mesh)
+
+        const wf = new THREE.LineSegments(unitWire, wmat)
+        wf.position.copy(mesh.position)
+        wf.scale.copy(mesh.scale)
+        scene.add(wf)
+
+        for (const [ux, uy, uz] of UNIT_CORNERS) {
+          draw.pushPoint(px + ux * sw, y + uy * SLAB_THICK, pz + uz * sd, tint, 0.28, 0)
+        }
+        roofY = y + SLAB_THICK / 2
+      }
+      poiPerch.push({ x: cx / R_CITY, z: cz / R_CITY, h: roofY - we })
+      capPos.push(cx, roofY, cz)
+    }
+
+    // `bn` del original: por bloque, probabilidad de torre según su tamaño;
+    // los bloques grandes pueden recibir una 2ª torre desplazada.
+    function placeBuildings() {
+      for (const block of layout.blocks) {
+        const r = Math.min(block.hx, block.hz) * 2
+        const prob = (r >= 20 ? 0.85 : r >= 14 ? 0.5 : 0.2) * TOWERS
+        const blockTint = BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
+        if (rnd() < prob) buildTower(block, blockTint)
+        if (r >= 40 && rnd() < 0.6 * Math.min(TOWERS, 1.5)) buildTower(block, blockTint)
+      }
+    }
+    placeBuildings()
   }
 
   stage.setResizeHook((m) => { draw.uniforms.uProj.value = m.proj })
