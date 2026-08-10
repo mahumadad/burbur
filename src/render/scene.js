@@ -1701,6 +1701,25 @@ export function createScene(container, cfg, agentNames = []) {
 
   function flash(v) { flashV = Math.min(1, v) }
 
+  // "Sacudir" el mundo (shake): dispersa a los individuos hacia afuera con un
+  // empujón aleatorio, y manda a los bichos a una flor lejana → estampida breve.
+  function scare(strength = 1) {
+    for (const r of roamers) {
+      const m = Math.hypot(r.x, r.z) || 1e-3
+      const k = (0.7 + Math.random() * 1.1) * strength
+      r.vx += (r.x / m) * k + (Math.random() - 0.5) * k * 1.5
+      r.vz += (r.z / m) * k + (Math.random() - 0.5) * k * 1.5
+      r.state = 'move'
+      r.stateT = 1.2 + Math.random() * 1.5
+    }
+    for (const b of bugs) {
+      if (!b.alive) continue
+      b.state = 'fly'
+      b.tx = (Math.random() * 2 - 1) * 0.85
+      b.tz = (Math.random() * 2 - 1) * 0.85
+    }
+  }
+
   // Desmontar el mundo: libera GPU y saca los nodos del DOM. Lo usa el host al
   // cambiar de mundo (el nuevo mundo se construye desde cero en el mismo container).
   function dispose() {
@@ -1718,5 +1737,5 @@ export function createScene(container, cfg, agentNames = []) {
     for (const el of [renderer.domElement, label, flashEl]) el.remove()
   }
 
-  return { update, resize, renderer, camera, controls, flash, dispose }
+  return { update, resize, renderer, camera, controls, flash, scare, dispose }
 }

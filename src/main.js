@@ -11,6 +11,7 @@ import { createAudio } from './audio/engine.js'
 import { createHud } from './ui/hud.js'
 import { createEventLog } from './ui/eventlog.js'
 import { createWorldSelector } from './ui/selector.js'
+import { createShake } from './ui/shake.js'
 
 // Reloj HH:MM a partir del avance del día (para los timestamps del log).
 function clockLabel(eco) {
@@ -70,6 +71,16 @@ async function start() {
   world = buildWorld('land')
   selector = createWorldSelector(WORLDS, 'land', switchWorld)
 
+  // ── Shake: sacude el mundo (dispersa individuos + traqueteo + alarma) ──
+  let lastEco = null
+  function doShake() {
+    if (world && world.scene.scare) world.scene.scare(1)
+    audio.rattle()
+    audio.fauna('flying_animal', 'all around', 'crow') // graznido de alarma
+    if (lastEco) eventLog.push({ type: 'shift', log: 'El mundo fue sacudido.', short: 'sacudida' }, clockLabel(lastEco))
+  }
+  createShake(doShake)
+
   // Interacción: el mouse atrae a los individuos cercanos del mundo activo.
   let mouse = null
   app.addEventListener('pointermove', (e) => {
@@ -93,6 +104,7 @@ async function start() {
     const { swarm, pop, scene, events } = world
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
     const eco = ecosystem.update(dt)
+    lastEco = eco
     hud.update(eco)
     audio.setMood(eco.tension)
 
