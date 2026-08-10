@@ -120,6 +120,13 @@ export function createScene(container, cfg, agentNames = []) {
   container.appendChild(label)
   const _proj = new THREE.Vector3()
 
+  // Destello de relámpago: overlay blanco que se apaga rápido.
+  const flashEl = document.createElement('div')
+  flashEl.style.cssText = `position:absolute; inset:0; z-index:7; pointer-events:none;
+    background:#e6f0ff; opacity:0; mix-blend-mode:screen;`
+  container.appendChild(flashEl)
+  let flashV = 0
+
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.target.set(0, 0, 0)
   controls.enableDamping = true
@@ -1279,6 +1286,9 @@ export function createScene(container, cfg, agentNames = []) {
     trailGeom.getAttribute('position').needsUpdate = true
     trailGeom.getAttribute('hsize').needsUpdate = true
 
+    // Relámpago: el overlay se apaga rápido tras el destello.
+    if (flashV > 0.001) { flashV = Math.max(0, flashV - step * 4.5); flashEl.style.opacity = flashV }
+
     // Respiración: velocidad de giro que pulsa + leve vaivén del mundo.
     controls.autoRotateSpeed = 0.3 + Math.sin(clock * 0.18) * 0.16
     controls.target.y = Math.sin(clock * 0.13) * 1.7
@@ -1287,5 +1297,6 @@ export function createScene(container, cfg, agentNames = []) {
     return predations
   }
 
-  return { update, resize, renderer, camera, controls }
+  function flash(v) { flashV = Math.min(1, v) }
+  return { update, resize, renderer, camera, controls, flash }
 }

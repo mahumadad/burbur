@@ -83,9 +83,78 @@ export async function createAudio(cfg) {
     try { accentSynth.triggerAttackRelease(f, 0.3) } catch (_) {}
   }
 
+  // ─── Voces de fauna: cada tipo de agente suena distinto ───────────────────
+  const faunaPan = new Tone.Panner(0).connect(flashReverb)
+  // Pájaro: dos notas rápidas ascendentes (trino).
+  const bird = new Tone.Synth({
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.005, decay: 0.12, sustain: 0, release: 0.1 },
+  }).connect(faunaPan)
+  bird.volume.value = -14
+  // Animal: golpe grave (crujido/pisada).
+  const thud = new Tone.MembraneSynth({
+    pitchDecay: 0.03, octaves: 3,
+    envelope: { attack: 0.001, decay: 0.18, sustain: 0 },
+  }).connect(faunaPan)
+  thud.volume.value = -16
+  // Insecto: ráfaga aguda con zumbido.
+  const buzzFilter = new Tone.Filter(5200, 'bandpass').connect(faunaPan)
+  buzzFilter.Q.value = 6
+  const buzzEnv = new Tone.AmplitudeEnvelope({ attack: 0.004, decay: 0.09, sustain: 0.15, release: 0.05 }).connect(buzzFilter)
+  const buzzNoise = new Tone.Noise('white').start(); buzzNoise.connect(buzzEnv)
+
+  const BIRD_HZ = [660, 784, 880, 988, 1175]
+  function fauna(type, dir, intensity = 1) {
+    faunaPan.pan.value = PAN[dir] ?? 0
+    const now = Tone.now()
+    if (type === 'flying_animal') {
+      const f = BIRD_HZ[(Math.random() * BIRD_HZ.length) | 0]
+      try {
+        bird.triggerAttackRelease(f, 0.06, now)
+        bird.triggerAttackRelease(f * 1.5, 0.08, now + 0.08)
+      } catch (_) {}
+    } else if (type === 'walking_animal') {
+      try { thud.triggerAttackRelease(55 + Math.random() * 30, 0.15, now) } catch (_) {}
+    } else if (type === 'static_object') {
+      try { buzzEnv.triggerAttackRelease(0.12, now) } catch (_) {}
+    } else { // human u otros
+      try { bird.triggerAttackRelease(330, 0.12, now) } catch (_) {}
+    }
+  }
+  function insect(dir) {
+    faunaPan.pan.value = PAN[dir] ?? 0
+    try { buzzEnv.triggerAttackRelease(0.06, Tone.now()) } catch (_) {}
+  }
+
+  // ─── Trueno: retumbo grave largo + chasquido ──────────────────────────────
+  const thunderGain = new Tone.Gain(0).connect(limiter)
+  const thunderFilter = new Tone.Filter(180, 'lowpass').connect(thunderGain)
+  const thunderNoise = new Tone.Noise('brown').start(); thunderNoise.connect(thunderFilter)
+  const crack = new Tone.NoiseSynth({
+    noise: { type: 'white' },
+    envelope: { attack: 0.001, decay: 0.25, sustain: 0 },
+  })
+  const crackFilter = new Tone.Filter(2200, 'highpass').connect(limiter)
+  crack.connect(crackFilter); crack.volume.value = -10
+  function thunder(intensity = 1) {
+    const now = Tone.now()
+    const g = 0.5 + 0.5 * intensity
+    try {
+      crack.triggerAttackRelease(0.2, now)
+      thunderGain.gain.cancelScheduledValues(now)
+      thunderGain.gain.setValueAtTime(0.001, now)
+      thunderGain.gain.linearRampToValueAtTime(g, now + 0.08)
+      thunderGain.gain.exponentialRampToValueAtTime(0.001, now + 2.6 + intensity)
+      thunderFilter.frequency.setValueAtTime(90 + 140 * intensity, now)
+    } catch (_) {}
+  }
+
   function setFlashVol(db) { flashGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setDroneVol(db) { droneGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setBedVol(db) { bedGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
 
-  return { triggerFlash, setWind, cricket, owl, accent, setFlashVol, setDroneVol, setBedVol }
+  return {
+    triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
+    setFlashVol, setDroneVol, setBedVol,
+  }
 }
