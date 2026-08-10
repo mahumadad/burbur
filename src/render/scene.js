@@ -199,6 +199,47 @@ export function createScene(container, cfg, agentNames = []) {
     snowMats.push(groundMat)
     scene.add(new THREE.Mesh(geo, groundMat))
 
+    // "Matrix": la malla triangulada del suelo se hace visible como wireframe.
+    // Es lo que hace que las superficies se lean como red y que los objetos
+    // parezcan disolverse dentro de ellas (como las rocas/árboles).
+    const gwf = new THREE.LineSegments(
+      new THREE.WireframeGeometry(geo),
+      new THREE.LineBasicMaterial({ color: 0x8fa06a, transparent: true, opacity: 0.13, fog: true }),
+    )
+    scene.add(gwf)
+
+    // Punteado del suelo: nube de puntos MATE (sin brillo aditivo) sembrada
+    // sobre el terreno → el detalle fino de murmur, visible sobre todo en las
+    // zonas peladas donde el pasto no tapa.
+    {
+      const SN = 42000
+      const spos = new Float32Array(SN * 3)
+      const scol = new Float32Array(SN * 3)
+      const cc = [0, 0, 0]
+      let sn = 0
+      for (let i = 0; i < SN * 1.4 && sn < SN; i++) {
+        const rad = R * Math.sqrt(rnd())
+        const ang = rnd() * 6.2832
+        const sx = Math.cos(ang) * rad, sz = Math.sin(ang) * rad
+        const mk = islandMask(sx, sz, R)
+        if (mk < 0.04) continue
+        const fert = fertility(sx, sz)
+        grassColor(fert * 0.5, cc)
+        const f = mk * (0.5 + 0.5 * fert)
+        const T = sn * 3
+        spos[T] = sx; spos[T + 1] = G + terrainHeight(sx, sz) + 0.15; spos[T + 2] = sz
+        scol[T] = cc[0] * f; scol[T + 1] = cc[1] * f; scol[T + 2] = cc[2] * f
+        sn++
+      }
+      const sg = new THREE.BufferGeometry()
+      sg.setAttribute('position', new THREE.BufferAttribute(spos.slice(0, sn * 3), 3))
+      sg.setAttribute('color', new THREE.BufferAttribute(scol.slice(0, sn * 3), 3))
+      scene.add(new THREE.Points(sg, new THREE.PointsMaterial({
+        size: 0.5, sizeAttenuation: true, vertexColors: true,
+        transparent: true, opacity: 0.8, fog: true,
+      })))
+    }
+
     // Capa de nieve: manto blanco CON cúmulos (dunas) y sombreado falso, para
     // que no se lea como un fondo blanco plano. El relieve se hornea en la malla
     // y la luz en el color por vértice (la roca/piedra no dan sombra real aquí).
