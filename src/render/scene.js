@@ -575,6 +575,31 @@ export function createScene(container, cfg, agentNames = []) {
   const TREE_EDGE = 0xd9d9ba   // aristas color hueso
   const treePos = [], treeIdx = []
 
+  // ─── Follaje de los árboles: hojas y flores como PUNTOS que brotan/abren con
+  // la estación (§ spec 2026-08-11-mapa-arboles-crecimiento). Se acumulan aquí y
+  // se suben más abajo (necesitan el shader de puntos). Cada punto lleva su
+  // `birth` (instante de brote, escalonado) y `kind` (0 hoja / 1 flor).
+  const folPos = [], folCol = [], folSize = [], folPhase = [], folKind = [], folBirth = []
+  let treeBlooms = false
+  const LEAF_LO = [0.09, 0.20, 0.05], LEAF_HI = [0.30, 0.52, 0.13]
+  const BLOSSOM = [[1.0, 0.72, 0.82], [1.0, 0.86, 0.40], [0.98, 0.95, 1.0], [1.0, 0.56, 0.66]]
+  const _fperp = new THREE.Vector3()
+  function addLeaf(p, tan) {
+    _fperp.set(-tan.z, (rnd() - 0.5) * 0.7, tan.x).normalize().multiplyScalar(0.3 + rnd() * 0.8)
+    const g = rnd()
+    folPos.push(p.x + _fperp.x + (rnd() - 0.5) * 0.5, p.y + _fperp.y + (rnd() - 0.5) * 0.5, p.z + _fperp.z + (rnd() - 0.5) * 0.5)
+    folCol.push(LEAF_LO[0] + (LEAF_HI[0] - LEAF_LO[0]) * g, LEAF_LO[1] + (LEAF_HI[1] - LEAF_LO[1]) * g, LEAF_LO[2] + (LEAF_HI[2] - LEAF_LO[2]) * g)
+    folSize.push(0.5 + rnd() * 0.6); folPhase.push(rnd()); folKind.push(0)
+    folBirth.push(rnd() * 0.12) // brotan temprano en primavera, escalonados
+  }
+  function addBlossom(p) {
+    const c = BLOSSOM[(rnd() * BLOSSOM.length) | 0]
+    folPos.push(p.x + (rnd() - 0.5) * 0.9, p.y + (rnd() - 0.5) * 0.9, p.z + (rnd() - 0.5) * 0.9)
+    folCol.push(c[0], c[1], c[2])
+    folSize.push(0.55 + rnd() * 0.65); folPhase.push(rnd()); folKind.push(1)
+    folBirth.push(0.02 + rnd() * 0.14)
+  }
+
   /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido. */
   function tube(spine, r0, r1, segs, seed) {
     const base = treePos.length / 3
@@ -634,7 +659,19 @@ export function createScene(container, cfg, agentNames = []) {
     const tip = depth >= maxDepth
     const rEnd = tip ? 0.03 : radius * (0.52 + rnd() * 0.16)
     tube(spine, radius, rEnd, radius > 0.8 ? 9 : radius > 0.35 ? 7 : 5, seed)
-    if (tip) return
+    if (tip) {
+      // Ramita externa: brotan las hojas (y flores si el árbol florece). Los
+      // troncos caídos no echan follaje.
+      if (!fallen) {
+        const leafN = 8 + ((rnd() * 8) | 0)
+        for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+        if (treeBlooms && rnd() < 0.7) {
+          const nb = 2 + ((rnd() * 4) | 0)
+          for (let k = 0; k < nb; k++) addBlossom(spine[spine.length - 1])
+        }
+      }
+      return
+    }
     const kids = depth === 0 ? 2 + ((rnd() * 2) | 0)
       : (rnd() < 0.7 ? 1 : 2) + (rnd() < 0.25 ? 1 : 0)
     const up = new THREE.Vector3()
@@ -662,6 +699,7 @@ export function createScene(container, cfg, agentNames = []) {
     const tr = R * (0.19 + rnd() * 0.54)
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.3) continue
+    treeBlooms = rnd() < 0.55 // ~la mitad de los árboles dan flores en primavera
     const treeLen = 8 + rnd() * 7
     branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.8, tz),
       new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
@@ -671,6 +709,7 @@ export function createScene(container, cfg, agentNames = []) {
     treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
     t++
   }
+  treeBlooms = false // los troncos caídos no florecen
   const logs = 1 + (rnd() < 0.5 ? 1 : 0)
   for (let t = 0, guard = 0; t < logs && guard++ < 60; ) {
     const ta = rnd() * 6.2832
@@ -983,6 +1022,67 @@ export function createScene(container, cfg, agentNames = []) {
     const pts = new THREE.Points(geo, pointMat)
     pts.frustumCulled = false
     scene.add(pts)
+  }
+
+  // ─── FOLLAJE de los árboles: hojas/flores que brotan y abren con la estación.
+  // Comparten uProj/uT con los puntos; uSeason escalona el brote por-punto;
+  // uLeaf/uFlower son la densidad estacional (y bajan con la lluvia); uAutumn
+  // vira las hojas a ámbar en otoño.
+  const foliageUniforms = {
+    uProj: pointUniforms.uProj, uT: pointUniforms.uT,
+    uSeason: { value: 0 }, uLeaf: { value: 0 }, uFlower: { value: 0 }, uAutumn: { value: 0 },
+  }
+  if (folPos.length) {
+    const fg = new THREE.BufferGeometry()
+    fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(folPos), 3))
+    fg.setAttribute('hcol', new THREE.BufferAttribute(new Float32Array(folCol), 3))
+    fg.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(folSize), 1))
+    fg.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(folPhase), 1))
+    fg.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array(folKind), 1))
+    fg.setAttribute('aBirth', new THREE.BufferAttribute(new Float32Array(folBirth), 1))
+    const foliageMat = new THREE.ShaderMaterial({
+      uniforms: foliageUniforms, transparent: true, depthWrite: false,
+      vertexShader: `
+        attribute vec3 hcol; attribute float hsize; attribute float hphs;
+        attribute float aKind; attribute float aBirth;
+        uniform float uProj, uT, uSeason, uLeaf, uFlower, uAutumn;
+        varying vec3 vC; varying float vSoft;
+        void main() {
+          vec3 p = position;
+          float ph = hphs * 6.2831;                 // balanceo (como flores/pasto)
+          p.x += sin(uT * 0.7 + ph) * 0.5;
+          p.z += cos(uT * 0.6 + ph * 1.7) * 0.5;
+          p.y += sin(uT * 1.1 + ph * 2.3) * 0.18;
+          // Brote escalonado + densidad estacional → curva de apertura (bloom).
+          float grow = clamp((uSeason - aBirth) / 0.18, 0.0, 1.0);
+          grow = grow * grow * (3.0 - 2.0 * grow);
+          float amount = (aKind < 0.5) ? uLeaf : uFlower;
+          float g = grow * amount;
+          vec3 col = hcol;
+          if (aKind < 0.5) col = mix(hcol, vec3(0.82, 0.42, 0.06), uAutumn); // verde→ámbar
+          col *= 0.9 + 0.14 * sin(uT * 2.0 + ph * 5.0);
+          vC = col;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          float vd = max(-mv.z, 0.001);
+          float sz = hsize * (0.12 + 0.88 * g);
+          gl_PointSize = (g < 0.02) ? 0.0 : clamp(sz * uProj / vd, 1.0, 48.0);
+          vSoft = 0.2;
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        precision mediump float;
+        varying vec3 vC; varying float vSoft;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          float d = length(uv) * 2.0;
+          if (d > 1.0) discard;
+          float a = 1.0 - smoothstep(1.0 - mix(0.06, 0.40, vSoft), 1.0, d);
+          gl_FragColor = vec4(vC, a);
+        }`,
+    })
+    const fmesh = new THREE.Points(fg, foliageMat)
+    fmesh.frustumCulled = false
+    scene.add(fmesh)
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
@@ -1407,6 +1507,7 @@ export function createScene(container, cfg, agentNames = []) {
   const _axis = new THREE.Vector3()
   const _q = new THREE.Quaternion()
   let _lx = 0, _ly = 0
+  const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1
   function update(swarm, dt, eco) {
@@ -1497,6 +1598,17 @@ export function createScene(container, cfg, agentNames = []) {
       // Los agentes se frenan con nieve/frío.
       // Con lluvia (sobre todo fuerte) todo se calma: agentes, pájaros y bichos.
       moveScale = snowing ? 0.4 : (1 - eco.rain * 0.45) * (eco.temperature <= 1 ? 0.85 : 1)
+
+      // Estaciones: ciclo lento (~210 s = un "año"). Brote → hoja plena → ámbar
+      // + caída → ramas peladas. La lluvia tira algunas hojas y borra flores.
+      // +0.35 → el mundo arranca en VERANO (con hojas) y el ciclo avanza desde ahí.
+      const seasonT = (clock / 210 + 0.35) % 1
+      const leafAmt = seasonT < 0.5 ? ss01(0, 0.2, seasonT) : 1 - ss01(0.62, 0.8, seasonT)
+      const flowerAmt = ss01(0.02, 0.1, seasonT) * (1 - ss01(0.2, 0.32, seasonT))
+      foliageUniforms.uSeason.value = seasonT
+      foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
+      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
+      foliageUniforms.uAutumn.value = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
     }
 
     mapPositions(step)
