@@ -48,7 +48,7 @@ export function createEventLog(accent = '#8fe04a', max = 14) {
 
   const box = document.createElement('div')
   box.className = 'evlog'
-  box.innerHTML = `<h4>EVENTS LOG</h4><div data-f="rows"></div>`
+  box.innerHTML = `<h4>REGISTRO</h4><div data-f="rows"></div>`
   document.body.appendChild(box)
   const rowsEl = box.querySelector('[data-f="rows"]')
 
