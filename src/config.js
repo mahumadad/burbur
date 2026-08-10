@@ -52,6 +52,10 @@ export const CONFIG = {
     maxRadius: 0.72,
     samples: 46,
   },
+  events: {
+    baseRate: 0.62,      // eventos/seg base (bosque ≈ 37/min a plena actividad)
+    ambientProb: 0.35,   // fracción de sonidos sin agente (texturas)
+  },
   ecosystem: {
     dayLengthSec: 540,   // día completo en 9 min → 45 s por fase
     weatherMinSec: 55,
