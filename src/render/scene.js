@@ -1588,7 +1588,8 @@ export function createScene(container, cfg, agentNames = []) {
       updateSnow(step, clock, snowfall)
 
       // Los agentes se frenan con nieve/frío.
-      moveScale = snowing ? 0.4 : (eco.temperature <= 1 ? 0.78 : 1)
+      // Con lluvia (sobre todo fuerte) todo se calma: agentes, pájaros y bichos.
+      moveScale = snowing ? 0.4 : (1 - eco.rain * 0.45) * (eco.temperature <= 1 ? 0.85 : 1)
     }
 
     mapPositions(step)
@@ -1596,7 +1597,8 @@ export function createScene(container, cfg, agentNames = []) {
     // Bichitos hacia las flores; cazadores hacia los bichitos.
     const predations = []
     if (bugCount) {
-      updateBugs(bugs, poiFlowers, bugCfg, step * moveScale, rnd, hunters)
+      // Los bichos se resguardan con la lluvia: amortiguación extra sobre moveScale.
+      updateBugs(bugs, poiFlowers, bugCfg, step * moveScale * (1 - eco.rain * 0.55), rnd, hunters)
       for (const h of hunters) {
         const idx = nearestBug(bugs, h.x, h.z, bugCfg.huntRadius)
         if (idx < 0) continue

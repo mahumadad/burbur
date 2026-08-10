@@ -113,7 +113,8 @@ async function start() {
     }
 
     // Tormenta: relámpagos y truenos cuando llueve (más con lluvia fuerte).
-    if (eco.rain > 0.3) {
+    // NO cuando hace frío suficiente para nevar (nada de "thundersnow").
+    if (eco.rain > 0.3 && eco.temperature > -3) {
       lightningCooldown -= dt
       if (lightningCooldown <= 0 && Math.random() < 1.1 * dt * eco.rain) {
         lightningCooldown = 2.5 + Math.random() * 5
