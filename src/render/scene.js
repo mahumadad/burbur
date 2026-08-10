@@ -1353,6 +1353,8 @@ export function createScene(container, cfg, agentNames = []) {
     q: new THREE.Quaternion(),
   }
   let _lx = 0, _ly = 0
+  let ptrX = null, ptrY = null // posición del mouse en NDC (null = fuera del canvas)
+  function setPointer(x, y) { ptrX = x; ptrY = y }
   const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1
@@ -1453,7 +1455,8 @@ export function createScene(container, cfg, agentNames = []) {
       // Estaciones: ciclo lento (~210 s = un "año"). Brote → hoja plena → ámbar
       // + caída → ramas peladas. La lluvia tira algunas hojas y borra flores.
       // +0.35 → el mundo arranca en VERANO (con hojas) y el ciclo avanza desde ahí.
-      const seasonT = (clock / 210 + 0.35) % 1
+      // La estación la maneja el host (para compartirla con el HUD); fallback local.
+      const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const leafAmt = seasonT < 0.5 ? ss01(0, 0.2, seasonT) : 1 - ss01(0.62, 0.8, seasonT)
       const flowerAmt = ss01(0.02, 0.1, seasonT) * (1 - ss01(0.2, 0.32, seasonT))
       foliageUniforms.uSeason.value = seasonT
@@ -1511,13 +1514,16 @@ export function createScene(container, cfg, agentNames = []) {
       else a.group.scale.setScalar(a.baseScale * pulse)
     }
 
-    // Etiqueta: el agente visible más cercano al centro de pantalla.
-    let bestI = -1, bestD = 0.16
-    for (let i = 0; i < n; i++) {
-      _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
-      if (_proj.z > 1) continue // detrás de la cámara
-      const d = Math.hypot(_proj.x, _proj.y)
-      if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+    // Etiqueta: SOLO al pasar el mouse por encima de un agente (no en el centro).
+    let bestI = -1
+    if (ptrX !== null) {
+      let bestD = 0.12 // umbral de "encima" en NDC (agentes chicos y en movimiento)
+      for (let i = 0; i < n; i++) {
+        _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
+        if (_proj.z > 1) continue // detrás de la cámara
+        const d = Math.hypot(_proj.x - ptrX, _proj.y - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+      }
     }
     if (bestI >= 0 && agentNames[bestI]) {
       const { w, h, ox, oy } = stage.metrics
@@ -1560,7 +1566,7 @@ export function createScene(container, cfg, agentNames = []) {
 
   // El desmontaje (GPU + nodos del DOM) lo hace el escenario compartido.
   return {
-    update, scare,
+    update, scare, setPointer,
     resize: stage.resize, flash: stage.flash, dispose: stage.dispose,
     renderer: stage.renderer, camera, controls,
   }

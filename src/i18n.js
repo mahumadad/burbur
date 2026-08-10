@@ -26,3 +26,9 @@ export const WEATHER_ES = {
 
 export const phaseES = (p) => PHASE_ES[p] || p
 export const weatherES = (w) => WEATHER_ES[w] || w
+
+// Estación a partir del reloj de estación (0..1, con el offset ya aplicado).
+export const seasonES = (t) => {
+  const s = (((t || 0) % 1) + 1) % 1
+  return s < 0.2 ? 'primavera' : s < 0.5 ? 'verano' : s < 0.78 ? 'otoño' : 'invierno'
+}
