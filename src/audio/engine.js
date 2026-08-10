@@ -68,9 +68,24 @@ export async function createAudio(cfg) {
     owlSynth.triggerAttackRelease(260, 0.5, now + 0.28)
   }
 
+  // Acento de evento: nota suave paneada según la dirección del evento.
+  const accentPan = new Tone.Panner(0).connect(flashReverb)
+  const accentSynth = new Tone.Synth({
+    oscillator: { type: 'triangle' },
+    envelope: { attack: 0.008, decay: 0.5, sustain: 0, release: 0.4 },
+  }).connect(accentPan)
+  accentSynth.volume.value = -18
+  const PAN = { left: -0.7, right: 0.7, ahead: 0, behind: 0, above: 0.25, below: -0.25, 'all around': 0 }
+  const ACCENT_HZ = [220, 262, 294, 330, 392, 440]
+  function accent(dir, hzIndex) {
+    accentPan.pan.value = PAN[dir] ?? 0
+    const f = ACCENT_HZ[hzIndex % ACCENT_HZ.length]
+    try { accentSynth.triggerAttackRelease(f, 0.3) } catch (_) {}
+  }
+
   function setFlashVol(db) { flashGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setDroneVol(db) { droneGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setBedVol(db) { bedGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
 
-  return { triggerFlash, setWind, cricket, owl, setFlashVol, setDroneVol, setBedVol }
+  return { triggerFlash, setWind, cricket, owl, accent, setFlashVol, setDroneVol, setBedVol }
 }
