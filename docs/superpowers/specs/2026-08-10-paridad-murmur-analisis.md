@@ -81,7 +81,11 @@ audio en 2 pistas + una lista de eventos con timestamps. Lo único vivo es el re
   obra, zorro urbano, reloj de iglesia, ambulancia, camión de basura, robot de reparto…)
 - **Bosque (PLOT): 38 agentes** — 23 `flying_animal`, 7 `walking_animal`, 5 `human`,
   3 `static_object`. (pito real, cárabo, corzo, corneja, tejón, zorro, arroyo, insectos, leñador…)
-- **Agua (POND):** tercer mundo, mismo patrón.
+- **Agua (POND): 38 agentes** — 24 `flying_animal`, 3 `swimming_animal` (**tipo nuevo**),
+  3 `walking_animal`, 3 `moving_object`, 3 `static_object`, 2 `human`. (garza, nutria, cisne,
+  martín pescador, ranas, lucio, libélulas, barcaza, esclusa, pescador, sauces, murciélago…)
+  Clima **propio del agua**: glassy still, choppy, light swell, steady rain, incoming storm.
+  Densidad ≈ **14 ev/min** — el mundo más calmo.
 
 ### UI de la web
 
@@ -150,6 +154,34 @@ mientras que su web repite la misma hora horneada.
 
 ---
 
+## 4-bis. Los tres mundos (diseño propio)
+
+Construimos los tres ambientes con contenido nuestro. Cada mundo debe sentirse distinto en
+**cinco ejes**: terreno, paleta, censo, clima y **ritmo** (densidad de eventos).
+
+| | **CIUDAD** (block) | **BOSQUE** (plot) | **AGUA** (pond) |
+|---|---|---|---|
+| **Terreno** | Manzanas de pasto separadas por calles; edificios de losas apiladas, farolas, charcos | Claro ondulado, montículos de tierra, árboles secos, flora densa | Laguna central con juncos, orillas de barro, embarcadero, sauces |
+| **Paleta** | Naranja/crema/violeta sobre verde, halo cálido | Verdes saturados, tierra rojiza, flores multicolor | Azules/verde-grisáceo, reflejos, luz difusa |
+| **Censo** | Peatones, ciclista, tranvía, taxi, palomas, busker, obra, zorro urbano, robot de reparto, reloj | Aves (mayoría), tejón, corzo, zorro, ardilla, arroyo, insectos, leñador, senderista | Aves acuáticas (mayoría), **nadadores** (peces, nutria), ranas, libélulas, barca, esclusa, pescador |
+| **Clima** | overcast, fog, windy, clear, light/heavy rain | after rain, frost, dry still, light/heavy rain | glassy still, choppy, light swell, steady rain, incoming storm |
+| **Ritmo** | ~20 ev/min — pulso mecánico, horas punta | ~37 ev/min — el más denso y parlanchín | ~14 ev/min — el más calmo, de respiración larga |
+| **Fases** | …, rush hour, …, evening rush, … | …, dawn chorus, …, golden hour, dusk | …, dawn, …, late afternoon, golden hour, dusk |
+
+**Implicación técnica:** hace falta un **tipo de agente nuevo** (`swimming_animal`, confinado al
+plano del agua) y que el clima sea **por mundo**, no global. Los mundos comparten motor
+(ecosistema, eventos, narrador) y difieren solo en *datos de mundo* + su módulo de terreno:
+
+```
+worlds/
+  city.js      # terreno + censo + clima + paleta
+  forest.js
+  pond.js
+  index.js     # registro y cambio de mundo
+```
+
+Esto hace que añadir un cuarto mundo después sea barato.
+
 ## 5. Plan por fases
 
 Cada fase deja algo funcional y demostrable.
@@ -175,19 +207,21 @@ Cada fase deja algo funcional y demostrable.
 - UI: **EVENTS LOG** + píldora "ahora sonando" + etiquetas flotantes.
 - Audio: paneo estéreo según `direction`.
 
-### Fase D — Mundo CIUDAD (BLOCK) · G9, G13
-- `worlds/city.js`: manzanas de pasto separadas por calles, edificios (losas apiladas, paleta
-  naranja/crema/violeta), farolas, plaza, charcos.
-- Censo urbano propio (peatones, tranvía, palomas, robot de reparto, zorro urbano…).
-- `worlds/forest.js`: extraer el glade actual a este módulo.
-- Selector de mundos con transición.
+### Fase D — Los tres mundos · G9, G13
+- **D1** `worlds/index.js`: registro de mundos + cambio con transición. Extraer el glade actual a
+  `worlds/forest.js` (refactor sin cambio de comportamiento).
+- **D2** `worlds/city.js`: manzanas separadas por calles, edificios de losas apiladas (naranja/
+  crema/violeta), farolas, charcos + censo urbano propio.
+- **D3** `worlds/pond.js`: laguna con juncos, orillas, embarcadero, sauces + censo acuático y el
+  nuevo tipo `swimming_animal` (confinado al plano del agua).
 
 ### Fase E — Audio en 2 capas · G10
 - Separar **MUSIC** (nuestro motor pentatónico, modulado por `tension`) y **WORLD** (atmósfera:
   clima, ambiente, sonidos de agentes), con sliders independientes.
+- Carácter sonoro por mundo (ciudad mecánica, bosque parlanchín, agua de respiración larga).
 
-### Fase F (opcional) — Mundo AGUA (POND) + export al device
-- Tercer mundo; y el pipeline de captura a `.avi` 466×466 para el hardware.
+### Fase F (opcional) — Export al device
+- Pipeline de captura a `.avi` 466×466 para el hardware (loop sin costura).
 
 ---
 
