@@ -569,6 +569,13 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
 3b. **`src/sim/rails.js`** — puro: microtúbulos radiales desde el centrosoma con inestabilidad
    dinámica (crecen lento, colapsan rápido, se rescatan) y `nearestOnRails` compatible con
    `wander.js`. ✅ implementado, 9 tests.
+3c. **`src/sim/atp.js`** — puro: pool de tamaño fijo, los cuantos viajan de la mitocondria al
+   consumidor y **solo la entrega repone** el `budget` (0..1) del que cuelga el resto del mundo.
+   ✅ implementado, 9 tests.
+3d. **`src/sim/invaders.js`** — puro: bacterias con run-and-tumble y viriones con difusión pura,
+   que se pegan al cruzar la membrana. No conoce la forma de la célula: pregunta por un predicado
+   `inside(x,z)`, así que sirve igual contra un disco de test que contra la membrana real.
+   ✅ implementado, 9 tests.
 4. **`CELL_CENSUS`** en `src/sim/agents.js` y el **léxico de célula** para el narrador.
 5. **Perfil de ecosistema** de la célula (12 fases del ciclo + 6 estados de medio).
 
@@ -651,9 +658,9 @@ recorre también los worktrees y cuenta 96 tests en vez de 24.
 | **F0** | *(ya no es nuestra)* Segunda capa del engine hacia `engine/*`, liderada por la sesión de ciudad. Aquí solo: acordar firmas de puntos/líneas, agentes y estelas | El bosque y la ciudad se ven idénticos tras la extracción; tests verdes |
 | **F1** | Célula estática sobre `createStage`: membrana, núcleo, ER/Golgi, microtúbulos, organelos sobre rieles. `ready: true` en el registro | Se cambia de mundo y se ve una célula reconocible; sin errores de consola; `dispose` limpio al volver a `land` |
 | **F2** | Motilidad: polarización, lamelipodio, filopodios, blebbing, adhesiones, sustrato deslizante, quimiotaxis. **La capa pura ya está: `src/sim/membrane.js` + `src/sim/motility.js`, 22 tests** — se adelantó porque no depende de `engine/*`. Falta solo el render | Tests puros de `membrane.js`/`motility.js` ✅; visualmente: la célula avanza y persigue el gradiente |
-| **F3** | ATP sobre el swarm + sonido propio | Los destellos salen de mitocondrias y se consumen; suenan; el presupuesto de ATP modula la protrusión |
+| **F3** | ATP sobre el swarm + sonido propio. **Capa pura lista: `src/sim/atp.js`, 9 tests.** Falta cablearlo al swarm Kuramoto y al audio | Los destellos salen de mitocondrias y se consumen; suenan; el presupuesto de ATP modula la protrusión |
 | **F4** | Perfil de ecosistema (ciclo celular) + narrador propio + eventos grandes | El HUD muestra las fases del ciclo; el log narra división/fagocitosis/apoptosis |
-| **F5** | Invasores: bacterias (run-and-tumble) y viriones (difusión) + conflicto | Fagocitosis e infección aparecen en el log; el shake dispersa lo que debe |
+| **F5** | Invasores: bacterias (run-and-tumble) y viriones (difusión) + conflicto. **Capa pura lista: `src/sim/invaders.js`, 9 tests.** Falta el render y la decisión de fagocitosis (la toma el mundo, en el lamelipodio) | Fagocitosis e infección aparecen en el log; el shake dispersa lo que debe |
 
 ### 8.6 Qué NO hacer
 
