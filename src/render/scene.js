@@ -85,7 +85,7 @@ export function createScene(container, cfg) {
   scene.background = new THREE.Color(0x000000)
   // Niebla negra: la distancia se funde en la oscuridad. La densidad la fija el clima.
   scene.fog = new THREE.FogExp2(0x000000, 0.004)
-  let grassMat, floraMat
+  let grassMat, floraMat, groundMat
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
@@ -130,6 +130,33 @@ export function createScene(container, cfg) {
     ptCol.push(col[0], col[1], col[2])
     ptSize.push(size)
     ptPhase.push(phase || 0)
+  }
+
+  // ─── SUELO: malla que rellena los huecos entre hojas ──────────────────────
+  // Sin ella se ve el negro a través del pasto y el claro pierde luminosidad.
+  {
+    const SEGS = 88
+    const size = R * 2.4
+    const geo = new THREE.PlaneGeometry(size, size, SEGS, SEGS)
+    geo.rotateX(-Math.PI / 2)
+    const pos = geo.attributes.position
+    const cols = new Float32Array(pos.count * 3)
+    const c = [0, 0, 0]
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), z = pos.getZ(i)
+      pos.setY(i, G + terrainHeight(x, z) - 0.22)
+      // Tono del pasto pero en la zona oscura de la rampa, y atenuado.
+      grassColor(fertility(x, z) * 0.42, c)
+      const f = islandMask(x, z, R) * 0.42
+      cols[i * 3] = c[0] * f
+      cols[i * 3 + 1] = c[1] * f
+      cols[i * 3 + 2] = c[2] * f
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+    groundMat = new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide, fog: true,
+    })
+    scene.add(new THREE.Mesh(geo, groundMat))
   }
 
   // ─── PASTO: cada hoja = 4 vértices = 2 segmentos, gradiente por vértice ────
@@ -191,7 +218,13 @@ export function createScene(container, cfg) {
     [1.0, 0.88, 0.10], [0.95, 0.30, 0.30], [1.0, 0.69, 0.35],
   ]
 
-  function flower(x, y, z, scale, lit = 1) {
+  /** Paleta de parche: un color domina (aparece 2 de 3) y otro hace de acento. */
+  function patchPalette() {
+    const a = FLOWER_COLS[(rnd() * FLOWER_COLS.length) | 0]
+    return [a, a, FLOWER_COLS[(rnd() * FLOWER_COLS.length) | 0]]
+  }
+
+  function flower(x, y, z, scale, lit = 1, palette = FLOWER_COLS) {
     const h = (3 + rnd() * 3.6) * scale
     const a = rnd() * 6.2832
     const c = (0.5 + rnd() * 1.3) * scale
@@ -200,7 +233,7 @@ export function createScene(container, cfg) {
     const tx = x + lx, ty = y + h, tz = z + lz
     pushLine(x, y, z, mx, my, mz, STEM_LO, STEM_MID)
     pushLine(mx, my, mz, tx, ty, tz, STEM_MID, STEM_HI)
-    const src = FLOWER_COLS[(rnd() * FLOWER_COLS.length) | 0]
+    const src = palette[(rnd() * palette.length) | 0]
     const col = [src[0] * lit, src[1] * lit, src[2] * lit]
     if (rnd() < 0.42) {
       const k = 2 + ((rnd() * 3) | 0)
@@ -225,13 +258,14 @@ export function createScene(container, cfg) {
     if (islandMask(px, pz, R) < 0.25) continue
     const k = 6 + ((rnd() * 11) | 0)
     const spread = 2.5 + rnd() * 3.5
+    const palette = patchPalette()
     for (let i = 0; i < k; i++) {
       const b = rnd() * 6.2832
       const d = spread * Math.sqrt(rnd()) * (1 + rnd() * 0.6)
       const fx = px + Math.cos(b) * d, fz = pz + Math.sin(b) * d
       if (islandMask(fx, fz, R) < 0.1) continue
       flower(fx, G + terrainHeight(fx, fz), fz, 0.6 + rnd() * 0.75,
-        Math.min(1.3, lightPool(fx, fz)))
+        Math.min(1.3, lightPool(fx, fz)), palette)
     }
   }
 
@@ -370,20 +404,37 @@ export function createScene(container, cfg) {
   const ROCK_LO = [0.30, 0.185, 0.15]
   const ROCK_HI = [0.64, 0.47, 0.40]
   const rockSpots = []
-  for (let i = 0; i < 14; i++) {
-    const rr = R * (0.10 + 0.72 * rnd())
-    const ra = rnd() * 6.2832
-    const cx = Math.cos(ra) * rr, cz = Math.sin(ra) * rr
-    if (islandMask(cx, cz, R) < 0.4) continue
+  // Formación agrupada: un monolito alto rodeado de bloques medianos y chicos.
+  const hubX = (rnd() * 2 - 1) * 11, hubZ = (rnd() * 2 - 1) * 11
+  const rockPlan = [{ x: hubX, z: hubZ, rx: 7.5 + rnd() * 3, h: 19 + rnd() * 10, mono: true }]
+  for (let i = 0, k = 3 + ((rnd() * 3) | 0); i < k; i++) {
+    const a = rnd() * 6.2832, d = 9 + rnd() * 13
+    rockPlan.push({
+      x: hubX + Math.cos(a) * d, z: hubZ + Math.sin(a) * d,
+      rx: 3.4 + rnd() * 3.4, h: 4.5 + rnd() * 6, mono: false,
+    })
+  }
+  for (let i = 0, k = 4 + ((rnd() * 4) | 0); i < k; i++) {
+    const a = rnd() * 6.2832, d = 14 + rnd() * 22
+    rockPlan.push({
+      x: hubX + Math.cos(a) * d, z: hubZ + Math.sin(a) * d,
+      rx: 1.6 + rnd() * 2, h: 1.8 + rnd() * 2.6, mono: false,
+    })
+  }
+
+  for (const spec of rockPlan) {
+    const cx = spec.x, cz = spec.z
+    if (islandMask(cx, cz, R) < 0.25) continue
     const cy = G + terrainHeight(cx, cz)
-    const radX = 1.6 + rnd() * 3.4
-    const hh = radX * (0.5 + rnd() * 0.35)
+    const radX = spec.rx
+    const hh = spec.h * 0.6
     const radZ = radX * (0.68 + rnd() * 0.62)
     const seed = rnd() * 97
     const rot = rnd() * 6.2832
     const cr = Math.cos(rot), sr = Math.sin(rot)
 
-    const geo = new THREE.SphereGeometry(1, 16, 12)
+    // Icosaedro: triángulos parejos, mejor que una esfera UV para deformar.
+    const geo = new THREE.IcosahedronGeometry(1, spec.mono ? 4 : 3)
     const pos = geo.attributes.position
     const cols = new Float32Array(pos.count * 3)
     for (let d = 0; d < pos.count; d++) {
@@ -421,7 +472,8 @@ export function createScene(container, cfg) {
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
 
     // Musgo: puntos solo donde la normal mira hacia arriba.
-    for (let k = 0, guard = 0; k < 420 && guard++ < 3800; ) {
+    const mossN = spec.mono ? 1100 : 420
+    for (let k = 0, guard = 0; k < mossN && guard++ < mossN * 9; ) {
       const d = (rnd() * pos.count) | 0
       const ny = nrm.getY(d)
       if (ny < 0.12) continue
@@ -926,6 +978,7 @@ export function createScene(container, cfg) {
       )
       if (grassMat) grassMat.color.copy(tintC)
       if (floraMat) floraMat.color.copy(tintC)
+      if (groundMat) groundMat.color.copy(tintC)
       // Niebla muy leve: la isla debe leerse entera, no perderse en negro.
       scene.fog.density = 0.0009 + eco.fog * 0.0028
       // La neblina toma el color de la luz y se espesa con la niebla.
