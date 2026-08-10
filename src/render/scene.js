@@ -23,6 +23,26 @@ export function createScene(container, cfg) {
   renderer.setClearColor(SKY, 1)
   container.appendChild(renderer.domElement)
 
+  // Estampado punteado (ordered dither tipo Bayer) — firma visual de murmur.
+  function applyDither(material) {
+    material.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        {
+          vec2 P = floor(gl_FragCoord.xy * 0.5);
+          float ba = fract(P.x * 0.5 + P.y * P.y * 0.75);
+          vec2 P2 = floor(P * 0.5);
+          float bb = fract(P2.x * 0.5 + P2.y * P2.y * 0.75);
+          float thr = bb * 0.25 + ba;
+          float lum = dot(gl_FragColor.rgb, vec3(0.299, 0.587, 0.114));
+          float dots = step(thr, clamp(lum * 1.15, 0.0, 1.0));
+          gl_FragColor.rgb *= mix(0.58, 1.08, dots);
+        }`,
+      )
+    }
+  }
+
   // ─── Luz suave, generosa (sombreado plano y luminoso) ─────────────────────
   scene.add(new THREE.HemisphereLight(0xffffff, 0x4f8f3a, 1.45))
   const sun = new THREE.DirectionalLight(0xfff3d0, 0.85)
@@ -41,6 +61,7 @@ export function createScene(container, cfg) {
   // ─── Colinas verdes de fondo ──────────────────────────────────────────────
   const hills = new THREE.Group()
   const hillMat = new THREE.MeshStandardMaterial({ color: 0x4fa235, roughness: 1, flatShading: true })
+  applyDither(hillMat)
   for (let i = 0; i < 14; i++) {
     const r = 10 + Math.random() * 12
     const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), hillMat)
@@ -55,6 +76,7 @@ export function createScene(container, cfg) {
   // ─── Relieve: montículos terrosos en plano medio ──────────────────────────
   const mounds = new THREE.Group()
   const moundMat = new THREE.MeshStandardMaterial({ color: 0x8a5540, roughness: 1, flatShading: true })
+  applyDither(moundMat)
   const moundSpots = [[-13, -18, 7], [12, -22, 8], [-4, -30, 9], [18, -14, 5]]
   for (const [mx, mz, r] of moundSpots) {
     const m = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 1), moundMat)
@@ -98,6 +120,81 @@ export function createScene(container, cfg) {
   }
   grass.instanceMatrix.needsUpdate = true
   scene.add(grass)
+
+  // ─── Árboles secos, blancos y punteados ───────────────────────────────────
+  const treeMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e0, roughness: 1, flatShading: true })
+  applyDither(treeMat)
+  function deadTree(tx, tz, s) {
+    const g = new THREE.Group()
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.26 * s, 3.4 * s, 6), treeMat)
+    trunk.position.y = 1.7 * s
+    g.add(trunk)
+    for (let b = 0; b < 5; b++) {
+      const br = new THREE.Mesh(new THREE.CylinderGeometry(0.04 * s, 0.1 * s, 1.7 * s, 5), treeMat)
+      br.position.y = 2.0 * s + b * 0.3 * s
+      br.rotation.z = (Math.random() * 2 - 1) * 1.1
+      br.rotation.y = Math.random() * Math.PI
+      g.add(br)
+    }
+    g.position.set(tx, GROUND_Y, tz)
+    return g
+  }
+  scene.add(deadTree(-11, -15, 1.15))
+  scene.add(deadTree(9, -25, 0.95))
+
+  // ─── Flora: florecillas con tallo esparcidas por el pasto ─────────────────
+  const FLORA = 560
+  const FLORA_PAL = [0xff8a3a, 0xffe14d, 0xff5aa0, 0x6fe0c0, 0xffffff]
+  const stemGeo = new THREE.PlaneGeometry(0.05, 1)
+  stemGeo.translate(0, 0.5, 0)
+  const stemMat = new THREE.MeshStandardMaterial({ color: 0x3f7f2c, roughness: 1, side: THREE.DoubleSide })
+  const stems = new THREE.InstancedMesh(stemGeo, stemMat, FLORA)
+  const headPos = new Float32Array(FLORA * 3)
+  const headCol = new Float32Array(FLORA * 3)
+  const fcol = new THREE.Color()
+  for (let i = 0; i < FLORA; i++) {
+    const fx = (Math.random() * 2 - 1) * 40
+    const fz = 11 - Math.random() * 52
+    const hh = 0.6 + Math.random() * 1.3
+    gpos.set(fx, GROUND_Y, fz)
+    qSpin.setFromAxisAngle(yAxis, Math.random() * Math.PI)
+    scl.set(1, hh, 1)
+    m4.compose(gpos, qSpin, scl)
+    stems.setMatrixAt(i, m4)
+    headPos[i * 3] = fx
+    headPos[i * 3 + 1] = GROUND_Y + hh
+    headPos[i * 3 + 2] = fz
+    fcol.set(FLORA_PAL[(Math.random() * FLORA_PAL.length) | 0])
+    headCol[i * 3] = fcol.r; headCol[i * 3 + 1] = fcol.g; headCol[i * 3 + 2] = fcol.b
+  }
+  stems.instanceMatrix.needsUpdate = true
+  scene.add(stems)
+  const headGeom = new THREE.BufferGeometry()
+  headGeom.setAttribute('position', new THREE.BufferAttribute(headPos, 3))
+  headGeom.setAttribute('aColor', new THREE.BufferAttribute(headCol, 3))
+  const headMat = new THREE.ShaderMaterial({
+    transparent: true,
+    uniforms: { uSize: { value: 95 * renderer.getPixelRatio() } },
+    vertexShader: `
+      attribute vec3 aColor;
+      varying vec3 vC;
+      uniform float uSize;
+      void main() {
+        vC = aColor;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = uSize / -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      varying vec3 vC;
+      void main() {
+        float d = length(gl_PointCoord - 0.5);
+        if (d > 0.5) discard;
+        float a = smoothstep(0.5, 0.18, d);
+        gl_FragColor = vec4(vC, a);
+      }`,
+  })
+  scene.add(new THREE.Points(headGeom, headMat))
 
   // ─── Agentes (criaturas que laten) ────────────────────────────────────────
   const n = cfg.fireflies.count
