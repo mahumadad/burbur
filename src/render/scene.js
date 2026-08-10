@@ -471,17 +471,42 @@ export function createScene(container, cfg) {
     scene.add(mesh)
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
 
-    // Musgo: puntos solo donde la normal mira hacia arriba.
-    const mossN = spec.mono ? 1100 : 420
-    for (let k = 0, guard = 0; k < mossN && guard++ < mossN * 9; ) {
+    // Liquen anaranjado: lo que cubre la roca. Solo en caras que miran arriba.
+    const lichenN = spec.mono ? 1100 : 420
+    for (let k = 0, guard = 0; k < lichenN && guard++ < lichenN * 9; ) {
       const d = (rnd() * pos.count) | 0
       const ny = nrm.getY(d)
       if (ny < 0.12) continue
+      const fx = pos.getX(d), fy = pos.getY(d), fz = pos.getZ(d)
+      if (fbm(fx * 0.5 + seed * 1.7, fz * 0.5 + fy * 0.4, 2) < 0.5) continue
       if (rnd() > 0.42 + ny * 0.4) continue
-      const sh = 0.55 + 0.45 * rnd()
-      pushPoint(cx + pos.getX(d), baseY + pos.getY(d) + 0.1, cz + pos.getZ(d),
-        [0.30 * sh, 0.42 * sh, 0.16 * sh], 0.13 + rnd() * 0.12, 0)
+      const A = 0.96 + rnd() * 0.09
+      pushPoint(cx + fx, baseY + fy + 0.1, cz + fz,
+        [1, 0.827 * A, 0.071], 0.12 + rnd() * 0.17, 0)
       k++
+    }
+
+    // Musgo verde: apenas unas manchas, no una capa.
+    const mossMax = spec.mono ? 60 : 24
+    for (let d = 0, k = 0; d < pos.count && k < mossMax; d += 3) {
+      if (nrm.getY(d) <= 0.15) continue
+      const fx = pos.getX(d), fy = pos.getY(d), fz = pos.getZ(d)
+      if (fbm(fx * 0.4 + seed * 2.3 + 9, fz * 0.4 + fy * 0.5, 2) <= 0.66) continue
+      if (rnd() >= 0.5) continue
+      pushPoint(cx + fx, baseY + fy + 0.08, cz + fz,
+        [0.3, 0.46, 0.3], 0.2 + rnd() * 0.22, 0)
+      k++
+    }
+
+    // Flores creciendo en las partes planas de arriba.
+    let want = spec.mono ? 5 + ((rnd() * 5) | 0) : (rnd() < 0.6 ? 2 + ((rnd() * 3) | 0) : 0)
+    const rockPal = patchPalette()
+    for (let guard = 0; want > 0 && guard < 400; guard++) {
+      const d = ((rnd() * (pos.count / 3)) | 0) * 3
+      if (nrm.getY(d) < 0.55) continue
+      flower(cx + pos.getX(d), baseY + pos.getY(d), cz + pos.getZ(d),
+        0.45 + rnd() * 0.45, 1, rockPal)
+      want--
     }
   }
 
@@ -935,26 +960,31 @@ export function createScene(container, cfg) {
   composer.addPass(lensPass)
 
   function resize() {
-    const side = Math.min(container.clientWidth, container.clientHeight)
+    const cw = container.clientWidth, ch = container.clientHeight
+    // Por defecto llena la pantalla. El recuadro cuadrado se reserva para el
+    // modo device (display redondo de 466×466).
+    const side = Math.min(cw, ch)
+    const w = rc.squareFrame ? side : cw
+    const h = rc.squareFrame ? side : ch
     const dpr = Math.min(2, window.devicePixelRatio)
     renderer.setPixelRatio(dpr)
-    renderer.setSize(side, side, false)
+    renderer.setSize(w, h, false)
     composer.setPixelRatio(dpr)
-    composer.setSize(side, side)
-    camera.aspect = 1
+    composer.setSize(w, h)
+    camera.aspect = w / h
     camera.updateProjectionMatrix()
     // uProj: convierte tamaño-mundo a píxeles con perspectiva correcta.
-    const proj = (side * dpr) / (2 * Math.tan((camera.fov * Math.PI) / 360))
+    const proj = (h * dpr) / (2 * Math.tan((camera.fov * Math.PI) / 360))
     pointUniforms.uProj.value = proj
     hazeUniforms.uProj.value = proj
     // Las líneas gruesas necesitan la resolución para calcular su ancho.
-    for (const m of fatMaterials) m.resolution.set(side * dpr, side * dpr)
+    for (const m of fatMaterials) m.resolution.set(w * dpr, h * dpr)
     const el = renderer.domElement
     el.style.position = 'absolute'
-    el.style.width = side + 'px'
-    el.style.height = side + 'px'
-    el.style.left = (container.clientWidth - side) / 2 + 'px'
-    el.style.top = (container.clientHeight - side) / 2 + 'px'
+    el.style.width = w + 'px'
+    el.style.height = h + 'px'
+    el.style.left = (cw - w) / 2 + 'px'
+    el.style.top = (ch - h) / 2 + 'px'
   }
   resize()
   window.addEventListener('resize', resize)

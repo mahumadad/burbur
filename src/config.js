@@ -78,6 +78,7 @@ export const CONFIG = {
     fisheye: 0.6,        // fov = 50 + fisheye*72 = 93°
     chroma: 0.25,
     vigSize: 1.0,
+    squareFrame: false,  // true = recuadro cuadrado (modo device 466x466)
     tintStrength: 0.3,   // cuánto vira el color con la hora (el brillo va aparte)
     // Profundidad de campo falsa
     dofFocus: 95,
