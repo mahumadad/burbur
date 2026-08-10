@@ -197,19 +197,101 @@ export function createScene(container, cfg, agentNames = []) {
     snowMats.push(groundMat)
     scene.add(new THREE.Mesh(geo, groundMat))
 
-    // Capa de nieve: mismo relieve, blanca, que aparece con la acumulación.
+    // Capa de nieve: manto blanco CON cúmulos (dunas) y sombreado falso, para
+    // que no se lea como un fondo blanco plano. El relieve se hornea en la malla
+    // y la luz en el color por vértice (la roca/piedra no dan sombra real aquí).
     const snowGeo = geo.clone()
     const sp = snowGeo.attributes.position
-    // Manto a ras de suelo, apenas sobre el terreno (el pasto se entierra).
-    for (let i = 0; i < sp.count; i++) sp.setY(i, sp.getY(i) + 0.6)
+    const scol = new Float32Array(sp.count * 3)
+    const SUN = [0.45, 1.0, 0.30]
+    { const l = Math.hypot(SUN[0], SUN[1], SUN[2]); SUN[0] /= l; SUN[1] /= l; SUN[2] /= l }
+    // Campo de dunas: fbm de media frecuencia, recortado a positivo.
+    const drift = (x, z) => Math.max(0, (fbm(x * 0.05 + 40, z * 0.05 + 17, 3) - 0.28) * 2.4)
+    const SNOW_HI = [0.95, 0.97, 1.0]   // cresta iluminada (blanco cálido)
+    const SNOW_LO = [0.70, 0.77, 0.93]  // valle en sombra (azulado)
+    for (let i = 0; i < sp.count; i++) {
+      const x = sp.getX(i), z = sp.getZ(i)
+      const m = islandMask(x, z, R)
+      const d = drift(x, z) * m
+      sp.setY(i, sp.getY(i) + 0.55 + d)
+      // Normal aproximada por diferencias finitas del campo de dunas → sombreado.
+      const e = 2.4
+      const dhx = (drift(x + e, z) - drift(x - e, z)) * m
+      const dhz = (drift(x, z + e) - drift(x, z - e)) * m
+      let nx = -dhx, ny = 2 * e, nz = -dhz
+      const nl = Math.hypot(nx, ny, nz); nx /= nl; ny /= nl; nz /= nl
+      const dot = Math.max(0, nx * SUN[0] + ny * SUN[1] + nz * SUN[2])
+      const t = 0.35 + 0.65 * dot // crestas → 1, valles → 0.35
+      scol[i * 3] = SNOW_LO[0] + (SNOW_HI[0] - SNOW_LO[0]) * t
+      scol[i * 3 + 1] = SNOW_LO[1] + (SNOW_HI[1] - SNOW_LO[1]) * t
+      scol[i * 3 + 2] = SNOW_LO[2] + (SNOW_HI[2] - SNOW_LO[2]) * t
+    }
     snowGeo.deleteAttribute('color')
+    snowGeo.setAttribute('color', new THREE.BufferAttribute(scol, 3))
+    snowGeo.computeVertexNormals()
     snowGroundMat = new THREE.MeshBasicMaterial({
-      color: 0xf2f6ff, transparent: true, opacity: 0, depthWrite: false,
+      vertexColors: true, transparent: true, opacity: 0, depthWrite: false,
       side: THREE.DoubleSide, fog: true,
     })
     const sm = new THREE.Mesh(snowGeo, snowGroundMat)
     sm.renderOrder = 1
     scene.add(sm)
+  }
+
+  // ─── SOMBRAS DE NUBES: manchas oscuras suaves que derivan sobre el mundo ─────
+  // Un plano alto con ruido animado; oscurece el suelo (y la nieve) al pasar, y
+  // da la sensación de que el claro "respira" bajo nubes en movimiento.
+  const shadowUniforms = {
+    uTime: { value: 0 },
+    uWind: { value: new THREE.Vector2(0.6, 0.25) },
+    uStrength: { value: 0 },
+    uR: { value: R },
+    uColor: { value: new THREE.Color(0.015, 0.025, 0.05) },
+  }
+  {
+    const g = new THREE.PlaneGeometry(R * 2.4, R * 2.4, 1, 1)
+    g.rotateX(-Math.PI / 2)
+    const mat = new THREE.ShaderMaterial({
+      uniforms: shadowUniforms,
+      transparent: true, depthWrite: false, fog: false,
+      vertexShader: `
+        varying vec2 vXZ;
+        void main() {
+          vXZ = position.xz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime; uniform vec2 uWind; uniform float uStrength;
+        uniform float uR; uniform vec3 uColor;
+        varying vec2 vXZ;
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float vnoise(vec2 p){
+          vec2 i = floor(p), f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          float a = hash(i), b = hash(i + vec2(1.0, 0.0));
+          float c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
+          return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+        }
+        float fbm(vec2 p){
+          float v = 0.0, a = 0.5;
+          for (int i = 0; i < 4; i++){ v += a * vnoise(p); p *= 2.03; a *= 0.5; }
+          return v;
+        }
+        void main(){
+          vec2 p = vXZ * 0.010 + uWind * uTime * 0.02;
+          float n = fbm(p);
+          float shade = 1.0 - smoothstep(0.34, 0.62, n); // 1 = núcleo de sombra
+          float r = length(vXZ);
+          float mask = 1.0 - smoothstep(uR * 0.45, uR * 0.95, r);
+          gl_FragColor = vec4(uColor, shade * uStrength * mask);
+        }
+      `,
+    })
+    const mesh = new THREE.Mesh(g, mat)
+    mesh.position.y = G + 6.5
+    mesh.renderOrder = 3
+    scene.add(mesh)
   }
 
   // ─── PASTO: cada hoja = 4 vértices = 2 segmentos, gradiente por vértice ────
@@ -1287,6 +1369,13 @@ export function createScene(container, cfg, agentNames = []) {
         rc.hazeColor[2] * 0.6 + L[2] * 0.4,
       )
       hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.5 + eco.fog * 1.3) * (0.45 + g * 0.75)
+
+      // Sombras de nubes: derivan siempre; se ven cuando hay sol y cielo despejado
+      // (nada de noche, ni con niebla o lluvia). Caen también sobre la nieve.
+      shadowUniforms.uTime.value = clock
+      const clearSky = Math.max(0, 1 - eco.fog * 1.5 - eco.rain * 2.2)
+      const dayF = Math.max(0, Math.min(1, (g - 0.42) / 0.5))
+      shadowUniforms.uStrength.value = 0.34 * clearSky * dayF
 
       // Nieve: SOLO cuando hace mucho frío (ocasional). Se acumula; al subir la
       // temperatura sobre 0 se derrite → deja el suelo húmedo (agua).
