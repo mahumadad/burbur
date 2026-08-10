@@ -20,6 +20,26 @@
 
 ---
 
+## Estado y pivote (2026-08-10)
+
+El tema visual pivotó de "bosque nocturno de luciérnagas" a **mapa/glade con individuos que se
+mueven** (estilo murmur real). El motor se conserva; cambió la capa de render.
+
+**Completado:**
+- Tasks 1–4: scaffold, núcleo Kuramoto, estado del enjambre, mapeo pentatónico (tests verdes).
+- Tasks 5–6: render base + marco circular — **render re-tematizado** a glade aéreo (pasto
+  instanciado, relieve, individuos con estela punteada, bloom). `createScene` mantiene su interfaz.
+
+**Orden de trabajo restante (acordado con el usuario):**
+1. Task 12 — Textura *dithered* + flora.
+2. Task 13 — Individuos distintos (formas por especie).
+3. Tasks 7–10 — Sonido: motor de audio, capa de mundo, interacción, panel (siguen válidas; el
+   sonido va **al final**).
+4. Task 11 — README + verificación final.
+
+Las Tasks 7–11 originales siguen vigentes tal cual; solo cambia que se ejecutan después de las
+tareas visuales nuevas.
+
 ## File Structure
 
 ```
@@ -1180,6 +1200,39 @@ git commit -m "Add README with run instructions and device pipeline notes"
 ```
 
 ---
+
+### Task 12: Textura dithered + flora (glade)
+
+**Files:**
+- Modify: `src/render/scene.js`
+
+**Objetivo:** acercar el look a murmur con su firma *dithered* (estampado punteado) en rocas/
+árboles y poblar el pasto con florecillas/brotes. Es trabajo de dirección de arte: se itera con
+verificación visual en el navegador (screenshots), no con tests unitarios.
+
+- [ ] **Dithered en relieve:** aplicar a rocas/colinas un patrón punteado (Bayer/ordered dither
+  en el fragment shader del material, o textura de puntos). Debe leerse como estampado, no liso.
+- [ ] **Árboles muertos punteados:** añadir 1–3 árboles secos blancos con textura punteada.
+- [ ] **Flora:** instanciar florecillas (tallo fino + cabeza de color: naranja, amarillo, magenta)
+  y brotes teal, esparcidos por el pasto con densidad variable.
+- [ ] **Verificación visual:** `npm run dev`, entrar, comparar contra la referencia de murmur;
+  ajustar densidad/escala/contraste hasta que el estampado y la flora lean bien.
+- [ ] **Guardas:** `npm run build` limpio y `npm test` (8/8) siguen pasando; commit local.
+
+### Task 13: Individuos distintos (formas por especie)
+
+**Files:**
+- Modify: `src/render/scene.js` (y opcionalmente `src/config.js` para paleta/especies)
+
+**Objetivo:** que los individuos se lean como **especies distintas** en vez de anillos iguales:
+p.ej. cubos wireframe cyan con un "ojo", estrellas amarillas, ráfagas blancas, formas magenta.
+Cada individuo conserva su color y su estela.
+
+- [ ] Asignar a cada agente una "especie" (por índice) con su forma y color.
+- [ ] Render por especie: sprites con distinta figura (anillo, estrella, ráfaga) o pequeñas
+  geometrías (cubo wireframe) orientadas hacia la cámara; el latido escala/brilla la figura.
+- [ ] Mantener la estela punteada por individuo.
+- [ ] Verificación visual + `npm run build`/`npm test` verdes; commit local.
 
 ## Self-Review (cobertura del spec)
 
