@@ -5,6 +5,8 @@ import { cityLayout } from './cityLayout.js'
 import { fbm } from './noise.js'
 
 const rnd = Math.random
+// Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
+function pick(arr) { return arr[(rnd() * arr.length) | 0] }
 
 // Constantes de paridad (reversed del bundle original, tabla `hg`/geometría de ciudad):
 //   Wt = medio-lado de la cuadrícula, Gt = ancho de calle, Kt = altura de bordillo,
@@ -207,35 +209,24 @@ export function createCityScene(container, cfg, agentNames = []) {
     const SLAB_THICK = 1.0    // grosor de cada losa
     const TAPER_MIN = 0.55    // angostamiento del piso más alto vs. la base (setback)
 
-    function buildTower(block, blockTint) {
-      const r = Math.min(block.hx, block.hz) * 2
-      // Footprint: proporcional a r, con jitter, inscripto con margen dentro
-      // del bloque para dejar sitio al borde (pasto/flores, tarea B7).
-      const maxHalfX = Math.max(2, block.hx - TOWER_INSET)
-      const maxHalfZ = Math.max(2, block.hz - TOWER_INSET)
-      const w = Math.min(maxHalfX * 2, r * (0.35 + rnd() * 0.3))
-      const d = Math.min(maxHalfZ * 2, r * (0.35 + rnd() * 0.3))
-      // Offset dentro del bloque (no siempre centrada).
-      const freeX = Math.max(0, maxHalfX - w / 2)
-      const freeZ = Math.max(0, maxHalfZ - d / 2)
-      const cx = block.cx + (rnd() * 2 - 1) * freeX
-      const cz = block.cz + (rnd() * 2 - 1) * freeZ
-      // Altura: mayor en bloques grandes, con jitter para variar la silueta.
-      const H = (12 + r * 0.85) * (0.65 + rnd() * 0.7)
-      const floors = Math.max(3, Math.min(20, Math.round(H / FLOOR_GAP)))
-      const baseY = we + Kt
-      const tint = rnd() < 0.66 ? blockTint : BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
+    // Apila `floors` losas desde `baseY`, todas del mismo tinte, reusando la
+    // caché de materiales y el cubo unitario compartido. Devuelve la altura
+    // del techo (Y del borde superior de la última losa). Factor común entre
+    // las torres (bn/yn) y la estructura secundaria baja (Sn edificios bajos,
+    // wn mobiliario): ninguna de las dos duplica la maquinaria de materiales
+    // ni geometría, solo varían footprint, cantidad de pisos y tinte.
+    function stackSlabs(cx, cz, w, d, floors, baseY, tint, taperMin = TAPER_MIN) {
       const mat = slabMaterial(tint)
       const wmat = wireMaterial(tint)
       let roofY = baseY
       for (let i = 0; i < floors; i++) {
         const tFloor = floors > 1 ? i / (floors - 1) : 0
-        const taper = 1 - (1 - TAPER_MIN) * tFloor
+        const taper = 1 - (1 - taperMin) * tFloor
         const sw = w * taper
         const sd = d * taper
         const y = baseY + SLAB_THICK / 2 + i * FLOOR_GAP
         // Jitter leve por piso: rompe el aspecto de bloque perfecto, ayuda a
-        // que la torre se lea orgánica y se "derrita" hacia el suelo.
+        // que el volumen se lea orgánico y se "derrita" hacia el suelo.
         const px = cx + (rnd() * 2 - 1) * 0.3
         const pz = cz + (rnd() * 2 - 1) * 0.3
 
@@ -254,6 +245,28 @@ export function createCityScene(container, cfg, agentNames = []) {
         }
         roofY = y + SLAB_THICK / 2
       }
+      return roofY
+    }
+
+    function buildTower(block, blockTint) {
+      const r = Math.min(block.hx, block.hz) * 2
+      // Footprint: proporcional a r, con jitter, inscripto con margen dentro
+      // del bloque para dejar sitio al borde (pasto/flores, tarea B7).
+      const maxHalfX = Math.max(2, block.hx - TOWER_INSET)
+      const maxHalfZ = Math.max(2, block.hz - TOWER_INSET)
+      const w = Math.min(maxHalfX * 2, r * (0.35 + rnd() * 0.3))
+      const d = Math.min(maxHalfZ * 2, r * (0.35 + rnd() * 0.3))
+      // Offset dentro del bloque (no siempre centrada).
+      const freeX = Math.max(0, maxHalfX - w / 2)
+      const freeZ = Math.max(0, maxHalfZ - d / 2)
+      const cx = block.cx + (rnd() * 2 - 1) * freeX
+      const cz = block.cz + (rnd() * 2 - 1) * freeZ
+      // Altura: mayor en bloques grandes, con jitter para variar la silueta.
+      const H = (12 + r * 0.85) * (0.65 + rnd() * 0.7)
+      const floors = Math.max(3, Math.min(20, Math.round(H / FLOOR_GAP)))
+      const baseY = we + Kt
+      const tint = rnd() < 0.66 ? blockTint : BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
+      const roofY = stackSlabs(cx, cz, w, d, floors, baseY, tint)
       poiPerch.push({ x: cx / R_CITY, z: cz / R_CITY, h: roofY - we })
       capPos.push(cx, roofY, cz)
     }
@@ -270,6 +283,124 @@ export function createCityScene(container, cfg, agentNames = []) {
       }
     }
     placeBuildings()
+
+    // `Sn` del original: 3–6 volúmenes bajos (1–2 pisos), offset aleatorio
+    // dentro de un bloque al azar. Mismo look de losa/matrix que las torres
+    // pero chicos; no se registran como percha (son mobiliario, no hito).
+    function buildLowBuilding() {
+      const block = pick(layout.blocks)
+      const r = Math.min(block.hx, block.hz) * 2
+      const maxHalfX = Math.max(2, block.hx - TOWER_INSET)
+      const maxHalfZ = Math.max(2, block.hz - TOWER_INSET)
+      const w = Math.min(maxHalfX * 2, r * (0.2 + rnd() * 0.25))
+      const d = Math.min(maxHalfZ * 2, r * (0.2 + rnd() * 0.25))
+      const freeX = Math.max(0, maxHalfX - w / 2)
+      const freeZ = Math.max(0, maxHalfZ - d / 2)
+      const cx = block.cx + (rnd() * 2 - 1) * freeX
+      const cz = block.cz + (rnd() * 2 - 1) * freeZ
+      const floors = 1 + ((rnd() * 2) | 0) // 1–2 pisos
+      const blockTint = pick(BUILDING_PALETTE)
+      const tint = rnd() < 0.66 ? blockTint : pick(BUILDING_PALETTE)
+      stackSlabs(cx, cz, w, d, floors, we + Kt, tint)
+    }
+    function placeLowBuildings() {
+      const n = 3 + ((rnd() * 4) | 0) // 3..6
+      for (let i = 0; i < n; i++) buildLowBuilding()
+    }
+    placeLowBuildings()
+
+    // `wn` del original: 1–3 muebles urbanos, cajas bajas de un solo piso
+    // (sin taper) en tinte apagado — no deben competir en brillo con las
+    // torres, así que usan un gris neutro fijo en vez de la paleta viva.
+    const FURNITURE_TINT = [0.5, 0.52, 0.55]
+    function buildFurniture() {
+      const block = pick(layout.blocks)
+      const w = 5.5 + rnd() * 1.5
+      const d = 3.4 + rnd() * 0.6
+      const maxHalfX = Math.max(2, block.hx - 2)
+      const maxHalfZ = Math.max(2, block.hz - 2)
+      const freeX = Math.max(0, maxHalfX - w / 2)
+      const freeZ = Math.max(0, maxHalfZ - d / 2)
+      const cx = block.cx + (rnd() * 2 - 1) * freeX
+      const cz = block.cz + (rnd() * 2 - 1) * freeZ
+      stackSlabs(cx, cz, w, d, 1, we + Kt, FURNITURE_TINT, 1)
+    }
+    function placeFurniture() {
+      const n = 1 + ((rnd() * 3) | 0) // 1..3
+      for (let i = 0; i < n; i++) buildFurniture()
+    }
+    placeFurniture()
+  }
+
+  // ─── FAROLAS: postes con foco de color cerca del bordillo ─────────────
+  // `Cn` del original: 3–7 por mundo, paleta exacta de 5 colores (§B.2 de
+  // la spec). El poste es una línea (oscura en la base, con el color de la
+  // luz arriba) y el foco es un punto más grande que los de las torres —
+  // visible pero secundario frente al glow apilado de los edificios.
+  {
+    const LAMP_COLORS = [
+      [0.16, 0.30, 0.98], // #294CFA
+      [1, 0.83, 0.20],    // #FFD433
+      [1, 0.35, 0.55],    // #FF598C
+      [0.35, 0.90, 0.85], // #59E6D9
+      [1, 0.48, 0.09],    // #FF7A17
+    ]
+    const POST_H_MIN = 5, POST_H_RANGE = 2
+    const lampMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, fog: true })
+    const n = 3 + ((rnd() * 5) | 0) // 3..7
+    for (let i = 0; i < n; i++) {
+      // Ubicación sobre el borde (bordillo) de un bloque al azar: un lado
+      // elegido al azar, punto a lo largo de ese lado también al azar.
+      const block = pick(layout.blocks)
+      const edge = (rnd() * 4) | 0
+      let x, z
+      if (edge === 0) { x = block.cx + block.hx; z = block.cz + (rnd() * 2 - 1) * block.hz }
+      else if (edge === 1) { x = block.cx - block.hx; z = block.cz + (rnd() * 2 - 1) * block.hz }
+      else if (edge === 2) { z = block.cz + block.hz; x = block.cx + (rnd() * 2 - 1) * block.hx }
+      else { z = block.cz - block.hz; x = block.cx + (rnd() * 2 - 1) * block.hx }
+      const gy = terrainHeight(x, z) // exactamente en el borde ⇒ nivel de calle (we)
+      const postH = POST_H_MIN + rnd() * POST_H_RANGE
+      const col = pick(LAMP_COLORS)
+      const dim = [col[0] * 0.35, col[1] * 0.35, col[2] * 0.35]
+      draw.pushLine(x, gy, z, x, gy + postH, z, dim, col)
+      draw.pushPoint(x, gy + postH, z, col, 1.0, 0)
+    }
+    draw.finalizeLines(scene, lampMat)
+  }
+
+  // ─── CHARCOS: parches grises reflectantes en bordes de manzana ────────
+  // `Tn` del original: color exacto #B8BDC9 con vertexColors, apenas sobre
+  // el nivel de calle (`we`). El bundle no reveló una cantidad exacta para
+  // esta función (sin confirmar en la spec) — se eligió un puñado acorde
+  // al resto del mobiliario, no es un número de paridad.
+  {
+    const PUDDLE_COL = [0.72, 0.74, 0.79]
+    const puddleMat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, opacity: 0.3, side: THREE.DoubleSide, fog: true,
+    })
+    const n = 4 + ((rnd() * 5) | 0) // 4..8, elección propia (ver comentario arriba)
+    for (let i = 0; i < n; i++) {
+      const block = pick(layout.blocks)
+      const edge = (rnd() * 4) | 0
+      let cx, cz, alongX
+      if (edge === 0) { cx = block.cx + block.hx; cz = block.cz + (rnd() * 2 - 1) * block.hz * 0.6; alongX = false }
+      else if (edge === 1) { cx = block.cx - block.hx; cz = block.cz + (rnd() * 2 - 1) * block.hz * 0.6; alongX = false }
+      else if (edge === 2) { cz = block.cz + block.hz; cx = block.cx + (rnd() * 2 - 1) * block.hx * 0.6; alongX = true }
+      else { cz = block.cz - block.hz; cx = block.cx + (rnd() * 2 - 1) * block.hx * 0.6; alongX = true }
+      const pw = alongX ? 3 + rnd() * 2 : 1.6 + rnd()
+      const pd = alongX ? 1.6 + rnd() : 3 + rnd() * 2
+      const geo = new THREE.PlaneGeometry(pw, pd)
+      geo.rotateX(-Math.PI / 2)
+      const count = geo.attributes.position.count
+      const cols = new Float32Array(count * 3)
+      for (let v = 0; v < count; v++) {
+        cols[v * 3] = PUDDLE_COL[0]; cols[v * 3 + 1] = PUDDLE_COL[1]; cols[v * 3 + 2] = PUDDLE_COL[2]
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+      const mesh = new THREE.Mesh(geo, puddleMat)
+      mesh.position.set(cx, we + 0.05, cz)
+      scene.add(mesh)
+    }
   }
 
   stage.setResizeHook((m) => { draw.uniforms.uProj.value = m.proj })
