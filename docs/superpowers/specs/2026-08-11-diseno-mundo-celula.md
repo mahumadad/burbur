@@ -627,12 +627,14 @@ acordar las firmas con esa sesión antes de F1**, en vez de copiar `scene.js` (~
 duplicadas y cada arreglo hecho dos veces). Si al llegar a F1 la extracción no está lista, la
 decisión correcta es esperar o hacerla en coordinación — no bifurcar el render.
 
-**(b) Parametrizar el ecosistema por mundo.**
-`TIME_PHASES`, `WEATHERS`, `PHASE` y `WEATHER` son constantes de módulo en `ecosystem.js`, y en
-`main.js:37` el ecosistema es **global** (se crea una vez y sobrevive a los cambios de mundo). Para
-que la célula tenga ciclo celular: añadir `ecosystem.setProfile({phases, weathers, ...})` y
-llamarlo desde `buildWorld`. Es preferible a mover la instancia a por-mundo — mantiene el reloj
-continuo y son ~15 líneas.
+**(b) Parametrizar el ecosistema por mundo. ✅ HECHO.**
+`createEcosystem` arranca con `FOREST_PROFILE` y expone `setProfile(profile)`, que `buildWorld`
+llama con el `ecosystem` del mundo. Un perfil trae `{ phases, phaseData, weathers, weatherData }`.
+**El reloj no se reinicia** al cambiar de mundo: el tiempo sigue donde estaba.
+
+Detalle que hubo que resolver y no era obvio: al cambiar de perfil, el clima activo puede no
+existir en la tabla nueva (`'heavy rain'` no es un medio celular) — sin eso, todo lo derivado
+salía `NaN`. `setProfile` reelige un clima válido si el actual no existe.
 
 **(c) Parametrizar el léxico del narrador. ✅ HECHO.**
 `narrate(ev, ctx, rand, lex)` recibe el léxico, con default a `FOREST_LEXICON` (el bosque no
@@ -673,7 +675,7 @@ recorre también los worktrees y cuenta 96 tests en vez de 24.
 | **F1** | Célula estática sobre `createStage`: membrana, núcleo, ER/Golgi, microtúbulos, organelos sobre rieles. `ready: true` en el registro | Se cambia de mundo y se ve una célula reconocible; sin errores de consola; `dispose` limpio al volver a `land` |
 | **F2** | Motilidad: polarización, lamelipodio, filopodios, blebbing, adhesiones, sustrato deslizante, quimiotaxis. **La capa pura ya está: `src/sim/membrane.js` + `src/sim/motility.js`, 22 tests** — se adelantó porque no depende de `engine/*`. Falta solo el render | Tests puros de `membrane.js`/`motility.js` ✅; visualmente: la célula avanza y persigue el gradiente |
 | **F3** | ATP sobre el swarm + sonido propio. **Capa pura lista: `src/sim/atp.js`, 9 tests.** Falta cablearlo al swarm Kuramoto y al audio | Los destellos salen de mitocondrias y se consumen; suenan; el presupuesto de ATP modula la protrusión |
-| **F4** | Perfil de ecosistema (ciclo celular) + narrador propio + eventos grandes | El HUD muestra las fases del ciclo; el log narra división/fagocitosis/apoptosis |
+| **F4** | ✅ Perfil de ecosistema (12 fases del ciclo + 6 medios) con `setProfile`, narrador propio cableado, redondeo mitótico y onda de Ca²⁺. **Falta**: los eventos grandes narrados (división, fagocitosis, apoptosis) por el canal de `scene.update()` | El HUD muestra las fases del ciclo ✅; el log narra en vocabulario celular ✅; división/fagocitosis/apoptosis pendientes |
 | **F5** | Invasores: bacterias (run-and-tumble) y viriones (difusión) + conflicto. **Capa pura lista: `src/sim/invaders.js`, 9 tests.** Falta el render y la decisión de fagocitosis (la toma el mundo, en el lamelipodio) | Fagocitosis e infección aparecen en el log; el shake dispersa lo que debe |
 
 ### 8.6 Qué NO hacer

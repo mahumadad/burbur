@@ -54,6 +54,8 @@ async function start() {
     const def = worldById(id)
     const swarm = createSwarm(CONFIG.fireflies)
     const pop = createCensus(def.census, CONFIG.fireflies.count)
+    // El vocabulario del mundo (fases y climas) cambia con el mundo; el reloj no.
+    ecosystem.setProfile(def.ecosystem)
     const scene = def.build(app, CONFIG, pop.visible.map((v) => v.name))
     // Cada mundo narra con su propio vocabulario; sin léxico, el del bosque.
     const events = createEventEngine(pop, { ...CONFIG.events, lexicon: def.lexicon })
