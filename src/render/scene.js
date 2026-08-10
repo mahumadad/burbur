@@ -1685,8 +1685,10 @@ export function createScene(container, cfg, agentNames = []) {
       // Nieve: SOLO cuando hace mucho frío (ocasional). Se acumula; al subir la
       // temperatura sobre 0 se derrite → deja el suelo húmedo (agua).
       // Nieve muy ocasional: solo con frío marcado y algo de precipitación.
-      const snowing = eco.temperature <= -3 && eco.rain > 0.1
-      const snowfall = snowing ? Math.max(0.5, eco.rain) : 0
+      // Nieve con frío marcado (la escarcha, temp -6, ahora SÍ nieva aunque no
+      // haya lluvia registrada; antes el AND con lluvia la hacía imposible).
+      const snowing = eco.temperature <= -3
+      const snowfall = snowing ? (0.6 + eco.rain * 0.6) : 0
       snowCover += snowfall * 0.09 * step
       if (eco.temperature > 0 && snowCover > 0) {
         const melt = (eco.temperature) * 0.03 * step
