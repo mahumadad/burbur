@@ -88,8 +88,13 @@ async function start() {
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1
     const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1)
     mouse = { x: nx * CONFIG.fireflies.bounds.x, y: ny * CONFIG.fireflies.bounds.y }
+    // El nombre del agente aparece al pasar el mouse por encima (no en el centro).
+    if (world.scene.setPointer) world.scene.setPointer(nx, ny)
   })
-  app.addEventListener('pointerleave', () => { mouse = null })
+  app.addEventListener('pointerleave', () => {
+    mouse = null
+    if (world.scene.setPointer) world.scene.setPointer(null, null)
+  })
   // Barra espaciadora: perturba las fases (desincroniza → mira cómo re-sincronizan).
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Space') { e.preventDefault(); perturbPhases(world.swarm, Math.PI) }
@@ -97,6 +102,7 @@ async function start() {
 
   let last = performance.now()
   let lightningCooldown = 4
+  let seasonClock = 0
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
@@ -104,6 +110,9 @@ async function start() {
     const { swarm, pop, scene, events } = world
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
     const eco = ecosystem.update(dt)
+    // Reloj de estación (~210 s = un "año"), compartido por el follaje y el HUD.
+    seasonClock += dt
+    eco.seasonT = (seasonClock / 210 + 0.35) % 1
     lastEco = eco
     hud.update(eco)
     audio.setMood(eco.tension)

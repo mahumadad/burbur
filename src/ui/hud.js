@@ -1,5 +1,5 @@
 // Panel ECOSISTEMA: lectura técnica del estado del mundo (estilo murmur).
-import { phaseES, weatherES } from '../i18n.js'
+import { phaseES, weatherES, seasonES } from '../i18n.js'
 
 const CSS = `
 .eco {
@@ -38,6 +38,7 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
     <h4><span class="dot"></span>ECOSISTEMA</h4>
     <div class="row"><span>HORA</span><span data-f="time">—</span></div>
     <div class="row"><span>CLIMA</span><span data-f="weather">—</span></div>
+    <div class="row"><span>ESTACIÓN</span><span data-f="season">—</span></div>
     <div class="row"><span>TEMPERATURA</span><span data-f="temp">—</span></div>
     <div class="sep"></div>
     <div class="row"><span>ACTIVIDAD</span><span data-f="actv">—</span></div>
@@ -61,6 +62,7 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
   function update(s) {
     if (s.phase !== lastPhase) { f.time.textContent = phaseES(s.phase); lastPhase = s.phase }
     if (s.weather !== lastWeather) { f.weather.textContent = weatherES(s.weather); lastWeather = s.weather }
+    f.season.textContent = seasonES(s.seasonT)
     f.temp.textContent = s.temperature + '°C'
     f.actv.textContent = Math.round(s.activity * 100) + '%'
     f.tenv.textContent = s.tension.toFixed(2)
