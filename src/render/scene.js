@@ -202,9 +202,25 @@ export function createScene(container, cfg, agentNames = []) {
     // "Matrix": la malla triangulada del suelo se hace visible como wireframe.
     // Es lo que hace que las superficies se lean como red y que los objetos
     // parezcan disolverse dentro de ellas (como las rocas/árboles).
+    const wfGeo = new THREE.WireframeGeometry(geo)
+    // La grilla se apaga con la máscara de isla: fuera del mapa no debe verse
+    // flotando (el suelo ya se funde a negro por su color por vértice).
+    {
+      const wp = wfGeo.attributes.position
+      const wc = new Float32Array(wp.count * 3)
+      const WF = [0.56, 0.63, 0.42]
+      for (let i = 0; i < wp.count; i++) {
+        const m = islandMask(wp.getX(i), wp.getZ(i), R)
+        const k = m * m // cae más rápido que el suelo → el borde no queda marcado
+        wc[i * 3] = WF[0] * k
+        wc[i * 3 + 1] = WF[1] * k
+        wc[i * 3 + 2] = WF[2] * k
+      }
+      wfGeo.setAttribute('color', new THREE.BufferAttribute(wc, 3))
+    }
     const gwf = new THREE.LineSegments(
-      new THREE.WireframeGeometry(geo),
-      new THREE.LineBasicMaterial({ color: 0x8fa06a, transparent: true, opacity: 0.13, fog: true }),
+      wfGeo,
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.22, fog: true }),
     )
     scene.add(gwf)
 
