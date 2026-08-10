@@ -1,32 +1,48 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, createWalkers, updateWalkers } from '../sim/paths.js'
+import { createRoamers, updateRoamers } from '../sim/wander.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
 
 const rnd = Math.random
 
-// ─── Campos del terreno ──────────────────────────────────────────────────────
+// ─── Campos del terreno (fórmulas y frecuencias del original) ────────────────
+const TERRAIN_AMP = 1.7   // relieve muy suave: ±1.7
+
 function terrainHeight(x, z) {
-  return (fbm(x * 0.012 + 7, z * 0.012 + 3, 3) - 0.5) * 9
+  return (fbm(x * 0.03 + 7.7, z * 0.03 - 3.1, 3) - 0.5) * 2 * TERRAIN_AMP
 }
+
+/**
+ * Fertilidad: fbm remapeado con recorte duro. Al saturar en 0 y en 1 crea
+ * ZONAS — parches pelados y parches frondosos — en vez de variación uniforme.
+ * Es lo que hace que el pasto no se vea regular.
+ */
 function fertility(x, z) {
-  return fbm(x * 0.02 + 19, z * 0.02 + 41, 2)
+  const v = (fbm(x * 0.045 + 21, z * 0.045 + 9, 3) - 0.34) / 0.36
+  return Math.max(0, Math.min(1, v))
 }
-/** 1 en el centro, 0 fuera de la isla; borde irregular y con caída larga a negro. */
+/**
+ * Máscara de isla: la caída arranca al 60% del radio y termina al 98%.
+ * Ese tramo largo (no un borde corto) es lo que disuelve el horizonte en negro.
+ */
 function islandMask(x, z, R) {
   const r = Math.hypot(x, z)
-  const wobble = (noise2(x * 0.03, z * 0.03) - 0.5) * 0.22
-  const t = 1 - r / (R * (1 + wobble))
-  // Caída suave (no lineal) → el horizonte se disuelve en el negro.
-  const m = Math.max(0, Math.min(1, t * 1.5))
-  return m * m * (3 - 2 * m)
+  const wob = (noise2(x * 0.05 + 3.3, z * 0.05 + 8.8) - 0.5) * 16
+  const inner = R * 0.6 + wob
+  let t = (r - inner) / (R * 0.98 - inner)
+  t = Math.max(0, Math.min(1, t))
+  return 1 - t * t * (3 - 2 * t)
 }
 
 /**
@@ -41,12 +57,23 @@ function lightPool(x, z) {
   return 0.34 + 1.75 * Math.pow(Math.max(0, v), 2.0)
 }
 
-// Gradiente del pasto por fertilidad: verde oliva → verde brillante.
+// Gradiente del pasto: de verde casi negro (zona pelada) a verde-amarillo (zona
+// frondosa). Indexado por la fertilidad → las zonas se leen como manchas.
+const GRASS_RAMP = [
+  [0.030, 0.062, 0.016],
+  [0.085, 0.190, 0.045],
+  [0.235, 0.430, 0.095],
+  [0.545, 0.720, 0.160],
+  [0.760, 0.870, 0.310],
+]
 function grassColor(f, out) {
-  const t = Math.max(0, Math.min(1, f))
-  out[0] = 0.24 + 0.38 * t
-  out[1] = 0.58 + 0.62 * t
-  out[2] = 0.13 + 0.27 * t
+  const t = Math.max(0, Math.min(0.999, f)) * (GRASS_RAMP.length - 1)
+  const i = t | 0
+  const k = t - i
+  const a = GRASS_RAMP[i], b = GRASS_RAMP[i + 1]
+  out[0] = a[0] + (b[0] - a[0]) * k
+  out[1] = a[1] + (b[1] - a[1]) * k
+  out[2] = a[2] + (b[2] - a[2]) * k
 }
 
 export function createScene(container, cfg) {
@@ -128,7 +155,9 @@ export function createScene(container, cfg) {
       const vx = Math.cos(a) * lean
       const vz = Math.sin(a) * lean
       grassColor(fert + (rnd() - 0.5) * 0.2, base)
-      const k = mask * lightPool(x, z)
+      // Brillo: máscara de isla × elevación normalizada (lo alto recibe más luz).
+      const elev = Math.max(0, Math.min(1, (y + TERRAIN_AMP) / (2 * TERRAIN_AMP)))
+      const k = mask * (0.55 + 0.45 * elev)
       const cr = base[0] * k, cg = base[1] * k, cb = base[2] * k
       const T = n * 12
       // base → medio
@@ -266,14 +295,14 @@ export function createScene(container, cfg) {
     }
   }
 
-  for (let t = 0; t < 9; t++) {
-    const tr = R * (0.12 + 0.72 * rnd())
+  for (let t = 0; t < 13; t++) {
+    const tr = R * (0.12 + 0.62 * rnd())
     const ta = rnd() * 6.2832
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.35) continue
     const lit = Math.min(1.25, lightPool(tx, tz))
     branch(tx, G + terrainHeight(tx, tz) - 0.4, tz, 0, 1, 0,
-      3.2 + rnd() * 1.8, 5, 4 + rnd() * 2, lit)
+      4.4 + rnd() * 2.4, 5, 5 + rnd() * 2.5, lit)
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
@@ -492,19 +521,35 @@ export function createScene(container, cfg) {
     PALETTE.cyan, PALETTE.magenta, PALETTE.yellow,
     PALETTE.white, PALETTE.blue, PALETTE.pink,
   ]
+  // Líneas gruesas de verdad: LineBasicMaterial ignora linewidth en casi todas
+  // las plataformas, así que las jaulas usan LineMaterial (grosor en píxeles).
+  const fatMaterials = []
+  function fatLine(positions, color) {
+    const mat = new LineMaterial({ color, linewidth: rc.agentLineWidth })
+    mat.resolution.set(1, 1)
+    fatMaterials.push(mat)
+    const geo = new LineSegmentsGeometry()
+    geo.setPositions(positions)
+    const seg = new LineSegments2(geo, mat)
+    seg.computeLineDistances()
+    return seg
+  }
   function edgesOf(geometry, color) {
     const e = new THREE.EdgesGeometry(geometry)
+    const arr = Array.from(e.attributes.position.array)
+    e.dispose()
     geometry.dispose()
-    return new THREE.LineSegments(e, new THREE.LineBasicMaterial({ color }))
+    return fatLine(arr, color)
   }
   function ringLoop(radius, segments, color) {
-    const pts = []
-    for (let i = 0; i <= segments; i++) {
+    const pos = []
+    for (let i = 0; i < segments; i++) {
       const a = (i / segments) * Math.PI * 2
-      pts.push(new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius))
+      const b = ((i + 1) / segments) * Math.PI * 2
+      pos.push(Math.cos(a) * radius, 0, Math.sin(a) * radius,
+        Math.cos(b) * radius, 0, Math.sin(b) * radius)
     }
-    return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color }))
+    return fatLine(pos, color)
   }
   /** Criatura interna: esferitas unidas por enlaces al centro. */
   function molecule(scale, color) {
@@ -546,11 +591,7 @@ export function createScene(container, cfg) {
     group.add(molecule(0.8, PALETTE.orange))
     // Tallo al suelo + bolita superior (la firma visual de murmur)
     if (kind === 3 || kind === 1) {
-      const sg = new THREE.BufferGeometry()
-      sg.setAttribute('position', new THREE.BufferAttribute(
-        new Float32Array([0, 0, 0, 0, 2.6, 0]), 3))
-      group.add(new THREE.LineSegments(sg,
-        new THREE.LineBasicMaterial({ color: PALETTE.magenta })))
+      group.add(fatLine([0, 0, 0, 0, 2.6, 0], PALETTE.magenta))
       const ball = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8),
         new THREE.MeshBasicMaterial({ color: PALETTE.white }))
       ball.position.set(0, 2.6, 0)
@@ -584,17 +625,25 @@ export function createScene(container, cfg) {
   let tHead = 0, tFrame = 0
 
   // ─── Mapeo simulación → mundo ─────────────────────────────────────────────
-  // Los agentes recorren los senderos; la altura la da el terreno.
-  const walkers = createWalkers(paths, n, rnd)
+  // Movimiento mixto: la mayoría deambula libre (como el original); unos pocos
+  // recorren senderos, para que el mundo tenga rutas marcadas además de deriva.
+  const pathCount = Math.round(n * cfg.paths.followerRatio)
+  const walkers = createWalkers(paths, pathCount, rnd)
+  const roamers = createRoamers(cfg.wander, n - pathCount, rnd)
   const worldPos = new Float32Array(n * 3)
+  const heads = new Float32Array(n * 2)
+
   function mapPositions(dt) {
     updateWalkers(walkers, paths, dt)
+    updateRoamers(roamers, cfg.wander, dt, rnd)
     for (let i = 0; i < n; i++) {
-      const w = walkers[i]
-      const x = w.x * R, z = w.z * R
+      const src = i < pathCount ? walkers[i] : roamers[i - pathCount]
+      const x = src.x * R, z = src.z * R
       worldPos[i * 3] = x
       worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1
       worldPos[i * 3 + 2] = z
+      heads[i * 2] = src.hx
+      heads[i * 2 + 1] = src.hz
     }
   }
 
@@ -686,6 +735,8 @@ export function createScene(container, cfg) {
     const proj = (side * dpr) / (2 * Math.tan((camera.fov * Math.PI) / 360))
     pointUniforms.uProj.value = proj
     hazeUniforms.uProj.value = proj
+    // Las líneas gruesas necesitan la resolución para calcular su ancho.
+    for (const m of fatMaterials) m.resolution.set(side * dpr, side * dpr)
     const el = renderer.domElement
     el.style.position = 'absolute'
     el.style.width = side + 'px'
@@ -723,10 +774,9 @@ export function createScene(container, cfg) {
 
     for (let i = 0; i < n; i++) {
       const a = agents[i]
-      const w = walkers[i]
       a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
       // Erguido y orientado al rumbo: nada de tumbos que deformen la silueta.
-      a.group.rotation.y = Math.atan2(w.hx, w.hz)
+      a.group.rotation.y = Math.atan2(heads[i * 2], heads[i * 2 + 1])
       a.cage.rotation.y += dt * 0.22
       const pulse = 1 + swarm.flash[i] * 0.35
       a.cage.scale.setScalar(pulse)

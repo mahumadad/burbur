@@ -14,9 +14,22 @@ export const PALETTE = {
 
 export const CONFIG = {
   world: {
-    radius: 62,          // radio de la isla
+    radius: 85,          // radio de la isla (el del original)
     groundY: 0,
     dustCount: 3200,     // polvo del borde
+  },
+  // Deambular libre: estados move/rest + separación mutua.
+  wander: {
+    density: 0.66,
+    wanderTurn: 2.2,     // deriva del ángulo (rad/s)
+    wanderPush: 0.055,   // empuje continuo
+    kickMin: 0.085,      // impulso al pasar a 'move'
+    kickRange: 0.085,
+    separation: 0.16,
+    sepRadius: 0.10,
+    drag: 0.965,
+    maxSpeed: 0.075,
+    bound: 0.80,         // radio normalizado de contención
   },
   fireflies: {
     count: 18,           // agentes visibles (murmur usa 15)
@@ -28,10 +41,11 @@ export const CONFIG = {
     driftSpeed: 0.4,
   },
   paths: {
-    loopCount: 4,
+    loopCount: 3,
     minRadius: 0.34,
-    maxRadius: 0.78,
+    maxRadius: 0.72,
     samples: 46,
+    followerRatio: 0.33,  // 1/3 usa senderos; el resto deambula libre
   },
   ecosystem: {
     dayLengthSec: 540,   // día completo en 9 min → 45 s por fase
@@ -50,9 +64,9 @@ export const CONFIG = {
     volumes: { drone: -14, bed: -18, flash: -10 },
   },
   render: {
-    grassBlades: 60000,  // hojas como líneas de 2 segmentos
-    flowerPatches: 52,
-    hazeCount: 4200,
+    grassBlades: 112000,  // hojas como líneas de 2 segmentos
+    flowerPatches: 88,
+    hazeCount: 5200,
     hazeColor: [0.12, 0.35, 1.0],  // azul frío (bosque); ciudad usaría naranja
     hazeAlpha: 0.15,
     // Cámara / lente
@@ -65,5 +79,6 @@ export const CONFIG = {
     // Estelas
     trailLen: 34,
     trailSize: 3.4,
+    agentLineWidth: 2.6,  // grosor de las jaulas (px)
   },
 }
