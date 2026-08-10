@@ -4,7 +4,8 @@
 **Estado:** diseño — **no implementado**. Este doc existe para revisarse antes de escribir código.
 **Alcance:** un cuarto mundo del registro, hermano de `land` / `water` / `city`, cuyo tema central
 es **cómo se mueve una célula**.
-**Base técnica:** el motor tal como está hoy en esta rama — `src/render/scene.js` (1743 líneas,
+**Base técnica:** el motor tal como está hoy sobre `main` (merge `93eae1c`) —
+`src/render/stage.js` (el escenario compartido ya extraído), `src/render/scene.js` (1630 líneas,
 el bosque), `src/worlds/registry.js`, `src/main.js`, `src/sim/*`, `src/audio/engine.js`.
 **Base biológica:** biología celular estándar (motilidad mesenquimal/ameboide, tráfico vesicular,
 ciclo celular, fagocitosis). Referencias visuales: `digizyme.com/cst_landscapes.html` (paisajes
@@ -32,10 +33,12 @@ silueta — no se importan mallas, todo se genera por código como en los otros 
   (oscilaciones glucolíticas sincronizadas).
 - **La hora del día pasa a ser el ciclo celular** (G1 → S → G2 → M → citocinesis) y el clima pasa a
   ser el **medio** (rico en nutrientes, hambre, hipoxia, estrés oxidativo, inflamación, acidosis).
-- **Costo técnico honesto:** el mundo célula necesita dos cosas del core que hoy no existen —
-  (a) las primitivas de render están embebidas dentro de `createScene`, hay que extraerlas; y
-  (b) `ecosystem` y `narrator` tienen sus tablas como constantes de módulo, hay que parametrizarlas
-  por mundo. Ambos son cambios acotados y retro-compatibles, detallados en §8.
+- **Costo técnico honesto:** la primera capa del engine compartido (`src/render/stage.js`) ya está
+  en `main` y el mundo célula se monta sobre ella, no sobre una copia del bosque. Falta todavía
+  (a) la segunda capa de primitivas — puntos/líneas, geometría y movimiento de agente, estelas —
+  que **lidera la sesión de CIUDAD** hacia `engine/*`: hay que coordinar firmas, no duplicar; y
+  (b) parametrizar por mundo las tablas de `ecosystem` y `narrator`, que hoy son constantes de
+  módulo. Detalle en §8.
 
 ---
 
@@ -522,14 +525,14 @@ casi gratis: la apoptosis es un `switchWorld('cell')` narrado.
 ### 8.1 El contrato del registro
 
 `src/worlds/registry.js:11` define cada mundo como `{ id, label, accent, ready, census, build }`,
-donde `build(container, cfg, names)` devuelve `{ update, resize, flash, scare, dispose }`. El mundo
-célula entra como una entrada más:
+donde `build(container, cfg, names)` devuelve `{ update(swarm, dt, eco), resize, flash(v),
+scare(strength), dispose }`. El mundo célula entra como una entrada más:
 
 ```js
 {
   id: 'cell', label: 'Cell ecosystem', accent: '#c9a6ff', ready: true,
   census: CELL_CENSUS,
-  build: (container, cfg, names) => createCellWorld(container, cfg, names),
+  build: (container, cfg, names) => createCellScene(container, cfg, names),
 }
 ```
 
@@ -541,6 +544,7 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
 
 | Módulo | Uso en la célula |
 |---|---|
+| **`src/render/stage.js`** | **El escenario compartido, completo**: escena + niebla, cámara aérea 3/4, renderer, órbita con respiración, el lente (fisheye + cromática + viñeta), la etiqueta flotante, el overlay de destello, `resize` y `dispose`. El mundo célula construye su contenido dentro de `stage.scene`, registra `setResizeHook` para sus uniforms y cierra cada frame con `stage.render(step)` |
 | `src/sim/wander.js` | Streaming citoplasmático (el campo de flujo **ya es** ciclosis) + move/rest + separación + atracción a rieles. Solo cambia el config |
 | `src/sim/fireflies.js` | El swarm Kuramoto pasa a ser el pool de ATP (§2.4) |
 | `src/sim/behaviors.js` | `createBugs`/`updateBugs` (ir de POI en POI, huir de cazadores) sirve casi tal cual para los motores caminando entre nodos del citoesqueleto |
@@ -553,8 +557,9 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
 
 ### 8.3 Qué es código nuevo
 
-1. **`src/worlds/cell.js`** — el builder. Membrana deformable, interior (núcleo/ER/Golgi/
-   citoesqueleto), organelos, adhesiones, sustrato deslizante, invasores.
+1. **`src/worlds/cell.js`** — el builder `createCellScene(container, cfg, agentNames)`, montado
+   sobre `createStage`. Membrana deformable, interior (núcleo/ER/Golgi/citoesqueleto), organelos,
+   adhesiones, sustrato deslizante, invasores.
 2. **`src/sim/membrane.js`** — puro, testeable: el contorno polar `r(θ,t)` con protrusión,
    filopodios, blebs, retracción y redondeo mitótico. Sin Three.js — como el resto de `src/sim/`.
 3. **`src/sim/motility.js`** — puro: polarización, quimiotaxis (paseo sesgado), ciclo
@@ -566,17 +571,25 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
 
 Son acotados y retro-compatibles, pero hay que nombrarlos antes de empezar.
 
-**(a) Extraer las primitivas de render. ⚠️ El más caro.**
-Hoy `pointMat` (shader de tamaño-mundo + DOF), `fatLine`/`edgesOf`/`ringLoop` (líneas gruesas), el
-composer (fisheye + cromática + viñeta), `resize`, la etiqueta flotante y el overlay de flash viven
-**dentro** de `createScene` (`src/render/scene.js`, 1743 líneas). El mundo célula los necesita
-todos. Dos caminos:
+**(a) La segunda capa del engine — ya no es tarea de esta rama, pero sí una dependencia.**
+La primera capa está resuelta: `createStage(container, cfg)` en `src/render/stage.js` entrega
+escena, cámara, renderer, órbita, composer, etiqueta, flash, resize y dispose. El mundo célula la
+consume directamente y no necesita nada más de ahí.
 
-- **Copiar `scene.js` y editarlo**: ~800 líneas duplicadas, deuda inmediata, cada arreglo se hace
-  dos veces. ❌
-- **Extraer `src/render/core.js` con las primitivas ⭐ recomendado**: refactor puro, sin cambio de
-  comportamiento, verificable comparando el bosque antes/después. **En commit separado**, según la
-  regla del repo de nunca mezclar refactor con cambio de comportamiento.
+Lo que **sigue dentro de `scene.js`** y la célula también necesita:
+
+| Pieza | Qué es | Uso en la célula |
+|---|---|---|
+| `pointMat` + `pushPoint`/`pushLine` | Shader de puntos tamaño-mundo con DOF falso, y los acumuladores de líneas/puntos | Todo: ribosomas, cuantos de ATP, membrana, citoesqueleto |
+| geometría de agente + `updateAgentMotion` | Jaulas (`fatLine`/`edgesOf`/`ringLoop`), rodado/planeo/spin | Los organelos son agentes con jaula |
+| `trails` | Estelas | Estelas de organelos sobre los rieles |
+| `weather`, `haze` | Lluvia/nieve, neblina aditiva | Partículas del medio, ROS, densidad del medio |
+
+**Esa descomposición hacia `engine/*` la lidera la sesión de CIUDAD.** La consecuencia práctica
+para la célula es de coordinación, no de trabajo: **diseñar asumiendo que esos módulos existirán y
+acordar las firmas con esa sesión antes de F1**, en vez de copiar `scene.js` (~800 líneas
+duplicadas y cada arreglo hecho dos veces). Si al llegar a F1 la extracción no está lista, la
+decisión correcta es esperar o hacerla en coordinación — no bifurcar el render.
 
 **(b) Parametrizar el ecosistema por mundo.**
 `TIME_PHASES`, `WEATHERS`, `PHASE` y `WEATHER` son constantes de módulo en `ecosystem.js`, y en
@@ -603,10 +616,13 @@ continuo y son ~15 líneas.
 
 Con criterio de verificación por fase, para que el plan que salga de aquí sea ejecutable.
 
+Los tests se corren con `npx vitest run --exclude '**/.claude/**'` — sin el `--exclude`, vitest
+recorre también los worktrees y cuenta 96 tests en vez de 24.
+
 | Fase | Entrega | Verificación |
 |---|---|---|
-| **F0** | Extraer `render/core.js` | El bosque se ve y se comporta idéntico; `npm test` verde |
-| **F1** | Célula estática: membrana, núcleo, ER/Golgi, microtúbulos, organelos sobre rieles. `ready: true` en el registro | Se cambia de mundo y se ve una célula reconocible; sin errores de consola; `dispose` limpio al volver a `land` |
+| **F0** | *(ya no es nuestra)* Segunda capa del engine hacia `engine/*`, liderada por la sesión de ciudad. Aquí solo: acordar firmas de puntos/líneas, agentes y estelas | El bosque y la ciudad se ven idénticos tras la extracción; tests verdes |
+| **F1** | Célula estática sobre `createStage`: membrana, núcleo, ER/Golgi, microtúbulos, organelos sobre rieles. `ready: true` en el registro | Se cambia de mundo y se ve una célula reconocible; sin errores de consola; `dispose` limpio al volver a `land` |
 | **F2** | Motilidad: polarización, lamelipodio, filopodios, blebbing, adhesiones, sustrato deslizante, quimiotaxis | Tests puros de `membrane.js`/`motility.js`; visualmente: la célula avanza y persigue el gradiente |
 | **F3** | ATP sobre el swarm + sonido propio | Los destellos salen de mitocondrias y se consumen; suenan; el presupuesto de ATP modula la protrusión |
 | **F4** | Perfil de ecosistema (ciclo celular) + narrador propio + eventos grandes | El HUD muestra las fases del ciclo; el log narra división/fagocitosis/apoptosis |
@@ -635,6 +651,8 @@ Con criterio de verificación por fase, para que el plan que salga de aquí sea 
 3. **¿Se entra directo con `ready: true` o primero un stub como `water`/`city`?** Recomiendo
    entrar con F1 ya jugable — el stub no aporta nada aquí porque el mundo no depende de mapear
    ningún bundle externo.
-4. **¿Se acepta el refactor F0 (`render/core.js`) como commit previo separado?** Es el
-   prerrequisito real; sin él, el mundo célula duplica ~800 líneas.
+4. **¿Se espera a que la sesión de ciudad termine `engine/*` antes de arrancar F1?** Es la
+   dependencia real (§8.4a): sin esas primitivas, el mundo célula duplicaría ~800 líneas de
+   `scene.js`. Recomiendo esperar y usar el tiempo en F2 (`membrane.js`/`motility.js`), que son
+   módulos puros sin Three.js y no dependen de la extracción.
 5. **Log en inglés**: se mantiene por consistencia con los otros tres mundos. Confirmar.
