@@ -3,7 +3,6 @@ import { CONFIG } from './config.js'
 import { createSwarm, updateSwarm, attract, perturbPhases } from './sim/fireflies.js'
 import { createAmbient } from './sim/ambient.js'
 import { createScene } from './render/scene.js'
-import { applyFraming } from './render/framing.js'
 import { createAudio } from './audio/engine.js'
 import { createPanel } from './ui/panel.js'
 
@@ -19,7 +18,6 @@ async function start() {
   await Tone.start()
   const swarm = createSwarm(CONFIG.fireflies)
   const scene = createScene(app, CONFIG)
-  applyFraming(app)
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
   createPanel(CONFIG, {
@@ -53,7 +51,7 @@ async function start() {
     audio.setWind(env.wind)
     if (env.cricket) audio.cricket()
     if (env.owl) audio.owl()
-    scene.update(swarm)
+    scene.update(swarm, dt)
     requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame)
