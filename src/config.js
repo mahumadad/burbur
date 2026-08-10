@@ -78,12 +78,13 @@ export const CONFIG = {
     fisheye: 0.6,        // fov = 50 + fisheye*72 = 93°
     chroma: 0.25,
     vigSize: 1.0,
+    tintStrength: 0.3,   // cuánto vira el color con la hora (el brillo va aparte)
     // Profundidad de campo falsa
     dofFocus: 95,
     dofAperture: 0.2,
     // Estelas
     trailLen: 34,
     trailSize: 3.4,
-    agentLineWidth: 1.7,  // grosor de las jaulas (px)
+    agentLineWidth: 0.9,  // grosor de las jaulas (px de dispositivo)
   },
 }

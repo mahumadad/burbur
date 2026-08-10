@@ -90,7 +90,7 @@ export function createScene(container, cfg) {
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
   // Órbita esférica inicial (r=118, theta=0.62, phi=0.92) — vista aérea 3/4.
-  const orbR = 96, th = 0.62, ph = 0.86
+  const orbR = 118, th = 0.62, ph = 0.92
   camera.position.set(
     orbR * Math.sin(ph) * Math.cos(th),
     orbR * Math.cos(ph),
@@ -916,10 +916,18 @@ export function createScene(container, cfg) {
     // El ecosistema pinta el mundo: luz de la hora, niebla y neblina del clima.
     if (eco) {
       const L = eco.light, g = eco.gain
-      tintC.setRGB(L[0] * g, L[1] * g, L[2] * g)
+      // El tinte de la hora se aplica SUAVE: a plena fuerza el verde del pasto
+      // se apaga a oliva. Mantenemos el brillo, atenuamos el viraje de color.
+      const k = rc.tintStrength
+      tintC.setRGB(
+        (1 - k + k * L[0]) * g,
+        (1 - k + k * L[1]) * g,
+        (1 - k + k * L[2]) * g,
+      )
       if (grassMat) grassMat.color.copy(tintC)
       if (floraMat) floraMat.color.copy(tintC)
-      scene.fog.density = 0.003 + eco.fog * 0.012
+      // Niebla muy leve: la isla debe leerse entera, no perderse en negro.
+      scene.fog.density = 0.0009 + eco.fog * 0.0028
       // La neblina toma el color de la luz y se espesa con la niebla.
       hazeUniforms.uColor.value.set(
         rc.hazeColor[0] * 0.4 + L[0] * 0.6,
