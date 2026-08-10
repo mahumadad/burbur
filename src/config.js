@@ -18,6 +18,23 @@ export const CONFIG = {
     groundY: 0,
     dustCount: 3200,     // polvo del borde
   },
+  // Mundo AGUA (pond). Valores de paridad del bundle de murmur (spec §4) + la
+  // "riqueza tipo bosque" (densidad extra con la misma paleta) y los peces.
+  pond: {
+    lagoonRadius: 64,      // mt — radio de la laguna
+    waterLevel: -3.4,      // ht — nivel del agua (relativo a groundY)
+    lobeDepth: 11,         // gt — profundidad de los lóbulos del lecho
+    hazeCount: 4200,       // Bt — niebla aditiva exclusiva de agua (radio mt*1.28)
+    dustCount: 8500,       // Ut — polvo de borde
+    reedBase: 736,         // Vt — juncos base (round(16*grass)*46)
+    reedRichness: 3.0,     // factor de densidad extra sobre la base
+    waterReflection: true, // híbrido on; false = reflejo falso (sin Reflector)
+    fish: {
+      schools: 3, perSchool: 30, spread: 0.82, yMin: -13.5, yMax: -3.9,
+      maxSpeed: 0.06, sep: 0.9, align: 0.5, cohesion: 0.4,
+      sepRadius: 0.05, neighborRadius: 0.14, wander: 0.5, turn: 2.0,
+    },
+  },
   // Deambular libre: estados move/rest + separación mutua.
   wander: {
     density: 0.66,
