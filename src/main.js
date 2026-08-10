@@ -30,11 +30,11 @@ async function start() {
 
   await Tone.start()
   const swarm = createSwarm(CONFIG.fireflies)
-  const scene = createScene(app, CONFIG)
+  const pop = createCensus(FOREST_CENSUS, CONFIG.fireflies.count)
+  const scene = createScene(app, CONFIG, pop.visible.map((v) => v.name))
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
   const ecosystem = createEcosystem(CONFIG.ecosystem)
-  const pop = createCensus(FOREST_CENSUS, CONFIG.fireflies.count)
   const events = createEventEngine(pop, CONFIG.events)
   const eventLog = createEventLog('#8fe04a')
   const hud = createHud('#8fe04a', {
