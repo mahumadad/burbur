@@ -6,7 +6,7 @@ export const CONFIG = {
     omegaMean: 1.1,        // rad/s frecuencia natural media
     omegaSpread: 0.18,     // dispersión relativa de omega
     bounds: { x: 12, y: 7, z: 10 }, // semiejes del volumen
-    driftSpeed: 0.35,
+    driftSpeed: 1.1,
   },
   ambient: {
     windPeriodSec: 23,     // periodo del oscilador lento de viento
