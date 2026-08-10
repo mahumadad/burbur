@@ -106,7 +106,8 @@ async function start() {
     // Lluvia: siseo por intensidad + goteo a un ritmo proporcional.
     audio.setRain(eco.rain)
     if (eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
-    if (env.cricket && Math.random() < eco.activity) audio.cricket()
+    // Los grillos son de clima cálido: enmudecen con el frío.
+    if (env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
     if (env.owl) audio.owl()
     const predations = scene.update(swarm, dt, eco)
     // Un cazador atrapó a un bicho → evento de conflicto narrado.
