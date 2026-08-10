@@ -1248,7 +1248,7 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   const rain = createRain(scene, R, G)
-  const snow = createSnow(scene, R, G)
+  const snow = createSnow(scene, R, G, pointUniforms.uProj)
   const caps = createSnowCaps(scene, capPos, pointUniforms.uProj)
 
   // El escenario ya trae el lente y el resize; aquí solo se registra lo que
@@ -1256,7 +1256,6 @@ export function createScene(container, cfg, agentNames = []) {
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
     hazeUniforms.uProj.value = m.proj
-    snow.mesh.material.uniforms.uProj.value = m.proj
     for (const mat of fatMaterials) mat.resolution.set(m.w * m.dpr, m.h * m.dpr)
   })
 
