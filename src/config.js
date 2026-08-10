@@ -99,7 +99,7 @@ export const CONFIG = {
   },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos
-    flowerPatches: 150,
+    flowerPatches: 95,
     berryClusters: 30,
     hazeCount: 5200,
     hazeColor: [0.12, 0.35, 1.0],  // azul frío (bosque); ciudad usaría naranja
