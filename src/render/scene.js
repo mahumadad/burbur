@@ -294,11 +294,69 @@ export function createScene(container, cfg, agentNames = []) {
     scene.add(mesh)
   }
 
+  // ─── AGUA: charcos que aparecen al derretir la nieve. Se juntan en las
+  // hondonadas del terreno; su opacidad sigue a `wet` y tienen un brillo que
+  // se desplaza como reflejo del cielo.
+  const waterUniforms = {
+    uTime: { value: 0 },
+    uWet: { value: 0 },
+    uR: { value: R },
+  }
+  {
+    const SEGS = 72
+    const size = R * 2.2
+    const wg = new THREE.PlaneGeometry(size, size, SEGS, SEGS)
+    wg.rotateX(-Math.PI / 2)
+    const wp = wg.attributes.position
+    const low = new Float32Array(wp.count)
+    for (let i = 0; i < wp.count; i++) {
+      const x = wp.getX(i), z = wp.getZ(i)
+      wp.setY(i, G + terrainHeight(x, z) + 0.05)
+      // Peso de charco: alto en las hondonadas (terreno bajo), 0 en las lomas.
+      const th = terrainHeight(x, z)
+      low[i] = Math.max(0, Math.min(1, (0.35 - th) / 1.3)) * islandMask(x, z, R)
+    }
+    wg.setAttribute('aLow', new THREE.BufferAttribute(low, 1))
+    const wmat = new THREE.ShaderMaterial({
+      uniforms: waterUniforms,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      vertexShader: `
+        attribute float aLow;
+        varying vec2 vXZ; varying float vLow;
+        void main() {
+          vXZ = position.xz; vLow = aLow;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime; uniform float uWet; uniform float uR;
+        varying vec2 vXZ; varying float vLow;
+        void main() {
+          // Agua reflectante: lámina azul-gris que refleja el cielo, con brillos
+          // que se deslizan lentamente por encima.
+          float s = sin(vXZ.x * 0.16 + vXZ.y * 0.11 + uTime * 0.8);
+          float s2 = sin(vXZ.x * 0.05 - vXZ.y * 0.07 - uTime * 0.5);
+          float glint = smoothstep(0.55, 1.0, s) + 0.5 * smoothstep(0.7, 1.0, s2);
+          vec3 col = vec3(0.16, 0.26, 0.34) + glint * vec3(0.55, 0.66, 0.78);
+          float r = length(vXZ);
+          float mask = 1.0 - smoothstep(uR * 0.5, uR * 0.95, r);
+          float a = vLow * uWet * (0.7 + 0.3 * min(glint, 1.0)) * mask;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(col, a);
+        }
+      `,
+    })
+    const wmesh = new THREE.Mesh(wg, wmat)
+    wmesh.renderOrder = 1
+    scene.add(wmesh)
+  }
+
   // ─── PASTO: cada hoja = 4 vértices = 2 segmentos, gradiente por vértice ────
   {
     const target = rc.grassBlades
     const gp = new Float32Array(target * 12)
     const gc = new Float32Array(target * 12)
+    const gw = new Float32Array(target * 4) // peso de mecido por vértice (0 base → 1 punta)
     const base = [0, 0, 0]
     let n = 0
     for (let i = 0; i < target * 1.35 && n < target; i++) {
@@ -322,6 +380,8 @@ export function createScene(container, cfg, agentNames = []) {
       const k = mask * (0.55 + 0.45 * elev)
       const cr = base[0] * k, cg = base[1] * k, cb = base[2] * k
       const T = n * 12
+      const W = n * 4
+      gw[W] = 0; gw[W + 1] = 0.62; gw[W + 2] = 0.62; gw[W + 3] = 1.0
       // base → medio
       gp[T] = x;               gp[T + 1] = y;            gp[T + 2] = z
       gp[T + 3] = x + vx * .35; gp[T + 4] = y + h * .62;  gp[T + 5] = z + vz * .35
@@ -340,8 +400,48 @@ export function createScene(container, cfg, agentNames = []) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(gp.slice(0, n * 12), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(gc.slice(0, n * 12), 3))
-    grassMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true, transparent: true })
-    snowMats.push(grassMat)
+    geo.setAttribute('aWeight', new THREE.BufferAttribute(gw.slice(0, n * 4), 1))
+    // Pasto animado: shader propio que mece las puntas con el viento. La base
+    // queda plantada (peso 0) y la punta se mueve el máximo (peso 1). El tinte de
+    // hora, lo húmedo y el enterrado por nieve viajan por uniforms.
+    grassMat = new THREE.ShaderMaterial({
+      fog: true, transparent: true, vertexColors: true,
+      uniforms: THREE.UniformsUtils.merge([
+        THREE.UniformsLib.fog,
+        {
+          uTime: { value: 0 }, uWind: { value: new THREE.Vector2() },
+          uTint: { value: new THREE.Color(1, 1, 1) }, uOpacity: { value: 1 },
+        },
+      ]),
+      vertexShader: `
+        #include <common>
+        #include <fog_pars_vertex>
+        uniform float uTime; uniform vec2 uWind;
+        attribute float aWeight;
+        varying vec3 vColor;
+        void main() {
+          vColor = color;
+          vec3 transformed = position;
+          float w = aWeight * aWeight;
+          float gust = 0.5 + 0.5 * sin(uTime * 1.7 + position.x * 0.09 + position.z * 0.05);
+          transformed.x += uWind.x * w * gust;
+          transformed.z += uWind.y * w * gust;
+          vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }
+      `,
+      fragmentShader: `
+        #include <common>
+        #include <fog_pars_fragment>
+        uniform vec3 uTint; uniform float uOpacity;
+        varying vec3 vColor;
+        void main() {
+          gl_FragColor = vec4(vColor * uTint, uOpacity);
+          #include <fog_fragment>
+        }
+      `,
+    })
     scene.add(new THREE.LineSegments(geo, grassMat))
   }
 
@@ -1100,7 +1200,7 @@ export function createScene(container, cfg, agentNames = []) {
   bugGeom.setAttribute('hcol', new THREE.BufferAttribute(bugColArr, 3))
   bugGeom.setAttribute('hsize', new THREE.BufferAttribute(bugSize, 1))
   const bugMat = new THREE.ShaderMaterial({
-    uniforms: { uProj: pointUniforms.uProj },
+    uniforms: { uProj: pointUniforms.uProj, uAlpha: { value: 1 } },
     blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
     vertexShader: `
       attribute vec3 hcol; attribute float hsize; uniform float uProj;
@@ -1110,11 +1210,11 @@ export function createScene(container, cfg, agentNames = []) {
         gl_PointSize = clamp(hsize * uProj / max(-mv.z, 0.001), 1.0, 40.0);
         gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `
-      precision mediump float; varying vec3 vC;
+      precision mediump float; varying vec3 vC; uniform float uAlpha;
       void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
         if (d > 0.5) discard;
         float a = smoothstep(0.5, 0.05, d);
-        gl_FragColor = vec4(vC, a); }`,
+        gl_FragColor = vec4(vC, a * uAlpha); }`,
   })
   const bugMesh = new THREE.Points(bugGeom, bugMat)
   bugMesh.frustumCulled = false
@@ -1368,14 +1468,13 @@ export function createScene(container, cfg, agentNames = []) {
         rc.hazeColor[1] * 0.4 + L[1] * 0.6,
         rc.hazeColor[2] * 0.6 + L[2] * 0.4,
       )
-      hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.5 + eco.fog * 1.3) * (0.45 + g * 0.75)
+      hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.62 + eco.fog * 1.35) * (0.5 + g * 0.72) * 1.18
 
       // Sombras de nubes: derivan siempre; se ven cuando hay sol y cielo despejado
       // (nada de noche, ni con niebla o lluvia). Caen también sobre la nieve.
       shadowUniforms.uTime.value = clock
       const clearSky = Math.max(0, 1 - eco.fog * 1.5 - eco.rain * 2.2)
       const dayF = Math.max(0, Math.min(1, (g - 0.42) / 0.5))
-      shadowUniforms.uStrength.value = 0.34 * clearSky * dayF
 
       // Nieve: SOLO cuando hace mucho frío (ocasional). Se acumula; al subir la
       // temperatura sobre 0 se derrite → deja el suelo húmedo (agua).
@@ -1391,17 +1490,39 @@ export function createScene(container, cfg, agentNames = []) {
       snowCover = Math.max(0, Math.min(1, snowCover))
       wet = Math.max(0, wet - 0.015 * step) // evaporación lenta
 
-      // El pasto se oscurece si está húmedo (multiplicar SÍ oscurece).
-      for (const m of snowMats) m.color.copy(tintC).multiplyScalar(1 - wet * 0.28)
-      // La nieve se acumula: capa blanca sobre el suelo + el pasto se entierra.
-      if (snowGroundMat) snowGroundMat.opacity = Math.min(0.95, snowCover * 1.2)
+      // Suelo/flora se oscurecen si están húmedos (multiplicar SÍ oscurece).
+      const wetShade = 1 - wet * 0.28
+      for (const m of snowMats) m.color.copy(tintC).multiplyScalar(wetShade)
+      // Pasto: se mece con el viento + tinte de hora + húmedo, y se entierra en
+      // nieve. El viento es una brisa base con ráfagas lentas, más fuerte con lluvia.
       if (grassMat) {
-        grassMat.opacity = 1 - snowCover * 0.82
+        const breeze = 0.4 + 0.28 * Math.sin(clock * 0.23) + eco.rain * 0.5
+        grassMat.uniforms.uTime.value = clock
+        grassMat.uniforms.uWind.value.set(0.55 * breeze, 0.22 * breeze)
+        grassMat.uniforms.uTint.value.copy(tintC).multiplyScalar(wetShade)
+        grassMat.uniforms.uOpacity.value = 1 - snowCover * 0.82
         // Con nieve el pasto deja de escribir profundidad: así el manto blanco
         // que queda por debajo de las hojas no se ve ocluido entre ellas.
         grassMat.depthWrite = snowCover < 0.05
       }
+      // La nieve se acumula: capa blanca sobre el suelo.
+      if (snowGroundMat) snowGroundMat.opacity = Math.min(0.95, snowCover * 1.2)
       capUniforms.uCap.value = snowCover
+
+      // Invierno: las flores se entierran y los bichos escasean bajo la nieve.
+      if (floraMat) { floraMat.transparent = true; floraMat.opacity = 1 - snowCover * 0.85 }
+      if (bugMat) bugMat.uniforms.uAlpha.value = 1 - snowCover * 0.85
+
+      // Agua: charcos que aparecen al derretir (wet), brillando en las hondonadas.
+      waterUniforms.uTime.value = clock
+      waterUniforms.uWet.value = wet
+
+      // Sombras de nube: con día y cielo despejado, y TAMBIÉN sobre la nieve
+      // (aunque el cielo esté algo cargado, para que el manto no quede plano).
+      shadowUniforms.uStrength.value = Math.max(
+        0.34 * clearSky * dayF,
+        0.26 * dayF * snowCover,
+      )
 
       updateRain(step, snowing ? 0 : eco.rain)
       updateSnow(step, clock, snowfall)
