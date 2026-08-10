@@ -10,6 +10,7 @@ import { createRails, updateRails, nearestOnRails } from '../sim/rails.js'
 import { createAtpPool, spawnQuantum, updateAtp } from '../sim/atp.js'
 import { createInvaders, spawnInvader, updateInvaders } from '../sim/invaders.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
+import { MITOTIC_PHASES } from '../sim/ecosystem.js'
 
 // MUNDO CÉLULA — un macrófago reptando sobre un sustrato, visto desde arriba.
 //
@@ -31,7 +32,6 @@ const C_MEMBRANE = rgb(PALETTE.white)
 const C_FRONT = rgb(PALETTE.cyan)
 const C_CORTEX = rgb(PALETTE.cyanSat)
 const C_RAIL = rgb(PALETTE.blue)
-const C_NUCLEUS = rgb(PALETTE.white)
 const C_CHROMATIN = rgb(PALETTE.bond)
 const C_ER = rgb(PALETTE.cyanSat)
 const C_GOLGI = rgb(PALETTE.pink)
@@ -267,6 +267,8 @@ export function createCellScene(container, cfg, agentNames = []) {
   let _lx = 0, _ly = 0
 
   let clock = 0
+  let rounding = 0, roundTarget = 0
+  let calciumCooldown = 5
 
   function drawMembrane(front) {
     memBuf.begin()
@@ -376,7 +378,11 @@ export function createCellScene(container, cfg, agentNames = []) {
 
     // El medio pinta la célula: el "clima" modula energía y tensión.
     const demand = 0.25 + (eco ? eco.tension : 0) * 0.8
-    const rounding = 0 // el redondeo mitótico llega con el perfil de ciclo (F4)
+    // En mitosis la célula suelta las adherencias, se redondea y deja de reptar.
+    // Entra y sale con rampa: el redondeo real tarda, no es un interruptor.
+    const inMitosis = eco ? MITOTIC_PHASES.has(eco.phase) : false
+    roundTarget = inMitosis ? 1 : 0
+    rounding += (roundTarget - rounding) * (1 - Math.exp(-step / 2.5))
 
     // ── Simulación ──────────────────────────────────────────────────────────
     updateMotility(motility, cc.motility, step, rnd, {
@@ -501,6 +507,18 @@ export function createCellScene(container, cfg, agentNames = []) {
 
     // La niebla se espesa con el medio.
     if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0022
+
+    // ── ONDA DE Ca²⁺: el "relámpago" de este mundo ─────────────────────────
+    // Barre la célula en 1–3 s. Se dispara con inflamación y con la tensión de
+    // la mitosis, no con la lluvia — por eso vive acá y no en el host.
+    if (eco) {
+      calciumCooldown -= step
+      const chance = (eco.weather === 'inflamed' ? 0.5 : 0.08) + eco.tension * 0.5
+      if (calciumCooldown <= 0 && rnd() < chance * step) {
+        calciumCooldown = 6 + rnd() * 10
+        stage.flash(0.32 + eco.tension * 0.3)
+      }
+    }
 
     stage.render(step)
     return []
