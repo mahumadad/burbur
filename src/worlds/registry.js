@@ -1,6 +1,8 @@
 import { createScene } from '../render/scene.js'
 import { createStubWorld } from './stub.js'
-import { FOREST_CENSUS } from '../sim/agents.js'
+import { createCellScene } from './cell.js'
+import { FOREST_CENSUS, CELL_CENSUS } from '../sim/agents.js'
+import { CELL_LEXICON } from '../sim/narrator.js'
 
 // Registro de mundos. Cada mundo es un builder que construye su escena en el
 // container y devuelve la API común { update, resize, flash, dispose }. El host
@@ -23,6 +25,13 @@ export const WORLDS = [
     id: 'city', label: 'Block ecosystem', accent: '#fab75e', ready: false,
     census: FOREST_CENSUS,
     build: (container, cfg) => createStubWorld(container, cfg, { accent: '#fab75e', label: 'Block' }),
+  },
+  // Célula: mundo propio (no viene del bundle de murmur). El acento violeta es
+  // diseño nuestro; no colisiona con land/water/city.
+  {
+    id: 'cell', label: 'Cell ecosystem', accent: '#c9a6ff', ready: true,
+    census: CELL_CENSUS, lexicon: CELL_LEXICON,
+    build: (container, cfg, names) => createCellScene(container, cfg, names),
   },
 ]
 

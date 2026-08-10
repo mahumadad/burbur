@@ -55,7 +55,8 @@ async function start() {
     const swarm = createSwarm(CONFIG.fireflies)
     const pop = createCensus(def.census, CONFIG.fireflies.count)
     const scene = def.build(app, CONFIG, pop.visible.map((v) => v.name))
-    const events = createEventEngine(pop, CONFIG.events)
+    // Cada mundo narra con su propio vocabulario; sin léxico, el del bosque.
+    const events = createEventEngine(pop, { ...CONFIG.events, lexicon: def.lexicon })
     applyAccent(def.accent)
     return { def, swarm, pop, scene, events }
   }
@@ -171,7 +172,8 @@ async function start() {
         const who = pop.visible[p.hunterIdx]
         if (!who) continue
         const ev = { type: 'conflict', agent: who.name, agentIdx: p.hunterIdx, dir: p.dir }
-        const text = narrate({ ...ev, agentType: who.type }, { phase: eco.phase, weather: eco.weather })
+        const text = narrate({ ...ev, agentType: who.type },
+          { phase: eco.phase, weather: eco.weather }, undefined, world.def.lexicon)
         eventLog.push({ ...ev, ...text }, label)
         audio.fauna(who.type, p.dir)
       }
