@@ -74,6 +74,12 @@ export const CONFIG = {
     catchRadius: 0.02,   // distancia para atrapar
     respawn: 2.5,        // segundos hasta reaparecer
   },
+  behaviors: {
+    perchers: 5, sky: 2,
+    perchSpeed: 0.14, perchArrive: 0.03,
+    perchMin: 4, perchMax: 9, riseRate: 1.6,
+    skyHeight: 26,
+  },
   ecosystem: {
     dayLengthSec: 540,   // día completo en 9 min → 45 s por fase
     weatherMinSec: 55,
