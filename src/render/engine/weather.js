@@ -45,7 +45,7 @@ export function createRain(scene, R, G) {
 }
 
 // ─── NIEVE: copos que caen lento y derivan; densidad por intensidad ───────
-export function createSnow(scene, R, G) {
+export function createSnow(scene, R, G, uProjUniform) {
   const SNOW_N = 5000
   const SNOW_H = 46
   const snowPos = new Float32Array(SNOW_N * 3)
@@ -60,7 +60,7 @@ export function createSnow(scene, R, G) {
   const snowGeom = new THREE.BufferGeometry()
   snowGeom.setAttribute('position', new THREE.BufferAttribute(snowPos, 3))
   const snowMat = new THREE.ShaderMaterial({
-    uniforms: { uProj: { value: 1000 } },
+    uniforms: { uProj: uProjUniform },
     transparent: true, depthWrite: false, blending: THREE.NormalBlending,
     vertexShader: `uniform float uProj; void main(){
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
