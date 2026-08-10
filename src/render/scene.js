@@ -88,44 +88,17 @@ export function createScene(container, cfg, agentNames = []) {
   scene.background = new THREE.Color(0x000000)
   // Niebla negra: la distancia se funde en la oscuridad. La densidad la fija el clima.
   scene.fog = new THREE.FogExp2(0x000000, 0.004)
-  let grassMat, floraMat, groundMat
+  let grassMat, floraMat, groundMat, snowGroundMat
   // Puntos de interés (coordenadas normalizadas): destinos de los agentes.
   const poiFlowers = []
   const poiPerch = []      // copas de árbol y cimas de roca {x, z, h}
   const treeObstacles = [] // troncos a bordear (normalizado {x, z, r})
   const rockDomes = []     // rocas por encima (mundo {x, z, r, h})
 
-  // Clima que pinta el suelo: sombras de nubes móviles + nieve + humedad.
-  const shadowUniforms = {
-    uTime: { value: 0 },
-    uWind: { value: new THREE.Vector2(0.025, 0.01) },
-    uCloud: { value: 0.5 },  // 0 despejado, 1 nublado (sombras marcadas)
-    uSun: { value: 1.0 },    // >1 día soleado
-    uSnow: { value: 0.0 },   // acumulación de nieve
-    uWet: { value: 0.0 },    // agua del deshielo
-  }
-  function applyCloudShadow(material) {
-    material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, shadowUniforms)
-      shader.vertexShader = 'uniform float uTime; uniform vec2 uWind; uniform float uCloud, uSun; varying float vShadow;\n'
-        + shader.vertexShader.replace('void main() {', `void main() {
-          {
-            vec2 q = position.xz * 0.02 + uWind * uTime;
-            float a = sin(q.x) + cos(q.y * 1.13);
-            float b = sin(q.x * 0.5 + q.y * 0.7 + 1.3);
-            float n = (a * 0.5 + b) * 0.5;
-            float lit = smoothstep(-0.2, 0.9, n);
-            vShadow = mix(1.0 - uCloud * 0.5, 1.0, lit) * uSun;
-          }`)
-      shader.fragmentShader = 'uniform float uSnow, uWet; varying float vShadow;\n'
-        + shader.fragmentShader.replace('#include <fog_fragment>', `
-          gl_FragColor.rgb *= vShadow;
-          gl_FragColor.rgb *= (1.0 - uWet * 0.28);
-          gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.90, 0.93, 1.0), uSnow);
-          #include <fog_fragment>`)
-    }
-    material.needsUpdate = true
-  }
+  // La nieve se pinta vía material.color en el suelo (fiable, sin shaders) y
+  // como puntos blancos que se acumulan sobre rocas y árboles.
+  const snowMats = []   // pasto, suelo, flora (se blanquean con la nieve)
+  const capPos = []     // posiciones de nieve sobre rocas/árboles (caras arriba)
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
@@ -221,8 +194,22 @@ export function createScene(container, cfg, agentNames = []) {
     groundMat = new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide, fog: true,
     })
-    applyCloudShadow(groundMat)
+    snowMats.push(groundMat)
     scene.add(new THREE.Mesh(geo, groundMat))
+
+    // Capa de nieve: mismo relieve, blanca, que aparece con la acumulación.
+    const snowGeo = geo.clone()
+    const sp = snowGeo.attributes.position
+    // Manto a ras de suelo, apenas sobre el terreno (el pasto se entierra).
+    for (let i = 0; i < sp.count; i++) sp.setY(i, sp.getY(i) + 0.6)
+    snowGeo.deleteAttribute('color')
+    snowGroundMat = new THREE.MeshBasicMaterial({
+      color: 0xf2f6ff, transparent: true, opacity: 0, depthWrite: false,
+      side: THREE.DoubleSide, fog: true,
+    })
+    const sm = new THREE.Mesh(snowGeo, snowGroundMat)
+    sm.renderOrder = 1
+    scene.add(sm)
   }
 
   // ─── PASTO: cada hoja = 4 vértices = 2 segmentos, gradiente por vértice ────
@@ -271,8 +258,8 @@ export function createScene(container, cfg, agentNames = []) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(gp.slice(0, n * 12), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(gc.slice(0, n * 12), 3))
-    grassMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
-    applyCloudShadow(grassMat)
+    grassMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true, transparent: true })
+    snowMats.push(grassMat)
     scene.add(new THREE.LineSegments(geo, grassMat))
   }
 
@@ -507,6 +494,10 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   if (treeIdx.length) {
+    // Nieve sobre las ramas: una muestra de vértices del árbol.
+    for (let i = 0; i < treePos.length; i += 3 * 5) {
+      capPos.push(treePos[i], treePos[i + 1] + 0.1, treePos[i + 2])
+    }
     const tg = new THREE.BufferGeometry()
     tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
     tg.setIndex(treeIdx)
@@ -627,6 +618,14 @@ export function createScene(container, cfg, agentNames = []) {
       k++
     }
 
+    // Nieve: puntos sobre las caras que miran hacia arriba (se ven al nevar).
+    const capN = spec.mono ? 260 : 90
+    for (let c = 0, k = 0; c < pos.count && k < capN; c++) {
+      if (nrm.getY(c) < 0.5) continue
+      capPos.push(cx + pos.getX(c), baseY + pos.getY(c) + 0.12, cz + pos.getZ(c))
+      k++
+    }
+
     // Flores creciendo en las partes planas de arriba.
     let want = spec.mono ? 5 + ((rnd() * 5) | 0) : (rnd() < 0.6 ? 2 + ((rnd() * 3) | 0) : 0)
     const rockPal = patchPalette()
@@ -721,7 +720,7 @@ export function createScene(container, cfg, agentNames = []) {
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePos), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lineCol), 3))
     floraMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
-    applyCloudShadow(floraMat)
+    snowMats.push(floraMat)
     scene.add(new THREE.LineSegments(geo, floraMat))
   }
 
@@ -1123,8 +1122,8 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   // ─── NIEVE: copos que caen lento y derivan; densidad por intensidad ───────
-  const SNOW_N = 1300
-  const SNOW_H = 44
+  const SNOW_N = 5000
+  const SNOW_H = 46
   const snowPos = new Float32Array(SNOW_N * 3)
   const snowPhase = new Float32Array(SNOW_N)
   for (let i = 0; i < SNOW_N; i++) {
@@ -1141,10 +1140,11 @@ export function createScene(container, cfg, agentNames = []) {
     transparent: true, depthWrite: false, blending: THREE.NormalBlending,
     vertexShader: `uniform float uProj; void main(){
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = clamp(0.28 * uProj / max(-mv.z, 0.001), 1.0, 20.0);
+      gl_PointSize = clamp(0.55 * uProj / max(-mv.z, 0.001), 1.5, 34.0);
       gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `void main(){ vec2 uv = gl_PointCoord - 0.5; if(length(uv) > 0.5) discard;
-      gl_FragColor = vec4(0.95, 0.97, 1.0, 0.9); }`,
+    fragmentShader: `void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
+      if(d > 0.5) discard;
+      gl_FragColor = vec4(1.0, 1.0, 1.0, smoothstep(0.5, 0.15, d)); }`,
   })
   const snowMesh = new THREE.Points(snowGeom, snowMat)
   snowMesh.frustumCulled = false
@@ -1155,7 +1155,7 @@ export function createScene(container, cfg, agentNames = []) {
     snowMesh.visible = intensity > 0.01
     if (!snowMesh.visible) return
     const active = Math.floor(intensity * SNOW_N)
-    const fall = (5 + 4 * intensity) * dt
+    const fall = (7 + 7 * intensity) * dt
     for (let i = 0; i < SNOW_N; i++) {
       if (i >= active) { snowPos[i * 3 + 1] = -9999; continue }
       let y = snowPos[i * 3 + 1] - fall
@@ -1166,6 +1166,26 @@ export function createScene(container, cfg, agentNames = []) {
       snowPos[i * 3 + 2] += Math.cos(clockT * 0.6 + snowPhase[i] * 1.3) * 6 * dt
     }
     snowGeom.getAttribute('position').needsUpdate = true
+  }
+
+  // Nieve acumulada sobre rocas/árboles: puntos que crecen con la acumulación.
+  const capUniforms = { uProj: pointUniforms.uProj, uCap: { value: 0 } }
+  {
+    const capGeom = new THREE.BufferGeometry()
+    capGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(capPos), 3))
+    const capMat = new THREE.ShaderMaterial({
+      uniforms: capUniforms, transparent: true, depthWrite: false,
+      vertexShader: `uniform float uProj, uCap; varying float vC; void main(){ vC = uCap;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = clamp(0.7 * uCap * uProj / max(-mv.z, 0.001), 0.0, 30.0);
+        gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `varying float vC; void main(){ if(vC < 0.02) discard;
+        vec2 uv = gl_PointCoord - 0.5; if(length(uv) > 0.5) discard;
+        gl_FragColor = vec4(0.96, 0.98, 1.0, 1.0); }`,
+    })
+    const capMesh = new THREE.Points(capGeom, capMat)
+    capMesh.frustumCulled = false
+    scene.add(capMesh)
   }
 
   // ─── Post-proceso: el "lente" (fisheye + cromática + viñeta) ──────────────
@@ -1234,6 +1254,7 @@ export function createScene(container, cfg, agentNames = []) {
   window.addEventListener('resize', resize)
 
   const tintC = new THREE.Color()
+  const _snowC = new THREE.Color()
   const _up = new THREE.Vector3(0, 1, 0)
   const _dir = new THREE.Vector3()
   const _axis = new THREE.Vector3()
@@ -1257,9 +1278,6 @@ export function createScene(container, cfg, agentNames = []) {
         (1 - k + k * L[1]) * g,
         (1 - k + k * L[2]) * g,
       )
-      if (grassMat) grassMat.color.copy(tintC)
-      if (floraMat) floraMat.color.copy(tintC)
-      if (groundMat) groundMat.color.copy(tintC)
       // Niebla muy leve: la isla debe leerse entera, no perderse en negro.
       scene.fog.density = 0.0009 + eco.fog * 0.0028
       // La neblina toma el color de la luz y se espesa con la niebla.
@@ -1270,34 +1288,37 @@ export function createScene(container, cfg, agentNames = []) {
       )
       hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.5 + eco.fog * 1.3) * (0.45 + g * 0.75)
 
-      // Sombras de nubes móviles + sol.
-      shadowUniforms.uTime.value = clock
-      const wa = clock * 0.03
-      shadowUniforms.uWind.value.set(Math.cos(wa) * 0.025, Math.sin(wa) * 0.025)
-      const cloud = Math.min(1, 0.25 + eco.fog * 1.1)
-      shadowUniforms.uCloud.value += (cloud - shadowUniforms.uCloud.value) * Math.min(1, step * 0.5)
-      shadowUniforms.uSun.value = 0.92 + (1 - cloud) * 0.32
-
-      // Nieve: si llueve y hace frío. Se acumula; con calor se derrite → agua.
-      const cold = eco.temperature <= 1
-      const snowing = cold && eco.rain > 0.2
-      const snowfall = snowing ? eco.rain : 0
-      snowCover += snowfall * 0.05 * step
-      if (eco.temperature > 1 && snowCover > 0) {
-        const melt = (eco.temperature - 1) * 0.02 * step
+      // Nieve: SOLO cuando hace mucho frío (ocasional). Se acumula; al subir la
+      // temperatura sobre 0 se derrite → deja el suelo húmedo (agua).
+      // Nieve muy ocasional: solo con frío marcado y algo de precipitación.
+      const snowing = eco.temperature <= -3 && eco.rain > 0.1
+      const snowfall = snowing ? Math.max(0.5, eco.rain) : 0
+      snowCover += snowfall * 0.09 * step
+      if (eco.temperature > 0 && snowCover > 0) {
+        const melt = (eco.temperature) * 0.03 * step
         snowCover -= melt
-        wet = Math.min(1, wet + melt * 3.5)
+        wet = Math.min(1, wet + melt * 4)
       }
       snowCover = Math.max(0, Math.min(1, snowCover))
-      wet = Math.max(0, wet - 0.02 * step) // evaporación lenta
-      shadowUniforms.uSnow.value = snowCover
-      shadowUniforms.uWet.value = wet
+      wet = Math.max(0, wet - 0.015 * step) // evaporación lenta
+
+      // El pasto se oscurece si está húmedo (multiplicar SÍ oscurece).
+      for (const m of snowMats) m.color.copy(tintC).multiplyScalar(1 - wet * 0.28)
+      // La nieve se acumula: capa blanca sobre el suelo + el pasto se entierra.
+      if (snowGroundMat) snowGroundMat.opacity = Math.min(0.95, snowCover * 1.2)
+      if (grassMat) {
+        grassMat.opacity = 1 - snowCover * 0.82
+        // Con nieve el pasto deja de escribir profundidad: así el manto blanco
+        // que queda por debajo de las hojas no se ve ocluido entre ellas.
+        grassMat.depthWrite = snowCover < 0.05
+      }
+      capUniforms.uCap.value = snowCover
 
       updateRain(step, snowing ? 0 : eco.rain)
       updateSnow(step, clock, snowfall)
 
       // Los agentes se frenan con nieve/frío.
-      moveScale = snowing ? 0.42 : (cold ? 0.72 : 1)
+      moveScale = snowing ? 0.4 : (eco.temperature <= 1 ? 0.78 : 1)
     }
 
     mapPositions(step)
