@@ -147,30 +147,10 @@ export function createScene(container, cfg, agentNames = []) {
     snowMats.push(groundMat)
     scene.add(new THREE.Mesh(geo, groundMat))
 
-    // "Matrix": la malla triangulada del suelo se hace visible como wireframe.
-    // Es lo que hace que las superficies se lean como red y que los objetos
-    // parezcan disolverse dentro de ellas (como las rocas/árboles).
-    const wfGeo = new THREE.WireframeGeometry(geo)
-    // La grilla se apaga con la máscara de isla: fuera del mapa no debe verse
-    // flotando (el suelo ya se funde a negro por su color por vértice).
-    {
-      const wp = wfGeo.attributes.position
-      const wc = new Float32Array(wp.count * 3)
-      const WF = [0.56, 0.63, 0.42]
-      for (let i = 0; i < wp.count; i++) {
-        const m = islandMask(wp.getX(i), wp.getZ(i), R)
-        const k = m * m // cae más rápido que el suelo → el borde no queda marcado
-        wc[i * 3] = WF[0] * k
-        wc[i * 3 + 1] = WF[1] * k
-        wc[i * 3 + 2] = WF[2] * k
-      }
-      wfGeo.setAttribute('color', new THREE.BufferAttribute(wc, 3))
-    }
-    const gwf = new THREE.LineSegments(
-      wfGeo,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.22, fog: true }),
-    )
-    scene.add(gwf)
+    // NB: el detalle "matrix" del suelo lo dan los PUNTOS (abajo), no una grilla
+    // de líneas — las aristas del wireframe se quitaron a pedido (se veían como
+    // líneas sobre el pasto). La fusión de elementos con la superficie viene del
+    // punteado, no del wireframe.
 
     // Punteado del suelo: nube de puntos MATE (sin brillo aditivo) sembrada
     // sobre el terreno → el detalle fino de murmur, visible sobre todo en las
@@ -852,14 +832,9 @@ export function createScene(container, cfg, agentNames = []) {
     const baseY = cy + hh * 0.05
     mesh.position.set(cx, baseY, cz)
     scene.add(mesh)
-    // Look "matrix": la malla triangulada de la roca visible (wireframe) + un
-    // punto por vértice, para que la roca se lea como red y no como bloque liso.
-    const rwf = new THREE.LineSegments(
-      new THREE.WireframeGeometry(geo),
-      new THREE.LineBasicMaterial({ color: 0x9c8b6b, transparent: true, opacity: 0.16, fog: true }),
-    )
-    rwf.position.copy(mesh.position)
-    scene.add(rwf)
+    // La roca se lee por sus PUNTOS (un punto por vértice + punteado denso), no
+    // por aristas de wireframe (se quitaron a pedido: no queremos ver líneas en
+    // las piedras, solo el punteado que las funde con el detalle).
     const rpts = new THREE.Points(geo, new THREE.PointsMaterial({
       size: 0.5, sizeAttenuation: true, vertexColors: true,
       transparent: true, opacity: 0.75, fog: true,
