@@ -236,77 +236,123 @@ export function createScene(container, cfg) {
   }
 
   // ─── ÁRBOLES SECOS: ramas curvas recursivas (líneas) ──────────────────────
-  const BARK_LO = [0.26, 0.25, 0.23]
-  const BARK_HI = [0.86, 0.85, 0.80]
+  // Los árboles son TUBOS ahusados (malla), no líneas: por eso en el original
+  // tienen silueta sólida y facetas visibles.
+  const BARK_LO = [0.13, 0.12, 0.11]
+  const BARK_HI = [0.80, 0.78, 0.71]
+  const treePos = [], treeIdx = [], treeCol = []
 
-  /**
-   * Rama con grosor: en vez de una línea, un haz de N líneas paralelas que se
-   * estrecha con la profundidad. Además curva (varios tramos) y siembra puntos
-   * de corteza. Eso le da estructura de árbol y no de brizna.
-   */
-  function branch(x, y, z, dx, dy, dz, len, depth, thick, lit) {
-    const SEGS = 4
-    let cx = x, cy = y, cz = z
-    let vx = dx, vy = dy, vz = dz
-    const t0 = depth / 5
-    const c1 = [
-      BARK_LO[0] + t0 * 0.34, BARK_LO[1] + t0 * 0.34, BARK_LO[2] + t0 * 0.32,
-    ]
-    for (let s = 0; s < SEGS; s++) {
-      // Curvar poco a poco (gravedad + deriva) → ramas orgánicas, no rectas.
-      vx += (rnd() - 0.5) * 0.16
-      vy -= 0.05 * (1 - depth / 5)
-      vz += (rnd() - 0.5) * 0.16
-      const m = Math.hypot(vx, vy, vz) || 1
-      vx /= m; vy /= m; vz /= m
-      const sl = len / SEGS
-      const ex = cx + vx * sl, ey = cy + vy * sl, ez = cz + vz * sl
-      // Haz de líneas → grosor visible.
-      const strands = Math.max(1, Math.round(thick))
-      for (let k = 0; k < strands; k++) {
-        const ox = strands === 1 ? 0 : (rnd() - 0.5) * thick * 0.075
-        const oz = strands === 1 ? 0 : (rnd() - 0.5) * thick * 0.075
-        pushLine(cx + ox, cy, cz + oz, ex + ox, ey, ez + oz, c1, BARK_HI)
-      }
-      // Puntos de corteza: pocos y apagados, solo para dar textura.
-      const dots = Math.round(thick * 0.5)
-      for (let k = 0; k < dots; k++) {
-        const f = rnd()
-        const sh = (0.30 + 0.28 * rnd()) * lit
-        pushPoint(
-          cx + (ex - cx) * f + (rnd() - 0.5) * thick * 0.07,
-          cy + (ey - cy) * f,
-          cz + (ez - cz) * f + (rnd() - 0.5) * thick * 0.07,
-          [BARK_HI[0] * sh, BARK_HI[1] * sh, BARK_HI[2] * sh],
-          0.07 + rnd() * 0.06, 0,
+  /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido. */
+  function tube(spine, r0, r1, segs, seed) {
+    const base = treePos.length / 3
+    const n = spine.length
+    const tan = new THREE.Vector3(), up = new THREE.Vector3()
+    const bx = new THREE.Vector3(), by = new THREE.Vector3()
+    for (let c = 0; c < n; c++) {
+      tan.subVectors(spine[Math.min(n - 1, c + 1)], spine[Math.max(0, c - 1)]).normalize()
+      up.set(0, 1, 0)
+      if (Math.abs(tan.y) > 0.9) up.set(1, 0, 0)
+      bx.crossVectors(tan, up).normalize()
+      by.crossVectors(tan, bx)
+      const h = c / (n - 1)
+      const g = r0 + (r1 - r0) * Math.pow(h, 0.85)
+      const p = spine[c]
+      for (let l = 0; l < segs; l++) {
+        const a = (l / segs) * 6.2832
+        const cv = Math.cos(a), sv = Math.sin(a)
+        // Radio irregular → corteza con relieve, no un cilindro liso.
+        const rad = g * (1 + (noise2(p.x * 1.4 + seed + l * 3.7, p.z * 1.4 + p.y * 0.9) - 0.5) * 0.34)
+        treePos.push(
+          p.x + (bx.x * cv + by.x * sv) * rad,
+          p.y + (bx.y * cv + by.y * sv) * rad,
+          p.z + (bx.z * cv + by.z * sv) * rad,
+        )
+        const shade = 0.18 + h * 0.5 + (noise2(p.x * 0.33 + seed, p.z * 0.33) - 0.5) * 0.5
+        const t = Math.max(0, Math.min(1, shade))
+        treeCol.push(
+          BARK_LO[0] + (BARK_HI[0] - BARK_LO[0]) * t,
+          BARK_LO[1] + (BARK_HI[1] - BARK_LO[1]) * t,
+          BARK_LO[2] + (BARK_HI[2] - BARK_LO[2]) * t,
         )
       }
-      cx = ex; cy = ey; cz = ez
     }
-    if (depth <= 0) return
-    const k = depth > 3 ? 2 : (rnd() < 0.6 ? 2 : 3)
-    for (let i = 0; i < k; i++) {
-      const nx = vx + (rnd() - 0.5) * 1.15
-      const ny = vy + (rnd() - 0.25) * 0.5
-      const nz = vz + (rnd() - 0.5) * 1.15
-      const m = Math.hypot(nx, ny, nz) || 1
-      branch(cx, cy, cz, nx / m, ny / m, nz / m,
-        len * (0.66 + rnd() * 0.16), depth - 1, thick * 0.56, lit)
+    for (let c = 0; c < n - 1; c++) {
+      for (let l = 0; l < segs; l++) {
+        const x = base + c * segs + l
+        const s2 = base + c * segs + ((l + 1) % segs)
+        const C = x + segs, w = s2 + segs
+        treeIdx.push(x, C, s2, s2, C, w)
+      }
     }
   }
 
-  for (let t = 0; t < 13; t++) {
+  /**
+   * Rama recursiva: espina de 4 tramos que se desvía al azar (con sesgo hacia
+   * arriba), envuelta en un tubo que se adelgaza. Los hijos salen del extremo
+   * o de un punto intermedio, abiertos en un cono.
+   */
+  function branch(start, dir, len, radius, depth, maxDepth, seed) {
+    const SEG = 4
+    const spine = [start.clone()]
+    const cur = start.clone()
+    const d = dir.clone()
+    for (let p = 0; p < SEG; p++) {
+      d.x += (rnd() - 0.5) * 0.55
+      d.y += (rnd() - 0.5) * 0.38 + 0.16
+      d.z += (rnd() - 0.5) * 0.55
+      d.normalize()
+      cur.addScaledVector(d, len / SEG)
+      spine.push(cur.clone())
+    }
+    const tip = depth >= maxDepth
+    const rEnd = tip ? 0.03 : radius * (0.52 + rnd() * 0.16)
+    tube(spine, radius, rEnd, radius > 0.8 ? 9 : radius > 0.35 ? 7 : 5, seed)
+    if (tip) return
+    const kids = depth === 0 ? 2 + ((rnd() * 2) | 0)
+      : (rnd() < 0.7 ? 1 : 2) + (rnd() < 0.25 ? 1 : 0)
+    const up = new THREE.Vector3()
+    for (let i = 0; i < kids; i++) {
+      const v = d.clone()
+      up.set(0, 1, 0)
+      if (Math.abs(v.y) > 0.9) up.set(1, 0, 0)
+      const bx = new THREE.Vector3().crossVectors(v, up).normalize()
+      const by = new THREE.Vector3().crossVectors(v, bx)
+      const az = rnd() * 6.2832
+      const spread = 0.35 + rnd() * 0.65
+      const w = bx.multiplyScalar(Math.cos(az)).addScaledVector(by, Math.sin(az))
+      v.multiplyScalar(Math.cos(spread)).addScaledVector(w, Math.sin(spread)).normalize()
+      const from = i === 0 ? spine[spine.length - 1]
+        : spine[1 + ((rnd() * (spine.length - 1)) | 0)]
+      branch(from.clone(), v, len * (0.6 + rnd() * 0.22),
+        rEnd * (0.85 + rnd() * 0.2), depth + 1, maxDepth, seed)
+    }
+  }
+
+  for (let t = 0; t < 11; t++) {
     const tr = R * (0.12 + 0.62 * rnd())
     const ta = rnd() * 6.2832
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.35) continue
-    const lit = Math.min(1.25, lightPool(tx, tz))
-    branch(tx, G + terrainHeight(tx, tz) - 0.4, tz, 0, 1, 0,
-      4.4 + rnd() * 2.4, 5, 5 + rnd() * 2.5, lit)
+    branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.4, tz),
+      new THREE.Vector3(0, 1, 0), 5.6 + rnd() * 2.6, 1.35 + rnd() * 0.5,
+      0, 3, rnd() * 97)
+  }
+  if (treeIdx.length) {
+    const tg = new THREE.BufferGeometry()
+    tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
+    tg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(treeCol), 3))
+    tg.setIndex(treeIdx)
+    tg.computeVertexNormals()
+    scene.add(new THREE.Mesh(tg, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide, fog: true,
+    })))
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
-  const ROCK = [0.44, 0.31, 0.27]
+  // Rocas: MALLA (esfera deformada por ruido, base aplanada) → silueta dura.
+  // Encima, puntos de musgo solo en las caras que miran hacia arriba.
+  const ROCK_LO = [0.30, 0.185, 0.15]
+  const ROCK_HI = [0.64, 0.47, 0.40]
   const rockSpots = []
   for (let i = 0; i < 14; i++) {
     const rr = R * (0.10 + 0.72 * rnd())
@@ -314,18 +360,60 @@ export function createScene(container, cfg) {
     const cx = Math.cos(ra) * rr, cz = Math.sin(ra) * rr
     if (islandMask(cx, cz, R) < 0.4) continue
     const cy = G + terrainHeight(cx, cz)
-    const size = 1.8 + rnd() * 4.2
-    const lit = Math.min(1.3, lightPool(cx, cz))
-    rockSpots.push({ x: cx, z: cz, r: size })
-    const dens = Math.round(340 + size * 160)
-    for (let k = 0; k < dens; k++) {
-      const u = rnd() * 6.2832, v = Math.acos(2 * rnd() - 1)
-      const rr2 = size * Math.cbrt(rnd())
-      const sx = cx + Math.sin(v) * Math.cos(u) * rr2
-      const sy = cy + Math.abs(Math.cos(v)) * rr2 * 0.55
-      const sz = cz + Math.sin(v) * Math.sin(u) * rr2
-      const sh = (0.68 + 0.5 * rnd()) * lit
-      pushPoint(sx, sy, sz, [ROCK[0] * sh, ROCK[1] * sh, ROCK[2] * sh], 0.26 + rnd() * 0.26, 0)
+    const radX = 1.6 + rnd() * 3.4
+    const hh = radX * (0.5 + rnd() * 0.35)
+    const radZ = radX * (0.68 + rnd() * 0.62)
+    const seed = rnd() * 97
+    const rot = rnd() * 6.2832
+    const cr = Math.cos(rot), sr = Math.sin(rot)
+
+    const geo = new THREE.SphereGeometry(1, 16, 12)
+    const pos = geo.attributes.position
+    const cols = new Float32Array(pos.count * 3)
+    for (let d = 0; d < pos.count; d++) {
+      const fx = pos.getX(d), fy = pos.getY(d), fz = pos.getZ(d)
+      const lump = 1
+        + (fbm(fx * 2.1 + fy * 1.6 + seed, fz * 2.1 - fy * 1.3 + seed * 0.6, 3) - 0.5) * 0.62
+        + (noise2(fx * 0.8 + seed, fz * 0.8 + fy * 0.7) - 0.5) * 0.46
+      let gx = fx * lump * radX
+      let gy = fy * lump * hh
+      const gz = fz * lump * radZ
+      // Aplanar la base para que se asiente en el suelo.
+      if (gy < -hh * 0.14) gy = -hh * 0.14 + (gy + hh * 0.14) * 0.22
+      pos.setXYZ(d, gx * cr - gz * sr, gy, gx * sr + gz * cr)
+    }
+    geo.computeVertexNormals()
+    const nrm = geo.attributes.normal
+    for (let d = 0; d < pos.count; d++) {
+      const py = pos.getY(d)
+      const up = nrm.getY(d) * 0.5 + 0.5
+      const t = Math.max(0, Math.min(1,
+        0.2 + ((py / hh + 1) / 2) * 0.52 + up * 0.22
+        + (fbm(pos.getX(d) * 0.33 + seed, pos.getZ(d) * 0.33, 3) - 0.5) * 0.55))
+      cols[d * 3] = ROCK_LO[0] + (ROCK_HI[0] - ROCK_LO[0]) * t
+      cols[d * 3 + 1] = ROCK_LO[1] + (ROCK_HI[1] - ROCK_LO[1]) * t
+      cols[d * 3 + 2] = ROCK_LO[2] + (ROCK_HI[2] - ROCK_LO[2]) * t
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.DoubleSide, fog: true,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+    }))
+    const baseY = cy + hh * 0.05
+    mesh.position.set(cx, baseY, cz)
+    scene.add(mesh)
+    rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
+
+    // Musgo: puntos solo donde la normal mira hacia arriba.
+    for (let k = 0, guard = 0; k < 420 && guard++ < 3800; ) {
+      const d = (rnd() * pos.count) | 0
+      const ny = nrm.getY(d)
+      if (ny < 0.12) continue
+      if (rnd() > 0.42 + ny * 0.4) continue
+      const sh = 0.55 + 0.45 * rnd()
+      pushPoint(cx + pos.getX(d), baseY + pos.getY(d) + 0.1, cz + pos.getZ(d),
+        [0.30 * sh, 0.42 * sh, 0.16 * sh], 0.13 + rnd() * 0.12, 0)
+      k++
     }
   }
 
@@ -442,9 +530,10 @@ export function createScene(container, cfg) {
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         float vd = max(-mv.z, 0.001);
         float coc = abs(vd - uFocus);           // DOF falso: crece al desenfocar
-        float worldR = hsize + uAperture * coc * 0.06;
+        float worldR = hsize + uAperture * coc * 0.02;
         gl_PointSize = clamp(worldR * uProj / vd, 1.0, 64.0);
-        vSoft = clamp(coc / (uFocus * 0.7), 0.0, 1.0);
+        // Difuminado contenido: las flores deben leerse como discos nítidos.
+        vSoft = clamp(coc / (uFocus * 1.6), 0.0, 0.45);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
@@ -454,7 +543,7 @@ export function createScene(container, cfg) {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv) * 2.0;
         if (d > 1.0) discard;
-        float edge = mix(0.10, 0.85, vSoft);    // borde blando si está fuera de foco
+        float edge = mix(0.06, 0.40, vSoft);    // borde casi duro; se ablanda poco
         float a = 1.0 - smoothstep(1.0 - edge, 1.0, d);
         gl_FragColor = vec4(vC, a);
       }`,

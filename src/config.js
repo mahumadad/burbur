@@ -79,6 +79,6 @@ export const CONFIG = {
     // Estelas
     trailLen: 34,
     trailSize: 3.4,
-    agentLineWidth: 2.6,  // grosor de las jaulas (px)
+    agentLineWidth: 1.7,  // grosor de las jaulas (px)
   },
 }
