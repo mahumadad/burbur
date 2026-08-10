@@ -494,11 +494,12 @@ export function createScene(container, cfg, agentNames = []) {
     if (islandMask(px, pz, R) < 0.25) continue
     poiFlowers.push({ x: px / R, z: pz / R })
     const k = 10 + ((rnd() * 14) | 0)
-    const spread = 2.5 + rnd() * 3.5
+    // Racimos apretados (focales) que dejan pasto vacío entre parche y parche.
+    const spread = 1.5 + rnd() * 2.0
     const palette = patchPalette()
     for (let i = 0; i < k; i++) {
       const b = rnd() * 6.2832
-      const d = spread * Math.sqrt(rnd()) * (1 + rnd() * 0.6)
+      const d = spread * Math.sqrt(rnd()) * (0.8 + rnd() * 0.4)
       const fx = px + Math.cos(b) * d, fz = pz + Math.sin(b) * d
       if (islandMask(fx, fz, R) < 0.1) continue
       flower(fx, G + terrainHeight(fx, fz), fz, 0.6 + rnd() * 0.75,
