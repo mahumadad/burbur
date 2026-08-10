@@ -587,22 +587,27 @@ Lo que **sigue dentro de `scene.js`** y la célula también necesita:
 | `trails` | Estelas | Estelas de organelos sobre los rieles |
 | `weather`, `haze` | Lluvia/nieve, neblina aditiva | Partículas del medio, ROS, densidad del medio |
 
-**Firmas propuestas por la sesión de ciudad** (aún no confirmadas; se cierran al entrar su Fase A):
-`engine/points.js` → `createDraw(rc)` con `pushPoint`/`pushLine`/`pointMaterial`/`finalize*`;
-`engine/agents3d.js` → `createAgentKit(rc)` con `fatLine`/`edgesOf`/`ringLoop`/`creature`/`wedge` y
-`updateAgentMotion(...)`; `engine/trails.js` → `createTrails(...)`; `engine/weather.js`;
-`engine/haze.js` → `createHaze(scene, {R, G, count, color, alpha, heightFn})`.
+**Firmas CERRADAS con la sesión de ciudad (2026-08-11).** Las implementa y mantiene esa sesión;
+**esta rama no edita `engine/*`, solo lo consume** (un único dueño por archivo).
 
-**Pedido abierto de esta rama (2026-08-11):** `points.js` tal como se propone es solo *build-time*
-— acumula en arrays y sube un buffer estático una vez. La membrana y el citoesqueleto de la célula
-**se redibujan cada frame**, así que hace falta además un camino dinámico:
-`createLineBuffer(maxSegments, material)` y `createPointCloud(count, material)` con `commit()`.
-No es especulativo: hoy `scene.js` ya tiene dos copias hechas a mano de eso (las estelas y los
-bichitos). Si la Fase A cierra sin ello, esta rama lo escribe aparte contra el material extraído.
-Pedidos menores: que `updateAgentMotion` siga leyendo flags del agente (`rollMul`/`glide`/`spinY`)
-y no nombres de especie del bosque; que ningún módulo de `engine/*` asuma contención circular
-(en célula el límite es `radiusAt`/`containsPoint` de `membrane.js`); y que **`weather.js` NO se
-generalice** para la célula — no lo va a usar.
+| Módulo | API | Uso en la célula |
+|---|---|---|
+| `engine/points.js` | `createDraw(rc)` → `pushPoint`/`pushLine`/`pointMaterial`/`uniforms`/`finalize*` | Contenido **estático**: ribosomas, sustrato |
+| " | `createPointCloud(count, material)` → `{ mesh, pos, col, size, phase, commit() }` | Contenido **dinámico**: cuantos de ATP |
+| " | `createLineBuffer(maxSegments, material)` → `{ mesh, begin(), push(...), commit() }` | **Membrana y citoesqueleto**, que se reescriben cada frame |
+| `engine/agents3d.js` | `createAgentKit(rc)` → `fatLine`/`edgesOf`/`ringLoop`/`creature`/`wedge`/`setResolution(w,h)`; `updateAgentMotion(...)` | Geometría de organelo compuesta con los primitivos; movimiento flag-driven (`glide`/`rollMul`/`spinY`) |
+| `engine/trails.js` | `createTrails(scene, n, agentColors, rc, pointMaterial)` | Estelas de organelo |
+| `engine/haze.js` | `createHaze(scene, {R, G, count, color, alpha, heightFn})` | Densidad del medio |
+| `engine/weather.js` | *(forest-shaped, sin generalizar)* | **No se usa.** Las partículas del medio y los ROS barren en XZ, no caen en Y: módulo propio |
+
+Dos precisiones que valen para no planificar sobre supuestos falsos:
+
+- `createLineBuffer` produce `THREE.LineSegments` **planas**, no líneas gruesas (`LineSegments2`
+  usa otra geometría). Es lo correcto: membrana y citoesqueleto son del registro *orgánico* del
+  lenguaje visual, igual que el terreno y la flora del bosque. Las líneas gruesas quedan para el
+  registro *esquemático* — las jaulas de organelo — vía `fatLine` del `agentKit`.
+- Ningún módulo de `engine/*` asume contención circular: `R` solo escala velocidad, nunca recorta.
+  En célula el límite lo manda `radiusAt`/`containsPoint` de `membrane.js`.
 
 **Esa descomposición hacia `engine/*` la lidera la sesión de CIUDAD.** La consecuencia práctica
 para la célula es de coordinación, no de trabajo: **diseñar asumiendo que esos módulos existirán y
