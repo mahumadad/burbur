@@ -3,6 +3,7 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { createStage } from './stage.js'
+import { createHaze } from './engine/haze.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -986,50 +987,10 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
-  const hazeUniforms = {
-    uProj: { value: 1000 },
-    uColor: { value: new THREE.Vector3(...rc.hazeColor) },
-    uAlpha: { value: rc.hazeAlpha },
-  }
-  {
-    const pos = [], siz = []
-    for (let i = 0; i < rc.hazeCount; i++) {
-      const a = rnd() * 6.2832
-      // Contenida dentro de la isla: fuera de ella el fondo queda negro puro.
-      const rr = Math.sqrt(rnd()) * R * 0.92
-      const x = Math.cos(a) * rr, z = Math.sin(a) * rr
-      pos.push(x, G + terrainHeight(x, z) + 0.3 + rnd() * 9, z)
-      siz.push(2.4 + rnd() * 5.2)
-    }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
-    geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(siz), 1))
-    const mat = new THREE.ShaderMaterial({
-      uniforms: hazeUniforms,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-      vertexShader: `
-        attribute float hsize; uniform float uProj;
-        void main() {
-          vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(hsize * uProj / max(-mv.z, 0.001), 1.0, 96.0);
-          gl_Position = projectionMatrix * mv;
-        }`,
-      fragmentShader: `
-        precision mediump float;
-        uniform vec3 uColor; uniform float uAlpha;
-        void main() {
-          vec2 uv = gl_PointCoord - 0.5; float d2 = dot(uv, uv);
-          if (d2 > 0.25) discard;
-          float a = 1.0 - sqrt(d2) * 2.0; a = a * a * uAlpha;
-          gl_FragColor = vec4(uColor, 1.0) * a;
-        }`,
-    })
-    const h = new THREE.Points(geo, mat)
-    h.frustumCulled = false
-    scene.add(h)
-  }
+  const hazeUniforms = createHaze(scene, {
+    R, G, count: rc.hazeCount, color: rc.hazeColor, alpha: rc.hazeAlpha,
+    heightFn: terrainHeight,
+  }).uniforms
 
   // ─── AGENTES: jaula de aristas + criatura molecular + tallo ───────────────
   // Un color por especie: la estela hereda el color de su individuo.
