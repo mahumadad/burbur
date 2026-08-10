@@ -52,9 +52,10 @@ function islandMask(x, z, R) {
 function lightPool(x, z) {
   const a = fbm(x * 0.026 + 11, z * 0.026 + 29, 2)
   const b = noise2(x * 0.011 + 61, z * 0.011 + 7)
+  // `a` viene del fbm sin normalizar (media ≈ 0.44), por eso los coeficientes.
   const v = a * 0.62 + b * 0.38
   // Rango amplio: zonas casi en sombra y pozos claramente iluminados.
-  return 0.34 + 1.75 * Math.pow(Math.max(0, v), 2.0)
+  return 0.38 + 2.05 * Math.pow(Math.max(0, v), 1.85)
 }
 
 // Gradiente del pasto: de verde casi negro (zona pelada) a verde-amarillo (zona
