@@ -1,7 +1,8 @@
 import { createScene } from '../render/scene.js'
+import { createPond } from '../render/pond.js'
 import { createStubWorld } from './stub.js'
 import { createCellScene } from './cell.js'
-import { FOREST_CENSUS, CELL_CENSUS } from '../sim/agents.js'
+import { FOREST_CENSUS, POND_CENSUS, CELL_CENSUS } from '../sim/agents.js'
 import { CELL_LEXICON } from '../sim/narrator.js'
 import { FOREST_PROFILE, CELL_PROFILE } from '../sim/ecosystem.js'
 
@@ -18,9 +19,9 @@ export const WORLDS = [
     build: (container, cfg, names) => createScene(container, cfg, names),
   },
   {
-    id: 'water', label: 'Pond ecosystem', accent: '#aacdff', ready: false,
-    census: FOREST_CENSUS, ecosystem: FOREST_PROFILE,
-    build: (container, cfg) => createStubWorld(container, cfg, { accent: '#aacdff', label: 'Pond' }),
+    id: 'water', label: 'Pond ecosystem', accent: '#aacdff', ready: true,
+    census: POND_CENSUS, ecosystem: FOREST_PROFILE,
+    build: (container, cfg, names) => createPond(container, cfg, names),
   },
   {
     id: 'city', label: 'Block ecosystem', accent: '#fab75e', ready: false,
