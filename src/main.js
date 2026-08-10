@@ -77,17 +77,17 @@ async function start() {
       for (const ev of evs) {
         eventLog.push(ev, label)
         // Cada tipo de agente tiene su voz; el ambiente usa un acento suave.
-        if (ev.agentType) audio.fauna(ev.agentType, ev.dir)
+        if (ev.agentType) audio.fauna(ev.agentType, ev.dir, ev.agent)
         else if (ev.dir && ev.type === 'sound') audio.accent(ev.dir, ev.log.length)
       }
     }
 
-    // Tormenta: relámpagos y truenos cuando llueve fuerte.
-    if (eco.rain > 0.55) {
+    // Tormenta: relámpagos y truenos cuando llueve (más con lluvia fuerte).
+    if (eco.rain > 0.3) {
       lightningCooldown -= dt
-      if (lightningCooldown <= 0 && Math.random() < 0.5 * dt * eco.rain) {
-        lightningCooldown = 3 + Math.random() * 6
-        const strength = 0.6 + eco.rain * 0.4
+      if (lightningCooldown <= 0 && Math.random() < 1.1 * dt * eco.rain) {
+        lightningCooldown = 2.5 + Math.random() * 5
+        const strength = 0.55 + eco.rain * 0.45
         scene.flash(0.7 * strength)
         // El trueno llega tras el destello (según "distancia").
         const delay = 300 + Math.random() * 1600
@@ -102,7 +102,10 @@ async function start() {
       if (Math.random() < 0.25 + eco.activity * 0.75) audio.triggerFlash(fl.y, fl.intensity)
     }
     const env = ambient.update(dt)
-    audio.setWind(Math.max(env.wind, eco.rain * 0.85))
+    audio.setWind(Math.max(env.wind, eco.rain * 0.4))
+    // Lluvia: siseo por intensidad + goteo a un ritmo proporcional.
+    audio.setRain(eco.rain)
+    if (eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
     if (env.cricket && Math.random() < eco.activity) audio.cricket()
     if (env.owl) audio.owl()
     const predations = scene.update(swarm, dt, eco)
