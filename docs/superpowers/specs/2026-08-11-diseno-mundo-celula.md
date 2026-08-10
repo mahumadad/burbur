@@ -550,7 +550,7 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
 | `src/sim/wander.js` | Streaming citoplasmático (el campo de flujo **ya es** ciclosis) + move/rest + separación + atracción a rieles. Solo cambia el config |
 | `src/sim/fireflies.js` | El swarm Kuramoto pasa a ser el pool de ATP (§2.4) |
 | `src/sim/behaviors.js` | `createBugs`/`updateBugs` (ir de POI en POI, huir de cazadores) sirve casi tal cual para los motores caminando entre nodos del citoesqueleto |
-| `src/sim/paths.js` | Rieles: bucles → radiales desde el centrosoma |
+| `src/sim/paths.js` | ~~Rieles~~ **No se reutiliza**: genera bucles cerrados con ruido, y los microtúbulos son segmentos radiales con inestabilidad dinámica. Forzarlo habría sido contorsión. En su lugar hay módulo propio, `src/sim/rails.js` — pero su `nearestOnRails` respeta **exactamente** el contrato `{x, z, d2}` de `nearestOnPaths`, así que `updateRoamers` lo consume sin cambios |
 | `src/sim/events.js` | El motor de eventos es agnóstico del contenido: solo cambian censo y léxico |
 | `src/sim/agents.js` | `createCensus` sirve sin cambios; solo se añade `CELL_CENSUS` |
 | `src/render/noise.js` | Ruido para el sustrato y la forma de la membrana |
@@ -566,6 +566,9 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
    filopodios, blebs, retracción y redondeo mitótico. Sin Three.js — como el resto de `src/sim/`.
 3. **`src/sim/motility.js`** — puro: polarización, quimiotaxis (paseo sesgado), ciclo
    adhesión→tracción→retracción, velocidad bifásica.
+3b. **`src/sim/rails.js`** — puro: microtúbulos radiales desde el centrosoma con inestabilidad
+   dinámica (crecen lento, colapsan rápido, se rescatan) y `nearestOnRails` compatible con
+   `wander.js`. ✅ implementado, 9 tests.
 4. **`CELL_CENSUS`** en `src/sim/agents.js` y el **léxico de célula** para el narrador.
 5. **Perfil de ecosistema** de la célula (12 fases del ciclo + 6 estados de medio).
 
