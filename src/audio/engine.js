@@ -6,12 +6,41 @@ import { flashToFreq } from './scale.js'
 export async function createAudio(cfg) {
   const limiter = new Tone.Limiter(cfg.audio.masterLimitDb).toDestination()
 
-  // Drone grave: dos osciladores desafinados + reverb.
-  const droneReverb = new Tone.Reverb({ decay: 8, wet: 0.6 }).connect(limiter)
-  const droneGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.drone)).connect(droneReverb)
-  const oscA = new Tone.Oscillator(cfg.audio.droneRootHz, 'sine').start()
-  const oscB = new Tone.Oscillator(cfg.audio.droneRootHz * 1.005, 'triangle').start()
-  oscA.connect(droneGain); oscB.connect(droneGain)
+  // ─── Drone psicodélico ambiental (chill) ──────────────────────────────────
+  // murmur usa mp3 pre-renderizados por hora; nosotros lo SINTETIZAMOS (más vivo).
+  // Cadena: voces graves detuned → filtro con LFO lento (respira) → autopan lento
+  //         → reverb largo + delay con feedback → limiter.
+  const droneReverb = new Tone.Reverb({ decay: 14, wet: 0.72 }).connect(limiter)
+  const droneDelay = new Tone.FeedbackDelay({ delayTime: 0.75, feedback: 0.48, wet: 0.32 }).connect(limiter)
+  const droneAutoPan = new Tone.AutoPanner({ frequency: 0.03, depth: 0.55 }).start()
+  droneAutoPan.connect(droneReverb); droneAutoPan.connect(droneDelay)
+  const droneFilter = new Tone.Filter(420, 'lowpass').connect(droneAutoPan)
+  droneFilter.Q.value = 1.3
+  // LFO muy lento sobre el corte → el drone "respira".
+  const droneLFO = new Tone.LFO({ frequency: 0.05, min: 170, max: 820 }).start()
+  droneLFO.connect(droneFilter.frequency)
+  const droneGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.drone)).connect(droneFilter)
+
+  // Voces: sub (una octava abajo, "muy profundo") + fundamental + quinta, con
+  // FatOscillator para el grosor psicodélico sin volverse áspero.
+  const droneRoot = cfg.audio.droneRootHz
+  const droneVoices = [
+    new Tone.FatOscillator(droneRoot / 2, 'sine', 8),
+    new Tone.FatOscillator(droneRoot, 'triangle', 12),
+    new Tone.FatOscillator(droneRoot * 1.5, 'sine', 16),
+  ]
+  for (const v of droneVoices) { v.count = 3; v.start(); v.connect(droneGain) }
+
+  // Evolución armónica lenta: cada ~22s mueve las notas por una pentatónica
+  // menor con rampas largas → pad flotante, sin resolución tonal (chill).
+  const PENT = [1, 1.2, 1.3333, 1.5, 1.8]
+  const droneEvolve = setInterval(() => {
+    const a = PENT[(Math.random() * PENT.length) | 0]
+    const fifth = PENT[3 + ((Math.random() * 2) | 0)] // 1.5 o 1.8
+    droneVoices[0].frequency.rampTo(droneRoot * a / 2, 9)
+    droneVoices[1].frequency.rampTo(droneRoot * a, 9)
+    droneVoices[2].frequency.rampTo(droneRoot * a * fifth, 9)
+  }, 22000)
 
   // Cama: ruido rosado → filtro (modulado por viento).
   const bedGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.bed)).connect(limiter)
@@ -107,10 +136,21 @@ export async function createAudio(cfg) {
     hootEnv.triggerAttackRelease(dur, t)
   }
 
-  // Graznido áspero (corvidos): ruido pasabanda + tono grave.
-  const cawBP = new Tone.Filter(1200, 'bandpass').connect(faunaPan); cawBP.Q.value = 2.2
-  const cawEnv = new Tone.AmplitudeEnvelope({ attack: 0.006, decay: 0.14, sustain: 0, release: 0.05 }).connect(cawBP)
+  // Graznido áspero (cuervos/córvidos): ruido pasabanda con barrido DESCENDENTE
+  // (la inflexión típica del "craa") + un tono grave rasposo que le da cuerpo.
+  const cawBP = new Tone.Filter(1400, 'bandpass').connect(faunaPan); cawBP.Q.value = 3.2
+  const cawEnv = new Tone.AmplitudeEnvelope({ attack: 0.006, decay: 0.16, sustain: 0, release: 0.06 }).connect(cawBP)
   const cawNoise = new Tone.Noise('pink').start(); cawNoise.connect(cawEnv)
+  const cawToneEnv = new Tone.AmplitudeEnvelope({ attack: 0.006, decay: 0.16, sustain: 0, release: 0.06 }).connect(new Tone.Gain(0.5).connect(faunaPan))
+  const cawTone = new Tone.Oscillator(320, 'sawtooth').start(); cawTone.connect(cawToneEnv)
+  function caw(t, dur = 0.16) {
+    cawBP.frequency.setValueAtTime(1700, t)
+    cawBP.frequency.linearRampToValueAtTime(780, t + dur)
+    cawTone.frequency.setValueAtTime(330, t)
+    cawTone.frequency.linearRampToValueAtTime(210, t + dur)
+    cawEnv.triggerAttackRelease(dur, t)
+    cawToneEnv.triggerAttackRelease(dur, t)
+  }
 
   // Golpe/pisada (animal que camina) + crujido de hojas.
   const thud = new Tone.MembraneSynth({ pitchDecay: 0.04, octaves: 4, envelope: { attack: 0.001, decay: 0.2, sustain: 0 } }).connect(faunaPan)
@@ -130,7 +170,7 @@ export async function createAudio(cfg) {
     const n = name.toLowerCase()
     if (type === 'flying_animal') {
       if (/owl|nightjar/.test(n)) { hoot(260 + rand() * 60, 0.35, t); hoot(240, 0.4, t + 0.5) }
-      else if (/crow|jay|magpie|rook/.test(n)) { cawEnv.triggerAttackRelease(0.14, t); if (rand() < 0.6) cawEnv.triggerAttackRelease(0.12, t + 0.22) }
+      else if (/crow|jay|magpie|rook|raven/.test(n)) { const reps = 1 + ((rand() * 3) | 0); for (let k = 0; k <= reps; k++) caw(t + k * (0.22 + rand() * 0.1), 0.14 + rand() * 0.06) }
       else if (/dove|cuckoo|pigeon/.test(n)) { chirp(520, 470, 0.18, t); chirp(430, 410, 0.22, t + 0.26) }
       else { // canto: trino de 2–4 chirridos ascendentes
         const reps = 2 + ((rand() * 3) | 0)
@@ -202,9 +242,15 @@ export async function createAudio(cfg) {
   function setFlashVol(db) { flashGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setDroneVol(db) { droneGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setBedVol(db) { bedGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
+  // El drone "respira" más rápido y se pone más resonante con la tensión del mundo.
+  function setMood(tension) {
+    const t = Math.max(0, Math.min(1, tension || 0))
+    droneLFO.frequency.rampTo(0.035 + t * 0.11, 3)
+    droneFilter.Q.rampTo(1.1 + t * 1.7, 3)
+  }
 
   return {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
-    setRain, drip, setFlashVol, setDroneVol, setBedVol,
+    setRain, drip, setFlashVol, setDroneVol, setBedVol, setMood,
   }
 }
