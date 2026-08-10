@@ -30,17 +30,30 @@ para el núcleo puro. Vite dev/build.
 
 - **Fase 0 (Tareas 1–2): SIN bloqueo.** Núcleo puro (peces, censo, config). Ejecutable ya en
   `feat/world-pond`.
-- **Engine — estado real (rebasado, main @ 93eae1c):**
-  - ✅ **`src/render/stage.js` YA está en main** (`createStage(container, cfg)` → `{ scene, camera,
-    renderer, controls, composer, labelEl, metrics, flash, resize, setResizeHook, render, dispose }`).
-    Capa rig+postfx compartida. `render/pond.js` la usa directamente (Task 3).
-  - ⛔ **Aún en `scene.js` (NO extraído):** `points/draw` (pointMat + pushPoint/pushLine), `agents3d`
-    (geometrías + updateAgentMotion), `trails`, `weather` (rain/snow/caps), `haze` (+ niebla 4200 de
-    agua). La descomposición fina `engine/*` la **lidera CIUDAD** — coordinar firmas con esa sesión.
-- **Gate de contenido:** las Tareas 4–8 dependen de esas primitivas. Opciones cuando toque: (a)
-  esperar el `engine/*` de CIUDAD (preferido por la coordinación acordada), o (b) copiar las
-  primitivas desde `scene.js` a pond (duplicación que CIUDAD reconciliará — solo con OK del usuario).
-  **Re-planificar en detalle 4–8** contra la API real cuando el `engine/*` aterrice.
+- **Engine — estado real:**
+  - ✅ **`src/render/stage.js` en main** (`createStage(container, cfg)` → `{ scene, camera, renderer,
+    controls, composer, labelEl, metrics, flash, resize, setResizeHook, render, dispose }`). Task 3
+    (esqueleto de pond) ya construido y verificado sobre esto.
+  - ✅ **Fase A `src/render/engine/*` COMPLETA y verificada por CIUDAD** en `feat/world-city`
+    (refactor puro, bosque idéntico, 27 tests). **Falta que el usuario la mergee a main.** Firmas
+    FINALES (confirmadas):
+    - `points.js`: `createDraw(rc)` → `{ pushPoint(x,y,z,col,size,phase), pushLine(x1,y1,z1,x2,y2,z2,c1,c2),
+      pointMaterial, uniforms, finalizePoints(scene), finalizeLines(scene, material) }`;
+      `uniforms = { uProj, uT, uFocus, uAperture }`. Buffers dinámicos:
+      `createPointCloud(count, material)` → `{ mesh, pos, col, size, phase, commit() }`,
+      `createLineBuffer(maxSegments, material)` → `{ mesh, begin(), push(...), commit() }`
+      **(usar `createLineBuffer` para el render de peces).**
+    - `agents3d.js`: `createAgentKit(rc)` → `{ fatLine, edgesOf, ringLoop, creature, wedge, pick,
+      fatMaterials, setResolution(w,h) }`; `updateAgentMotion(...)` export aparte (pond NO lo llama).
+    - `trails.js`: `createTrails(scene, n, agentColors, rc, pointMaterial)` → `{ update(worldPos) }`.
+    - `haze.js`: `createHaze(scene, { R, G, count, color, alpha, heightFn })` → `{ uniforms }`
+      (pond pasa `R≈82` = mt*1.28, azul).
+    - `weather.js`: `createRain(scene, R, G)` → `{ mesh, update(dt, intensity) }`;
+      **`createSnow(scene, R, G, uProjUniform)`** → `{ mesh, update(dt, clockT, intensity) }`
+      (pasar `draw.uniforms.uProj`); `createSnowCaps(scene, capPos, uProjUniform)` → `{ setCover(v) }`.
+- **Gate de contenido:** Tareas 4–8 dependen de que la Fase A esté en **main**. Cuando el usuario la
+  mergee: `git rebase main` (main avanzó a `c0a7b51`, incluye tree-growth que toca scene.js — sin
+  conflicto esperado para archivos de pond) y ejecutar 4–8 contra las firmas de arriba.
 - **Tests:** correr `npx vitest run --exclude '**/.claude/**'` (sin el flag, vitest recorre los
   worktrees hermanos y cuenta de más).
 
