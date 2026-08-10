@@ -30,6 +30,12 @@ export const CONFIG = {
     drag: 0.965,
     maxSpeed: 0.075,
     bound: 0.80,         // radio normalizado de contención
+    // Campo de flujo: corrientes coherentes que varían lento.
+    flowFreq: 5.1,
+    flowPush: 0.030,
+    // Atracción a caminos. 0 = ignorarlos; alto = encauzar (calles de ciudad).
+    pathPull: 0.055,     // bosque: los caminos son sendas preferidas, no rieles
+    pathRadius: 0.14,
   },
   fireflies: {
     count: 18,           // agentes visibles (murmur usa 15)
@@ -45,7 +51,6 @@ export const CONFIG = {
     minRadius: 0.34,
     maxRadius: 0.72,
     samples: 46,
-    followerRatio: 0.33,  // 1/3 usa senderos; el resto deambula libre
   },
   ecosystem: {
     dayLengthSec: 540,   // día completo en 9 min → 45 s por fase

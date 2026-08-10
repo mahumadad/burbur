@@ -8,7 +8,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
-import { createPaths, createWalkers, updateWalkers } from '../sim/paths.js'
+import { createPaths, nearestOnPaths } from '../sim/paths.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
@@ -786,19 +786,18 @@ export function createScene(container, cfg) {
   let tHead = 0, tFrame = 0
 
   // ─── Mapeo simulación → mundo ─────────────────────────────────────────────
-  // Movimiento mixto: la mayoría deambula libre (como el original); unos pocos
-  // recorren senderos, para que el mundo tenga rutas marcadas además de deriva.
-  const pathCount = Math.round(n * cfg.paths.followerRatio)
-  const walkers = createWalkers(paths, pathCount, rnd)
-  const roamers = createRoamers(cfg.wander, n - pathCount, rnd)
+  // TODOS deambulan libremente. Los caminos existen y los atraen, pero no los
+  // encadenan: subiendo `pathPull` el mismo core sirve para calles de ciudad.
+  const roamers = createRoamers(cfg.wander, n, rnd)
   const worldPos = new Float32Array(n * 3)
   const heads = new Float32Array(n * 2)
+  let simTime = 0
 
   function mapPositions(dt) {
-    updateWalkers(walkers, paths, dt)
-    updateRoamers(roamers, cfg.wander, dt, rnd)
+    simTime += dt
+    updateRoamers(roamers, cfg.wander, dt, rnd, simTime, paths, nearestOnPaths)
     for (let i = 0; i < n; i++) {
-      const src = i < pathCount ? walkers[i] : roamers[i - pathCount]
+      const src = roamers[i]
       const x = src.x * R, z = src.z * R
       worldPos[i * 3] = x
       worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1
