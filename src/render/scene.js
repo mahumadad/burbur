@@ -3,6 +3,7 @@ import { createStage } from './stage.js'
 import { createHaze } from './engine/haze.js'
 import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
 import { createAgentKit, updateAgentMotion } from './engine/agents3d.js'
+import { createDraw } from './engine/points.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -102,23 +103,8 @@ export function createScene(container, cfg, agentNames = []) {
   const _proj = new THREE.Vector3()
 
   // ─── Acumuladores: un solo buffer de líneas y uno de puntos ────────────────
-  const linePos = []
-  const lineCol = []
-  const ptPos = []
-  const ptCol = []
-  const ptSize = []
-  const ptPhase = []
-
-  function pushLine(x1, y1, z1, x2, y2, z2, c1, c2) {
-    linePos.push(x1, y1, z1, x2, y2, z2)
-    lineCol.push(c1[0], c1[1], c1[2], c2[0], c2[1], c2[2])
-  }
-  function pushPoint(x, y, z, col, size, phase) {
-    ptPos.push(x, y, z)
-    ptCol.push(col[0], col[1], col[2])
-    ptSize.push(size)
-    ptPhase.push(phase || 0)
-  }
+  const draw = createDraw(rc)
+  const { pushPoint, pushLine, pointMaterial, uniforms: pointUniforms } = draw
 
   // ─── SUELO: malla que rellena los huecos entre hojas ──────────────────────
   // Sin ella se ve el negro a través del pasto y el claro pierde luminosidad.
@@ -920,70 +906,12 @@ export function createScene(container, cfg, agentNames = []) {
 
   // ─── Subir buffers ────────────────────────────────────────────────────────
   {
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePos), 3))
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lineCol), 3))
     floraMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
     snowMats.push(floraMat)
-    scene.add(new THREE.LineSegments(geo, floraMat))
+    draw.finalizeLines(scene, floraMat)
   }
 
-  // Shader de puntos: tamaño en unidades de MUNDO + balanceo + DOF falso.
-  const pointUniforms = {
-    uProj: { value: 1000 },
-    uT: { value: 0 },
-    uFocus: { value: rc.dofFocus },
-    uAperture: { value: rc.dofAperture },
-  }
-  const pointMat = new THREE.ShaderMaterial({
-    uniforms: pointUniforms,
-    transparent: true,
-    depthWrite: false,
-    vertexShader: `
-      attribute vec3 hcol; attribute float hsize; attribute float hphs;
-      uniform float uProj, uT, uFocus, uAperture;
-      varying vec3 vC; varying float vSoft;
-      void main() {
-        vC = hcol;
-        vec3 p = position;
-        if (hphs > 0.0) {                       // balanceo de vegetación
-          float ph = hphs * 6.2831;
-          p.x += sin(uT * 0.7 + ph) * 0.42;
-          p.z += cos(uT * 0.6 + ph * 1.7) * 0.42;
-          p.y += sin(uT * 1.1 + ph * 2.3) * 0.16;
-          vC *= 0.92 + 0.12 * sin(uT * 2.0 + ph * 5.0);
-        }
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        float vd = max(-mv.z, 0.001);
-        float coc = abs(vd - uFocus);           // DOF falso: crece al desenfocar
-        float worldR = hsize + uAperture * coc * 0.02;
-        gl_PointSize = clamp(worldR * uProj / vd, 1.0, 64.0);
-        // Difuminado contenido: las flores deben leerse como discos nítidos.
-        vSoft = clamp(coc / (uFocus * 1.6), 0.0, 0.45);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vC; varying float vSoft;
-      void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        float d = length(uv) * 2.0;
-        if (d > 1.0) discard;
-        float edge = mix(0.06, 0.40, vSoft);    // borde casi duro; se ablanda poco
-        float a = 1.0 - smoothstep(1.0 - edge, 1.0, d);
-        gl_FragColor = vec4(vC, a);
-      }`,
-  })
-  {
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ptPos), 3))
-    geo.setAttribute('hcol', new THREE.BufferAttribute(new Float32Array(ptCol), 3))
-    geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(ptSize), 1))
-    geo.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(ptPhase), 1))
-    const pts = new THREE.Points(geo, pointMat)
-    pts.frustumCulled = false
-    scene.add(pts)
-  }
+  draw.finalizePoints(scene)
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
   const hazeUniforms = createHaze(scene, {
@@ -1087,7 +1015,7 @@ export function createScene(container, cfg, agentNames = []) {
   trailGeom.setAttribute('hcol', new THREE.BufferAttribute(tCol, 3))
   trailGeom.setAttribute('hsize', new THREE.BufferAttribute(tSize, 1))
   trailGeom.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(n * TRAIL), 1))
-  const trail = new THREE.Points(trailGeom, pointMat)
+  const trail = new THREE.Points(trailGeom, pointMaterial)
   trail.frustumCulled = false
   scene.add(trail)
   let tHead = 0, tFrame = 0
