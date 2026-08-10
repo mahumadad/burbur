@@ -1,10 +1,8 @@
 import * as THREE from 'three'
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
-import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
-import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { createStage } from './stage.js'
 import { createHaze } from './engine/haze.js'
 import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
+import { createAgentKit, updateAgentMotion } from './engine/agents3d.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -996,79 +994,8 @@ export function createScene(container, cfg, agentNames = []) {
   // ─── AGENTES: jaula de aristas + criatura molecular + tallo ───────────────
   // Un color por especie: la estela hereda el color de su individuo.
   const AGENT_COLORS = [PALETTE.cyan, PALETTE.magenta, PALETTE.white, PALETTE.yellow]
-  // Líneas gruesas de verdad: LineBasicMaterial ignora linewidth en casi todas
-  // las plataformas, así que las jaulas usan LineMaterial (grosor en píxeles).
-  const fatMaterials = []
-  function fatLine(positions, color) {
-    const mat = new LineMaterial({ color, linewidth: rc.agentLineWidth })
-    mat.resolution.set(1, 1)
-    fatMaterials.push(mat)
-    const geo = new LineSegmentsGeometry()
-    geo.setPositions(positions)
-    const seg = new LineSegments2(geo, mat)
-    seg.computeLineDistances()
-    return seg
-  }
-  function edgesOf(geometry, color) {
-    const e = new THREE.EdgesGeometry(geometry)
-    const arr = Array.from(e.attributes.position.array)
-    e.dispose()
-    geometry.dispose()
-    return fatLine(arr, color)
-  }
-  function ringLoop(radius, segments, color) {
-    const pos = []
-    for (let i = 0; i < segments; i++) {
-      const a = (i / segments) * Math.PI * 2
-      const b = ((i + 1) / segments) * Math.PI * 2
-      pos.push(Math.cos(a) * radius, 0, Math.sin(a) * radius,
-        Math.cos(b) * radius, 0, Math.sin(b) * radius)
-    }
-    return fatLine(pos, color)
-  }
-  const pick = (arr) => arr[(rnd() * arr.length) | 0]
-
-  /**
-   * Criatura interna: núcleo naranja + 3–4 satélites en direcciones FIJAS
-   * (por eso se lee igual desde cualquier ángulo), unidos por enlaces.
-   */
-  function creature(t) {
-    const g = new THREE.Group()
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.6 * t, 16, 12),
-      new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
-    const dirs = [
-      new THREE.Vector3(1, 0.5, 0.3), new THREE.Vector3(-0.8, -0.4, 0.6),
-      new THREE.Vector3(0.25, -0.95, -0.55), new THREE.Vector3(0.7, 0.6, -0.7),
-    ]
-    const cols = [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyanSat]
-    const k = 3 + (rnd() < 0.5 ? 1 : 0)
-    const seg = []
-    for (let i = 0; i < k; i++) {
-      const p = dirs[i].clone().normalize().multiplyScalar((1.5 + rnd() * 0.45) * t)
-      const s = new THREE.Mesh(
-        new THREE.SphereGeometry((0.3 + rnd() * 0.12) * t, 12, 10),
-        new THREE.MeshBasicMaterial({ color: cols[(i + ((rnd() * 4) | 0)) % 4] }))
-      s.position.copy(p)
-      g.add(s)
-      seg.push(0, 0, 0, p.x, p.y, p.z)
-    }
-    g.add(fatLine(seg, PALETTE.bond))
-    return g
-  }
-
-  /** Cuña/planeador: prisma triangular de 9 aristas. */
-  function wedge(e) {
-    const t = 5.2, n = 2.2, r = 1.6, lo = -0.7, hi = 0.8
-    const P = (x, y, z) => [x * e, y * e, z * e]
-    const s = P(0, lo, t), c = P(-n, lo, -r), l = P(n, lo, -r)
-    const u = P(0, hi, t * 0.45), d = P(-n * 0.5, hi, -r), f = P(n * 0.5, hi, -r)
-    const seg = (a, b) => [...a, ...b]
-    return [
-      ...seg(s, c), ...seg(c, l), ...seg(l, s),
-      ...seg(u, d), ...seg(d, f), ...seg(f, u),
-      ...seg(s, u), ...seg(c, d), ...seg(l, f),
-    ]
-  }
+  const kit = createAgentKit(rc)
+  const { fatLine, edgesOf, ringLoop, creature, wedge, pick } = kit
 
   // Las 4 especies del bosque, tal como las arma el original.
   const SPECIES = ['cyan', 'flag', 'eye', 'dbl']
@@ -1256,15 +1183,17 @@ export function createScene(container, cfg, agentNames = []) {
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
     hazeUniforms.uProj.value = m.proj
-    for (const mat of fatMaterials) mat.resolution.set(m.w * m.dpr, m.h * m.dpr)
+    kit.setResolution(m.w * m.dpr, m.h * m.dpr)
   })
 
   const tintC = new THREE.Color()
   const _snowC = new THREE.Color()
-  const _up = new THREE.Vector3(0, 1, 0)
-  const _dir = new THREE.Vector3()
-  const _axis = new THREE.Vector3()
-  const _q = new THREE.Quaternion()
+  const tmp = {
+    up: new THREE.Vector3(0, 1, 0),
+    dir: new THREE.Vector3(),
+    axis: new THREE.Vector3(),
+    q: new THREE.Quaternion(),
+  }
   let _lx = 0, _ly = 0
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1
@@ -1392,29 +1321,10 @@ export function createScene(container, cfg, agentNames = []) {
       bugGeom.getAttribute('position').needsUpdate = true
     }
 
+    updateAgentMotion(agents, roamers, R, step, worldPos, tmp)
+
     for (let i = 0; i < n; i++) {
       const a = agents[i]
-      const r = roamers[i]
-      a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
-
-      // Velocidad en unidades de mundo (los roamers están normalizados).
-      const wvx = r.vx * R, wvz = r.vz * R
-      const wspeed = Math.hypot(wvx, wvz)
-      if (a.glide) {
-        // Planeador: se orienta hacia donde va.
-        if (wspeed > 0.05) a.group.rotation.y = Math.atan2(wvx, wvz)
-      } else if (a.rollMul > 0 && a.cage && wspeed > 1e-4) {
-        // Rueda como una esfera: eje = arriba × dirección, ángulo = dist/effR.
-        _dir.set(wvx, 0, wvz).normalize()
-        _axis.crossVectors(_up, _dir)
-        if (_axis.lengthSq() < 1e-5) _axis.set(1, 0, 0)
-        _axis.normalize()
-        _q.setFromAxisAngle(_axis, (wspeed * step) / a.effR * a.rollMul)
-        a.cage.quaternion.premultiply(_q)
-      } else if (a.spinY) {
-        a.group.rotation.y += a.spinY * step
-      }
-
       const pulse = 1 + swarm.flash[i] * 0.35
       if (a.cage) a.cage.scale.setScalar(pulse)
       else a.group.scale.setScalar(a.baseScale * pulse)
