@@ -35,14 +35,16 @@ function fertility(x, z) {
   return Math.max(0, Math.min(1, v))
 }
 /**
- * Máscara de isla: la caída arranca al 60% del radio y termina al 98%.
- * Ese tramo largo (no un borde corto) es lo que disuelve el horizonte en negro.
+ * Máscara de isla: borde DELIMITADO. La caída es un anillo exterior corto
+ * (del 82% al 100% del radio), con una ondulación FINA y de poca amplitud —
+ * un contorno orgánico limpio, sin los lóbulos/"mascadas" que dejaba el ruido
+ * de baja frecuencia y amplitud grande.
  */
 function islandMask(x, z, R) {
   const r = Math.hypot(x, z)
-  const wob = (noise2(x * 0.05 + 3.3, z * 0.05 + 8.8) - 0.5) * 16
-  const inner = R * 0.6 + wob
-  let t = (r - inner) / (R * 0.98 - inner)
+  const wob = (noise2(x * 0.11 + 3.3, z * 0.11 + 8.8) - 0.5) * 5
+  const inner = R * 0.82 + wob
+  let t = (r - inner) / (R * 1.0 - inner)
   t = Math.max(0, Math.min(1, t))
   return 1 - t * t * (3 - 2 * t)
 }
