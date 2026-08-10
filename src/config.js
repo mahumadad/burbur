@@ -28,13 +28,13 @@ export const CONFIG = {
     separation: 0.16,
     sepRadius: 0.10,
     drag: 0.965,
-    maxSpeed: 0.075,
-    softR: 0.30,         // desde aquí empieza la fuerza hacia el centro
-    centerPull: 2.2,     // fuerza de la cuenca
-    bound: 0.82,         // tope duro
+    maxSpeed: 0.095,
+    softR: 0.58,         // cuenca amplia: dejan casi todo el disco libre
+    centerPull: 1.0,     // fuerza suave (no los amontona al centro)
+    bound: 0.84,         // tope duro
     // Campo de flujo: corrientes coherentes que varían lento.
     flowFreq: 5.1,
-    flowPush: 0.030,
+    flowPush: 0.042,
     // Atracción a caminos. 0 = ignorarlos; alto = encauzar (calles de ciudad).
     pathPull: 0.055,     // bosque: los caminos son sendas preferidas, no rieles
     pathRadius: 0.14,
@@ -92,7 +92,7 @@ export const CONFIG = {
   },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos
-    flowerPatches: 88,
+    flowerPatches: 150,
     hazeCount: 5200,
     hazeColor: [0.12, 0.35, 1.0],  // azul frío (bosque); ciudad usaría naranja
     hazeAlpha: 0.15,

@@ -114,8 +114,16 @@ export function createScene(container, cfg) {
   controls.maxDistance = 260
   controls.maxPolarAngle = Math.PI * 0.49 // no bajar del horizonte
   controls.autoRotate = true
-  controls.autoRotateSpeed = 0.25
-  controls.addEventListener('start', () => { controls.autoRotate = false })
+  controls.autoRotateSpeed = 0.3
+  // La vista nunca queda estática: la auto-rotación se reanuda tras inactividad.
+  let idleTimer = null
+  controls.addEventListener('start', () => {
+    controls.autoRotate = false
+    if (idleTimer) clearTimeout(idleTimer)
+  })
+  controls.addEventListener('end', () => {
+    idleTimer = setTimeout(() => { controls.autoRotate = true }, 3500)
+  })
 
   // ─── Acumuladores: un solo buffer de líneas y uno de puntos ────────────────
   const linePos = []
@@ -247,10 +255,10 @@ export function createScene(container, cfg) {
         const yr = (0.3 + rnd() * 1.0) * scale
         const cx = tx + Math.cos(b) * xr, cy = ty + yr, cz = tz + Math.sin(b) * xr
         pushLine(tx, ty, tz, cx, cy, cz, STEM_MID, STEM_HI)
-        pushPoint(cx, cy, cz, col, (0.20 + rnd() * 0.22) * scale, rnd())
+        pushPoint(cx, cy, cz, col, (0.34 + rnd() * 0.34) * scale, rnd())
       }
     } else {
-      pushPoint(tx, ty + 0.1 * scale, tz, col, (0.26 + rnd() * 0.28) * scale, rnd())
+      pushPoint(tx, ty + 0.1 * scale, tz, col, (0.44 + rnd() * 0.42) * scale, rnd())
     }
   }
 
@@ -261,7 +269,7 @@ export function createScene(container, cfg) {
     const px = Math.cos(pa) * pr, pz = Math.sin(pa) * pr
     if (islandMask(px, pz, R) < 0.25) continue
     poiFlowers.push({ x: px / R, z: pz / R })
-    const k = 6 + ((rnd() * 11) | 0)
+    const k = 10 + ((rnd() * 14) | 0)
     const spread = 2.5 + rnd() * 3.5
     const palette = patchPalette()
     for (let i = 0; i < k; i++) {
@@ -1134,6 +1142,9 @@ export function createScene(container, cfg) {
     trailGeom.getAttribute('position').needsUpdate = true
     trailGeom.getAttribute('hsize').needsUpdate = true
 
+    // Respiración: velocidad de giro que pulsa + leve vaivén del mundo.
+    controls.autoRotateSpeed = 0.3 + Math.sin(clock * 0.18) * 0.16
+    controls.target.y = Math.sin(clock * 0.13) * 1.7
     controls.update()
     composer.render()
     return predations
