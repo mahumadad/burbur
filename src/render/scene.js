@@ -769,6 +769,14 @@ export function createScene(container, cfg, agentNames = []) {
         color: TREE_EDGE, transparent: true, opacity: 0.55, fog: true,
       }),
     ))
+    // Punteado sobre la corteza: un punto por vértice del tubo → el tronco se lee
+    // como red de puntos (como en murmur), no como un sólido liso.
+    const tpg = new THREE.BufferGeometry()
+    tpg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
+    scene.add(new THREE.Points(tpg, new THREE.PointsMaterial({
+      color: TREE_EDGE, size: 0.3, sizeAttenuation: true,
+      transparent: true, opacity: 0.7, fog: true,
+    })))
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
@@ -856,6 +864,34 @@ export function createScene(container, cfg, agentNames = []) {
     }))
     rpts.position.copy(mesh.position)
     scene.add(rpts)
+    // Punteado DENSO extra: muestreo por baricéntrico sobre las caras deformadas
+    // → muchos más puntos sobre la roca (paridad con murmur) sin recargar el mesh.
+    {
+      const dn = spec.mono ? 1500 : 520
+      const dp = new Float32Array(dn * 3), dc = new Float32Array(dn * 3)
+      const pc = geo.attributes.position, cc = geo.attributes.color
+      const tris = pc.count / 3
+      for (let k = 0; k < dn; k++) {
+        const tri = ((rnd() * tris) | 0) * 3
+        let u = rnd(), v = rnd()
+        if (u + v > 1) { u = 1 - u; v = 1 - v }
+        const w = 1 - u - v, a = tri, b = tri + 1, c2 = tri + 2
+        for (let j = 0; j < 3; j++) {
+          const gx = j === 0 ? 'getX' : j === 1 ? 'getY' : 'getZ'
+          dp[k * 3 + j] = pc[gx](a) * u + pc[gx](b) * v + pc[gx](c2) * w
+          dc[k * 3 + j] = cc[gx](a) * u + cc[gx](b) * v + cc[gx](c2) * w
+        }
+      }
+      const dg = new THREE.BufferGeometry()
+      dg.setAttribute('position', new THREE.BufferAttribute(dp, 3))
+      dg.setAttribute('color', new THREE.BufferAttribute(dc, 3))
+      const dpts = new THREE.Points(dg, new THREE.PointsMaterial({
+        size: 0.42, sizeAttenuation: true, vertexColors: true,
+        transparent: true, opacity: 0.85, fog: true,
+      }))
+      dpts.position.copy(mesh.position)
+      scene.add(dpts)
+    }
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
     // Cima como posado + cúpula para caminar por encima (coords de mundo).
     poiPerch.push({ x: cx / R, z: cz / R, h: hh })
@@ -1807,7 +1843,7 @@ export function createScene(container, cfg, agentNames = []) {
         tPos[slot] = worldPos[i * 3]
         tPos[slot + 1] = worldPos[i * 3 + 1] - 1.2
         tPos[slot + 2] = worldPos[i * 3 + 2]
-        tSize[i * TRAIL + tHead] = rc.trailSize * 0.13
+        tSize[i * TRAIL + tHead] = rc.trailSize * 0.17 // puntos un poco más gruesos (paridad murmur)
       }
       tHead = (tHead + 1) % TRAIL
     }
