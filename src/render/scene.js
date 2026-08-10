@@ -580,22 +580,28 @@ export function createScene(container, cfg, agentNames = []) {
   // se suben más abajo (necesitan el shader de puntos). Cada punto lleva su
   // `birth` (instante de brote, escalonado) y `kind` (0 hoja / 1 flor).
   const folPos = [], folCol = [], folSize = [], folPhase = [], folKind = [], folBirth = []
+  const folFall = [], folRot = [] // color de otoño por hoja + orientación de la hoja
   let treeBlooms = false
   const LEAF_LO = [0.09, 0.20, 0.05], LEAF_HI = [0.30, 0.52, 0.13]
   const BLOSSOM = [[1.0, 0.72, 0.82], [1.0, 0.86, 0.40], [0.98, 0.95, 1.0], [1.0, 0.56, 0.66]]
+  // Otoño: cada hoja vira a un color propio (rojos, naranjas, ámbar, marrones).
+  const AUTUMN = [[0.85, 0.20, 0.06], [0.92, 0.44, 0.05], [0.90, 0.66, 0.10], [0.60, 0.26, 0.08], [0.78, 0.33, 0.10]]
   const _fperp = new THREE.Vector3()
   function addLeaf(p, tan) {
     _fperp.set(-tan.z, (rnd() - 0.5) * 0.7, tan.x).normalize().multiplyScalar(0.3 + rnd() * 0.8)
     const g = rnd()
     folPos.push(p.x + _fperp.x + (rnd() - 0.5) * 0.5, p.y + _fperp.y + (rnd() - 0.5) * 0.5, p.z + _fperp.z + (rnd() - 0.5) * 0.5)
     folCol.push(LEAF_LO[0] + (LEAF_HI[0] - LEAF_LO[0]) * g, LEAF_LO[1] + (LEAF_HI[1] - LEAF_LO[1]) * g, LEAF_LO[2] + (LEAF_HI[2] - LEAF_LO[2]) * g)
-    folSize.push(0.5 + rnd() * 0.6); folPhase.push(rnd()); folKind.push(0)
+    const fc = AUTUMN[(rnd() * AUTUMN.length) | 0]
+    folFall.push(fc[0], fc[1], fc[2]); folRot.push(rnd() * 6.2832)
+    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(0)
     folBirth.push(rnd() * 0.12) // brotan temprano en primavera, escalonados
   }
   function addBlossom(p) {
     const c = BLOSSOM[(rnd() * BLOSSOM.length) | 0]
     folPos.push(p.x + (rnd() - 0.5) * 0.9, p.y + (rnd() - 0.5) * 0.9, p.z + (rnd() - 0.5) * 0.9)
     folCol.push(c[0], c[1], c[2])
+    folFall.push(c[0], c[1], c[2]); folRot.push(0) // las flores no viran (aKind=1)
     folSize.push(0.55 + rnd() * 0.65); folPhase.push(rnd()); folKind.push(1)
     folBirth.push(0.02 + rnd() * 0.14)
   }
@@ -1040,13 +1046,15 @@ export function createScene(container, cfg, agentNames = []) {
     fg.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(folPhase), 1))
     fg.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array(folKind), 1))
     fg.setAttribute('aBirth', new THREE.BufferAttribute(new Float32Array(folBirth), 1))
+    fg.setAttribute('aFall', new THREE.BufferAttribute(new Float32Array(folFall), 3))
+    fg.setAttribute('aRot', new THREE.BufferAttribute(new Float32Array(folRot), 1))
     const foliageMat = new THREE.ShaderMaterial({
       uniforms: foliageUniforms, transparent: true, depthWrite: false,
       vertexShader: `
         attribute vec3 hcol; attribute float hsize; attribute float hphs;
-        attribute float aKind; attribute float aBirth;
+        attribute float aKind; attribute float aBirth; attribute vec3 aFall; attribute float aRot;
         uniform float uProj, uT, uSeason, uLeaf, uFlower, uAutumn;
-        varying vec3 vC; varying float vSoft;
+        varying vec3 vC; varying float vKind; varying float vRot;
         void main() {
           vec3 p = position;
           float ph = hphs * 6.2831;                 // balanceo (como flores/pasto)
@@ -1058,26 +1066,35 @@ export function createScene(container, cfg, agentNames = []) {
           grow = grow * grow * (3.0 - 2.0 * grow);
           float amount = (aKind < 0.5) ? uLeaf : uFlower;
           float g = grow * amount;
-          vec3 col = hcol;
-          if (aKind < 0.5) col = mix(hcol, vec3(0.82, 0.42, 0.06), uAutumn); // verde→ámbar
+          // En otoño la hoja vira a SU color propio (rojos/naranjas/ámbar/marrón).
+          vec3 col = (aKind < 0.5) ? mix(hcol, aFall, uAutumn) : hcol;
           col *= 0.9 + 0.14 * sin(uT * 2.0 + ph * 5.0);
-          vC = col;
+          vC = col; vKind = aKind; vRot = aRot + uT * 0.15;
           vec4 mv = modelViewMatrix * vec4(p, 1.0);
           float vd = max(-mv.z, 0.001);
           float sz = hsize * (0.12 + 0.88 * g);
           gl_PointSize = (g < 0.02) ? 0.0 : clamp(sz * uProj / vd, 1.0, 48.0);
-          vSoft = 0.2;
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
         precision mediump float;
-        varying vec3 vC; varying float vSoft;
+        varying vec3 vC; varying float vKind; varying float vRot;
         void main() {
           vec2 uv = gl_PointCoord - 0.5;
-          float d = length(uv) * 2.0;
-          if (d > 1.0) discard;
-          float a = 1.0 - smoothstep(1.0 - mix(0.06, 0.40, vSoft), 1.0, d);
-          gl_FragColor = vec4(vC, a);
+          if (vKind > 0.5) {                        // FLOR: disco suave
+            float d = length(uv) * 2.0;
+            if (d > 1.0) discard;
+            gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
+            return;
+          }
+          // HOJA: óvalo apuntado (lens) orientado por vRot, con nervadura.
+          float s = sin(vRot), c = cos(vRot);
+          vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+          float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y)); // ancho se cierra en las puntas
+          if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
+          float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
+          float rib = smoothstep(0.06, 0.0, abs(q.x));            // nervadura central más clara
+          gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
         }`,
     })
     const fmesh = new THREE.Points(fg, foliageMat)
@@ -1087,9 +1104,12 @@ export function createScene(container, cfg, agentNames = []) {
 
   // ─── HOJAS QUE CAEN: pool reciclable (como la nieve). Se desprenden de las
   // ramas en otoño y con la lluvia, y bajan con vaivén hasta el suelo.
-  const leafAnchors = []
+  const leafAnchors = [] // por hoja: x,y,z, verde(3), otoño(3) = 9 floats
   for (let i = 0; i < folKind.length; i++) {
-    if (folKind[i] === 0) leafAnchors.push(folPos[i * 3], folPos[i * 3 + 1], folPos[i * 3 + 2], folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2])
+    if (folKind[i] === 0) leafAnchors.push(
+      folPos[i * 3], folPos[i * 3 + 1], folPos[i * 3 + 2],
+      folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
+      folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
   }
   const FALL_N = 280
   const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
@@ -1107,20 +1127,19 @@ export function createScene(container, cfg, agentNames = []) {
   }))
   fallMesh.frustumCulled = false
   scene.add(fallMesh)
-  const AMBER = [0.82, 0.42, 0.06]
   function updateFallingLeaves(step, rate, autumn) {
     // Emisión: presupuesto fraccional (hojas/seg) desde las ramas.
     if (leafAnchors.length && rate > 0) {
       fallBudget += rate * step
       while (fallBudget >= 1) {
         fallBudget -= 1
-        const a = ((Math.random() * (leafAnchors.length / 6)) | 0) * 6
+        const a = ((Math.random() * (leafAnchors.length / 9)) | 0) * 9
         const i = fallHead; fallHead = (fallHead + 1) % FALL_N
         fallPos[i * 3] = leafAnchors[a]; fallPos[i * 3 + 1] = leafAnchors[a + 1]; fallPos[i * 3 + 2] = leafAnchors[a + 2]
-        // En otoño la hoja que cae ya viene virada a ámbar.
-        fallCol[i * 3] = leafAnchors[a + 3] + (AMBER[0] - leafAnchors[a + 3]) * autumn
-        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (AMBER[1] - leafAnchors[a + 4]) * autumn
-        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (AMBER[2] - leafAnchors[a + 5]) * autumn
+        // La hoja que cae hereda su propio viraje de otoño (verde→su color).
+        fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
+        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
+        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
         fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
       }
     }
