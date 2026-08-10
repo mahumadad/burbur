@@ -1138,6 +1138,18 @@ export function createScene(container, cfg, agentNames = []) {
         fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1 // PÉTALO (disco)
       }
     }
+    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
+    if (petalAnchors.length && petalRate > 0) {
+      petalBudget += petalRate * step
+      while (petalBudget >= 1) {
+        petalBudget -= 1
+        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
+        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
+        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
+      }
+    }
     for (let i = 0; i < FALL_N; i++) {
       if (!fallActive[i]) continue
       fallPos[i * 3 + 1] -= fallVy[i] * step
@@ -1449,11 +1461,9 @@ export function createScene(container, cfg, agentNames = []) {
       foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
       const autumn = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
       foliageUniforms.uAutumn.value = autumn
-      // Hojas que se desprenden: en otoño y con lluvia (si aún hay hojas).
-      // El viento también desprende hojas (y pétalos), no solo el otoño/la lluvia.
+      // Hojas/pétalos que se desprenden: otoño + lluvia + VIENTO (si aún hay hojas).
       const gust = eco.rain + (eco.wind || 0) * 0.7
       const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
-      // Pétalos de sakura: lluvia suave mientras florece, más con lluvia/viento.
       const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
       updateFallingLeaves(step, shedRate, autumn, petalRate)
     }
