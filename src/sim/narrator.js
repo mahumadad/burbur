@@ -1,5 +1,9 @@
-// Narrador gramatical: convierte un evento en texto. Puro y determinista dado `rand`.
-// Contenido propio (no el de murmur): plantillas + léxico por tipo de agente.
+// Narrador gramatical: convierte un evento en texto (español). Puro y determinista.
+// Estilo bitácora: usa el nombre como sujeto SIN artículo, para no lidiar con el
+// género ("MIRLO canta...", "ZORRO se aleja..."). Los objetos estáticos ya traen
+// su artículo en el nombre ("el arroyo", "la hojarasca").
+
+import { phaseES, weatherES } from '../i18n.js'
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1)
 const pick = (arr, rand) => arr[(rand() * arr.length) | 0]
@@ -7,53 +11,53 @@ const pick = (arr, rand) => arr[(rand() * arr.length) | 0]
 // Acciones por tipo: { l: fragmento largo, s: forma corta }.
 const ACTIONS = {
   flying_animal: [
-    { l: 'calls, thin and high', s: 'calls' },
-    { l: 'chatters from a hidden branch', s: 'chatters' },
-    { l: 'drums on dead wood', s: 'drums' },
-    { l: 'wheels once overhead', s: 'wheels' },
-    { l: 'scolds an unseen intruder', s: 'scolds' },
-    { l: 'lets a single note fall', s: 'sings' },
-    { l: 'clatters up out of the canopy', s: 'takes flight' },
+    { l: 'canta fino y agudo', s: 'canta' },
+    { l: 'parlotea desde una rama oculta', s: 'parlotea' },
+    { l: 'tamborilea sobre madera muerta', s: 'tamborilea' },
+    { l: 'da una vuelta por encima', s: 'sobrevuela' },
+    { l: 'regaña a un intruso invisible', s: 'regaña' },
+    { l: 'deja caer una sola nota', s: 'canta' },
+    { l: 'sale aleteando del follaje', s: 'alza el vuelo' },
   ],
   walking_animal: [
-    { l: 'snaps a twig underfoot', s: 'snaps a twig' },
-    { l: 'pads through the leaf litter', s: 'pads past' },
-    { l: 'freezes mid-step, listening', s: 'freezes' },
-    { l: 'noses through the undergrowth', s: 'forages' },
-    { l: 'bounds off through the fern', s: 'bounds off' },
-    { l: 'scratches at the wet ground', s: 'scratches' },
+    { l: 'quiebra una ramita al pisar', s: 'quiebra una ramita' },
+    { l: 'camina entre la hojarasca', s: 'pasa' },
+    { l: 'se congela a medio paso, atento', s: 'se congela' },
+    { l: 'hurga en la maleza', s: 'forrajea' },
+    { l: 'se aleja a saltos por el helecho', s: 'se aleja a saltos' },
+    { l: 'escarba en el suelo húmedo', s: 'escarba' },
   ],
   static_object: [
-    { l: 'creaks as the wind leans on it', s: 'creaks' },
-    { l: 'drips steadily onto the litter', s: 'drips' },
-    { l: 'hums with a haze of midges', s: 'hums' },
-    { l: 'sighs as the air moves through', s: 'sighs' },
-    { l: 'runs on over cold stones', s: 'trickles' },
+    { l: 'cruje cuando el viento lo empuja', s: 'cruje' },
+    { l: 'gotea sin parar sobre la hojarasca', s: 'gotea' },
+    { l: 'zumba con una nube de mosquitos', s: 'zumba' },
+    { l: 'suspira cuando el aire lo atraviesa', s: 'suspira' },
+    { l: 'corre sobre piedras frías', s: 'fluye' },
   ],
   human: [
-    { l: 'treads carefully past', s: 'passes' },
-    { l: 'murmurs something low', s: 'murmurs' },
-    { l: 'snaps a branch aside', s: 'snaps a branch' },
-    { l: 'whistles once, then stops', s: 'whistles' },
-    { l: 'rummages in a pack', s: 'rummages' },
+    { l: 'pasa con cuidado', s: 'pasa' },
+    { l: 'murmura algo por lo bajo', s: 'murmura' },
+    { l: 'aparta una rama de un golpe', s: 'aparta una rama' },
+    { l: 'silba una vez y calla', s: 'silba' },
+    { l: 'rebusca en una mochila', s: 'rebusca' },
   ],
 }
 
 // Texturas de ambiente (sin agente).
 const AMBIENT = [
-  { l: 'A gentle drip falls from the wet leaves', s: 'leaves drip' },
-  { l: 'A twig settles somewhere in the dark', s: 'a twig settles' },
-  { l: 'Distant water moves over stones', s: 'distant water' },
-  { l: 'Wind combs through the high branches', s: 'wind in the branches' },
-  { l: 'Rain ticks softly on the broad leaves', s: 'rain on leaves' },
-  { l: 'A far-off branch creaks and holds', s: 'a branch creaks' },
-  { l: 'The litter rustles, then goes still', s: 'litter rustles' },
+  { l: 'Una gota suave cae de las hojas mojadas', s: 'gotean las hojas' },
+  { l: 'Una ramita se asienta en la oscuridad', s: 'cruje una ramita' },
+  { l: 'Agua lejana corre sobre las piedras', s: 'agua lejana' },
+  { l: 'El viento peina las ramas altas', s: 'viento en las ramas' },
+  { l: 'La lluvia repica suave sobre las hojas anchas', s: 'lluvia en las hojas' },
+  { l: 'Una rama lejana cruje y aguanta', s: 'cruje una rama' },
+  { l: 'La hojarasca susurra y vuelve a callar', s: 'susurra la hojarasca' },
 ]
 
 const DIR_PHRASE = {
-  left: 'to the left', right: 'to the right', ahead: 'up ahead',
-  behind: 'somewhere behind', above: 'overhead', below: 'low to the ground',
-  'all around': 'all around',
+  left: 'a la izquierda', right: 'a la derecha', ahead: 'más adelante',
+  behind: 'en algún lugar detrás', above: 'por encima', below: 'a ras del suelo',
+  'all around': 'por todas partes',
 }
 
 function action(type, rand) {
@@ -68,52 +72,54 @@ function action(type, rand) {
 export function narrate(ev, ctx, rand = Math.random) {
   const name = ev.agent
   const t = ev.agentType || 'static_object'
+  const wx = weatherES(ctx.weather)
+  const ph = phaseES(ctx.phase)
 
   switch (ev.type) {
     case 'sound': {
       if (!name) { const am = pick(AMBIENT, rand); return { log: am.l, short: am.s } }
       const a = action(t, rand)
       const d = ev.dir && rand() < 0.5 ? ` ${DIR_PHRASE[ev.dir]}` : ''
-      return { log: `The ${name} ${a.l}${d}.`, short: `${name} ${a.s}` }
+      return { log: `${cap(name)} ${a.l}${d}.`, short: `${name} ${a.s}` }
     }
     case 'interaction': {
       const a = action(t, rand)
-      return { log: `The ${name} ${a.l} as ${ctx.weather} moves through.`, short: `${name} ${a.s}` }
+      return { log: `${cap(name)} ${a.l} mientras ${wx} atraviesa el claro.`, short: `${name} ${a.s}` }
     }
     case 'conflict': {
       const a = action(t, rand)
-      return { log: `Something startles the ${name}; it ${a.l}.`, short: `${name} ${a.s}` }
+      return { log: `Algo sobresalta al claro; ${name} ${a.l}.`, short: `${name} ${a.s}` }
     }
     case 'residue': {
       const a = action(t, rand)
-      return { log: `The ${name} ${a.l} still, then fades.`, short: `${name} settles` }
+      return { log: `${cap(name)} ${a.l} un momento más, y se apaga.`, short: `${name} se asienta` }
     }
     case 'moment': {
       return {
-        log: `The old oak groans as the ${ctx.weather} takes hold of the clearing.`,
-        short: 'the oak groans',
+        log: `El viejo roble gime mientras ${wx} se apodera del claro.`,
+        short: 'gime el roble',
       }
     }
     case 'overview': {
       return {
-        log: `${cap(ctx.weather)} settles over the clearing as ${ctx.phase} deepens.`,
-        short: 'overview',
+        log: `${cap(wx)} se asienta sobre el claro mientras ${ph} se ahonda.`,
+        short: 'panorama',
       }
     }
     case 'shift': {
-      return { log: `The light turns toward ${ctx.phase}.`, short: `shift · ${ctx.phase}` }
+      return { log: `La luz gira hacia ${ph}.`, short: `cambio · ${ph}` }
     }
     case 'setup': {
       const a = action(t, rand)
-      return { log: `The ${name} ${a.l}, closer now.`, short: `${name} ${a.s}` }
+      return { log: `${cap(name)} ${a.l}, más cerca ahora.`, short: `${name} ${a.s}` }
     }
     case 'distant': {
       const a = action(t, rand)
-      return { log: `Far off, the ${name} ${a.l}.`, short: `distant ${name}` }
+      return { log: `A lo lejos, ${name} ${a.l}.`, short: `${name} a lo lejos` }
     }
     default: {
       const a = action(t, rand)
-      return { log: `The ${name || 'clearing'} ${a.l}.`, short: name ? `${name} ${a.s}` : 'the clearing' }
+      return { log: `${cap(name || 'el claro')} ${a.l}.`, short: name ? `${name} ${a.s}` : 'el claro' }
     }
   }
 }

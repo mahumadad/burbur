@@ -1,4 +1,5 @@
-// Panel ECOSYSTEM: lectura técnica del estado del mundo (estilo murmur).
+// Panel ECOSISTEMA: lectura técnica del estado del mundo (estilo murmur).
+import { phaseES, weatherES } from '../i18n.js'
 
 const CSS = `
 .eco {
@@ -34,18 +35,18 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
   el.className = 'eco'
   // El acento lo controla :root (--accent) según el mundo activo; el CSS ya lo lee.
   el.innerHTML = `
-    <h4><span class="dot"></span>PLOT ECOSYSTEM</h4>
-    <div class="row"><span>TIME</span><span data-f="time">—</span></div>
-    <div class="row"><span>WEATHER</span><span data-f="weather">—</span></div>
-    <div class="row"><span>TEMPERATURE</span><span data-f="temp">—</span></div>
+    <h4><span class="dot"></span>ECOSISTEMA</h4>
+    <div class="row"><span>HORA</span><span data-f="time">—</span></div>
+    <div class="row"><span>CLIMA</span><span data-f="weather">—</span></div>
+    <div class="row"><span>TEMPERATURA</span><span data-f="temp">—</span></div>
     <div class="sep"></div>
-    <div class="row"><span>ACTIVITY</span><span data-f="actv">—</span></div>
+    <div class="row"><span>ACTIVIDAD</span><span data-f="actv">—</span></div>
     <div class="bar"><i data-f="actbar" style="width:0%"></i></div>
-    <div class="row"><span>TENSION</span><span data-f="tenv">—</span></div>
+    <div class="row"><span>TENSIÓN</span><span data-f="tenv">—</span></div>
     <div class="bar warn"><i data-f="tenbar" style="width:0%"></i></div>
     <div class="sep"></div>
-    <div class="row"><span>MUSIC</span><input type="range" data-f="music" min="0" max="100" value="100"></div>
-    <div class="row"><span>WORLD</span><input type="range" data-f="world" min="0" max="100" value="100"></div>`
+    <div class="row"><span>MÚSICA</span><input type="range" data-f="music" min="0" max="100" value="100"></div>
+    <div class="row"><span>MUNDO</span><input type="range" data-f="world" min="0" max="100" value="100"></div>`
   document.body.appendChild(el)
 
   const f = {}
@@ -58,8 +59,8 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
 
   let lastPhase = null, lastWeather = null
   function update(s) {
-    if (s.phase !== lastPhase) { f.time.textContent = s.phase; lastPhase = s.phase }
-    if (s.weather !== lastWeather) { f.weather.textContent = s.weather; lastWeather = s.weather }
+    if (s.phase !== lastPhase) { f.time.textContent = phaseES(s.phase); lastPhase = s.phase }
+    if (s.weather !== lastWeather) { f.weather.textContent = weatherES(s.weather); lastWeather = s.weather }
     f.temp.textContent = s.temperature + '°C'
     f.actv.textContent = Math.round(s.activity * 100) + '%'
     f.tenv.textContent = s.tension.toFixed(2)
