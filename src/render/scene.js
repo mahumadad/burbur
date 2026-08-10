@@ -95,6 +95,38 @@ export function createScene(container, cfg, agentNames = []) {
   const treeObstacles = [] // troncos a bordear (normalizado {x, z, r})
   const rockDomes = []     // rocas por encima (mundo {x, z, r, h})
 
+  // Clima que pinta el suelo: sombras de nubes móviles + nieve + humedad.
+  const shadowUniforms = {
+    uTime: { value: 0 },
+    uWind: { value: new THREE.Vector2(0.025, 0.01) },
+    uCloud: { value: 0.5 },  // 0 despejado, 1 nublado (sombras marcadas)
+    uSun: { value: 1.0 },    // >1 día soleado
+    uSnow: { value: 0.0 },   // acumulación de nieve
+    uWet: { value: 0.0 },    // agua del deshielo
+  }
+  function applyCloudShadow(material) {
+    material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, shadowUniforms)
+      shader.vertexShader = 'uniform float uTime; uniform vec2 uWind; uniform float uCloud, uSun; varying float vShadow;\n'
+        + shader.vertexShader.replace('void main() {', `void main() {
+          {
+            vec2 q = position.xz * 0.02 + uWind * uTime;
+            float a = sin(q.x) + cos(q.y * 1.13);
+            float b = sin(q.x * 0.5 + q.y * 0.7 + 1.3);
+            float n = (a * 0.5 + b) * 0.5;
+            float lit = smoothstep(-0.2, 0.9, n);
+            vShadow = mix(1.0 - uCloud * 0.5, 1.0, lit) * uSun;
+          }`)
+      shader.fragmentShader = 'uniform float uSnow, uWet; varying float vShadow;\n'
+        + shader.fragmentShader.replace('#include <fog_fragment>', `
+          gl_FragColor.rgb *= vShadow;
+          gl_FragColor.rgb *= (1.0 - uWet * 0.28);
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.90, 0.93, 1.0), uSnow);
+          #include <fog_fragment>`)
+    }
+    material.needsUpdate = true
+  }
+
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
   // Órbita esférica inicial (r=118, theta=0.62, phi=0.92) — vista aérea 3/4.
@@ -189,6 +221,7 @@ export function createScene(container, cfg, agentNames = []) {
     groundMat = new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide, fog: true,
     })
+    applyCloudShadow(groundMat)
     scene.add(new THREE.Mesh(geo, groundMat))
   }
 
@@ -239,6 +272,7 @@ export function createScene(container, cfg, agentNames = []) {
     geo.setAttribute('position', new THREE.BufferAttribute(gp.slice(0, n * 12), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(gc.slice(0, n * 12), 3))
     grassMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
+    applyCloudShadow(grassMat)
     scene.add(new THREE.LineSegments(geo, grassMat))
   }
 
@@ -687,6 +721,7 @@ export function createScene(container, cfg, agentNames = []) {
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePos), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lineCol), 3))
     floraMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
+    applyCloudShadow(floraMat)
     scene.add(new THREE.LineSegments(geo, floraMat))
   }
 
@@ -1022,9 +1057,10 @@ export function createScene(container, cfg, agentNames = []) {
   let simTime = 0
 
   function mapPositions(dt) {
-    simTime += dt
-    updateRoamers(roamers, cfg.wander, dt, rnd, simTime, paths, nearestOnPaths, treeObstacles)
-    updatePerchers(perchAgents, roamers, poiPerch, cfg.behaviors, dt, rnd)
+    const md = dt * moveScale
+    simTime += md
+    updateRoamers(roamers, cfg.wander, md, rnd, simTime, paths, nearestOnPaths, treeObstacles)
+    updatePerchers(perchAgents, roamers, poiPerch, cfg.behaviors, md, rnd)
     for (let i = 0; i < n; i++) {
       const src = roamers[i]
       const x = src.x * R, z = src.z * R
@@ -1084,6 +1120,52 @@ export function createScene(container, cfg, agentNames = []) {
       rainPos[k + 3] = x + 0.5;   rainPos[k + 4] = y - streak;  rainPos[k + 5] = z
     }
     rainGeom.getAttribute('position').needsUpdate = true
+  }
+
+  // ─── NIEVE: copos que caen lento y derivan; densidad por intensidad ───────
+  const SNOW_N = 1300
+  const SNOW_H = 44
+  const snowPos = new Float32Array(SNOW_N * 3)
+  const snowPhase = new Float32Array(SNOW_N)
+  for (let i = 0; i < SNOW_N; i++) {
+    const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * R * 1.05
+    snowPos[i * 3] = Math.cos(a) * rr
+    snowPos[i * 3 + 1] = G + rnd() * SNOW_H
+    snowPos[i * 3 + 2] = Math.sin(a) * rr
+    snowPhase[i] = rnd() * 6.2832
+  }
+  const snowGeom = new THREE.BufferGeometry()
+  snowGeom.setAttribute('position', new THREE.BufferAttribute(snowPos, 3))
+  const snowMat = new THREE.ShaderMaterial({
+    uniforms: { uProj: pointUniforms.uProj },
+    transparent: true, depthWrite: false, blending: THREE.NormalBlending,
+    vertexShader: `uniform float uProj; void main(){
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = clamp(0.28 * uProj / max(-mv.z, 0.001), 1.0, 20.0);
+      gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `void main(){ vec2 uv = gl_PointCoord - 0.5; if(length(uv) > 0.5) discard;
+      gl_FragColor = vec4(0.95, 0.97, 1.0, 0.9); }`,
+  })
+  const snowMesh = new THREE.Points(snowGeom, snowMat)
+  snowMesh.frustumCulled = false
+  snowMesh.visible = false
+  scene.add(snowMesh)
+
+  function updateSnow(dt, clockT, intensity) {
+    snowMesh.visible = intensity > 0.01
+    if (!snowMesh.visible) return
+    const active = Math.floor(intensity * SNOW_N)
+    const fall = (5 + 4 * intensity) * dt
+    for (let i = 0; i < SNOW_N; i++) {
+      if (i >= active) { snowPos[i * 3 + 1] = -9999; continue }
+      let y = snowPos[i * 3 + 1] - fall
+      if (y < G - 2) { y = G + SNOW_H; }
+      snowPos[i * 3 + 1] = y
+      // Deriva lateral suave (revoloteo).
+      snowPos[i * 3] += Math.sin(clockT * 0.8 + snowPhase[i]) * 6 * dt
+      snowPos[i * 3 + 2] += Math.cos(clockT * 0.6 + snowPhase[i] * 1.3) * 6 * dt
+    }
+    snowGeom.getAttribute('position').needsUpdate = true
   }
 
   // ─── Post-proceso: el "lente" (fisheye + cromática + viñeta) ──────────────
@@ -1158,8 +1240,10 @@ export function createScene(container, cfg, agentNames = []) {
   const _q = new THREE.Quaternion()
   let _lx = 0, _ly = 0
   let clock = 0
+  let snowCover = 0, wet = 0, moveScale = 1
   function update(swarm, dt, eco) {
-    clock += dt || 0.016
+    const step = dt || 0.016
+    clock += step
     pointUniforms.uT.value = clock
 
     // El ecosistema pinta el mundo: luz de la hora, niebla y neblina del clima.
@@ -1185,16 +1269,43 @@ export function createScene(container, cfg, agentNames = []) {
         rc.hazeColor[2] * 0.6 + L[2] * 0.4,
       )
       hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.5 + eco.fog * 1.3) * (0.45 + g * 0.75)
-      updateRain(dt || 0.016, eco.rain)
+
+      // Sombras de nubes móviles + sol.
+      shadowUniforms.uTime.value = clock
+      const wa = clock * 0.03
+      shadowUniforms.uWind.value.set(Math.cos(wa) * 0.025, Math.sin(wa) * 0.025)
+      const cloud = Math.min(1, 0.25 + eco.fog * 1.1)
+      shadowUniforms.uCloud.value += (cloud - shadowUniforms.uCloud.value) * Math.min(1, step * 0.5)
+      shadowUniforms.uSun.value = 0.92 + (1 - cloud) * 0.32
+
+      // Nieve: si llueve y hace frío. Se acumula; con calor se derrite → agua.
+      const cold = eco.temperature <= 1
+      const snowing = cold && eco.rain > 0.2
+      const snowfall = snowing ? eco.rain : 0
+      snowCover += snowfall * 0.05 * step
+      if (eco.temperature > 1 && snowCover > 0) {
+        const melt = (eco.temperature - 1) * 0.02 * step
+        snowCover -= melt
+        wet = Math.min(1, wet + melt * 3.5)
+      }
+      snowCover = Math.max(0, Math.min(1, snowCover))
+      wet = Math.max(0, wet - 0.02 * step) // evaporación lenta
+      shadowUniforms.uSnow.value = snowCover
+      shadowUniforms.uWet.value = wet
+
+      updateRain(step, snowing ? 0 : eco.rain)
+      updateSnow(step, clock, snowfall)
+
+      // Los agentes se frenan con nieve/frío.
+      moveScale = snowing ? 0.42 : (cold ? 0.72 : 1)
     }
 
-    const step = dt || 0.016
     mapPositions(step)
 
     // Bichitos hacia las flores; cazadores hacia los bichitos.
     const predations = []
     if (bugCount) {
-      updateBugs(bugs, poiFlowers, bugCfg, step, rnd, hunters)
+      updateBugs(bugs, poiFlowers, bugCfg, step * moveScale, rnd, hunters)
       for (const h of hunters) {
         const idx = nearestBug(bugs, h.x, h.z, bugCfg.huntRadius)
         if (idx < 0) continue
