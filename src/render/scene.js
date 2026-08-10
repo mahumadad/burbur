@@ -4,6 +4,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { createStage } from './stage.js'
 import { createHaze } from './engine/haze.js'
+import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -1246,118 +1247,16 @@ export function createScene(container, cfg, agentNames = []) {
     }
   }
 
-  // ─── LLUVIA: líneas que caen, recicladas al llegar al suelo ───────────────
-  const RAIN_N = 1400
-  const rainPos = new Float32Array(RAIN_N * 6)
-  const rainTop = new Float32Array(RAIN_N * 3)
-  const RAIN_H = 46
-  for (let i = 0; i < RAIN_N; i++) {
-    const a = rnd() * 6.2832
-    const rr = Math.sqrt(rnd()) * R * 1.1
-    rainTop[i * 3] = Math.cos(a) * rr
-    rainTop[i * 3 + 1] = G + rnd() * RAIN_H
-    rainTop[i * 3 + 2] = Math.sin(a) * rr
-  }
-  const rainGeom = new THREE.BufferGeometry()
-  rainGeom.setAttribute('position', new THREE.BufferAttribute(rainPos, 3))
-  const rainMat = new THREE.LineBasicMaterial({
-    color: 0xbcd6e8, transparent: true, opacity: 0, depthWrite: false,
-  })
-  const rainMesh = new THREE.LineSegments(rainGeom, rainMat)
-  rainMesh.frustumCulled = false
-  rainMesh.visible = false
-  scene.add(rainMesh)
-
-  function updateRain(dt, intensity) {
-    rainMesh.visible = intensity > 0.01
-    if (!rainMesh.visible) return
-    rainMat.opacity = 0.16 + 0.34 * intensity
-    const fall = (26 + 42 * intensity) * dt
-    const streak = 1.6 + 3.4 * intensity
-    for (let i = 0; i < RAIN_N; i++) {
-      let y = rainTop[i * 3 + 1] - fall
-      if (y < G - 4) y = G + RAIN_H
-      rainTop[i * 3 + 1] = y
-      const x = rainTop[i * 3], z = rainTop[i * 3 + 2]
-      const k = i * 6
-      rainPos[k] = x;             rainPos[k + 1] = y;           rainPos[k + 2] = z
-      rainPos[k + 3] = x + 0.5;   rainPos[k + 4] = y - streak;  rainPos[k + 5] = z
-    }
-    rainGeom.getAttribute('position').needsUpdate = true
-  }
-
-  // ─── NIEVE: copos que caen lento y derivan; densidad por intensidad ───────
-  const SNOW_N = 5000
-  const SNOW_H = 46
-  const snowPos = new Float32Array(SNOW_N * 3)
-  const snowPhase = new Float32Array(SNOW_N)
-  for (let i = 0; i < SNOW_N; i++) {
-    const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * R * 1.05
-    snowPos[i * 3] = Math.cos(a) * rr
-    snowPos[i * 3 + 1] = G + rnd() * SNOW_H
-    snowPos[i * 3 + 2] = Math.sin(a) * rr
-    snowPhase[i] = rnd() * 6.2832
-  }
-  const snowGeom = new THREE.BufferGeometry()
-  snowGeom.setAttribute('position', new THREE.BufferAttribute(snowPos, 3))
-  const snowMat = new THREE.ShaderMaterial({
-    uniforms: { uProj: pointUniforms.uProj },
-    transparent: true, depthWrite: false, blending: THREE.NormalBlending,
-    vertexShader: `uniform float uProj; void main(){
-      vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = clamp(0.55 * uProj / max(-mv.z, 0.001), 1.5, 34.0);
-      gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
-      if(d > 0.5) discard;
-      gl_FragColor = vec4(1.0, 1.0, 1.0, smoothstep(0.5, 0.15, d)); }`,
-  })
-  const snowMesh = new THREE.Points(snowGeom, snowMat)
-  snowMesh.frustumCulled = false
-  snowMesh.visible = false
-  scene.add(snowMesh)
-
-  function updateSnow(dt, clockT, intensity) {
-    snowMesh.visible = intensity > 0.01
-    if (!snowMesh.visible) return
-    const active = Math.floor(intensity * SNOW_N)
-    const fall = (7 + 7 * intensity) * dt
-    for (let i = 0; i < SNOW_N; i++) {
-      if (i >= active) { snowPos[i * 3 + 1] = -9999; continue }
-      let y = snowPos[i * 3 + 1] - fall
-      if (y < G - 2) { y = G + SNOW_H; }
-      snowPos[i * 3 + 1] = y
-      // Deriva lateral suave (revoloteo).
-      snowPos[i * 3] += Math.sin(clockT * 0.8 + snowPhase[i]) * 6 * dt
-      snowPos[i * 3 + 2] += Math.cos(clockT * 0.6 + snowPhase[i] * 1.3) * 6 * dt
-    }
-    snowGeom.getAttribute('position').needsUpdate = true
-  }
-
-  // Nieve acumulada sobre rocas/árboles: puntos que crecen con la acumulación.
-  const capUniforms = { uProj: pointUniforms.uProj, uCap: { value: 0 } }
-  {
-    const capGeom = new THREE.BufferGeometry()
-    capGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(capPos), 3))
-    const capMat = new THREE.ShaderMaterial({
-      uniforms: capUniforms, transparent: true, depthWrite: false,
-      vertexShader: `uniform float uProj, uCap; varying float vC; void main(){ vC = uCap;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = clamp(0.7 * uCap * uProj / max(-mv.z, 0.001), 0.0, 30.0);
-        gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `varying float vC; void main(){ if(vC < 0.02) discard;
-        vec2 uv = gl_PointCoord - 0.5; if(length(uv) > 0.5) discard;
-        gl_FragColor = vec4(0.96, 0.98, 1.0, 1.0); }`,
-    })
-    const capMesh = new THREE.Points(capGeom, capMat)
-    capMesh.frustumCulled = false
-    scene.add(capMesh)
-  }
+  const rain = createRain(scene, R, G)
+  const snow = createSnow(scene, R, G)
+  const caps = createSnowCaps(scene, capPos, pointUniforms.uProj)
 
   // El escenario ya trae el lente y el resize; aquí solo se registra lo que
   // depende de la resolución en este mundo (uProj de los puntos, líneas gruesas).
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
     hazeUniforms.uProj.value = m.proj
+    snow.mesh.material.uniforms.uProj.value = m.proj
     for (const mat of fatMaterials) mat.resolution.set(m.w * m.dpr, m.h * m.dpr)
   })
 
@@ -1435,7 +1334,7 @@ export function createScene(container, cfg, agentNames = []) {
       }
       // La nieve se acumula: capa blanca sobre el suelo.
       if (snowGroundMat) snowGroundMat.opacity = Math.min(0.95, snowCover * 1.2)
-      capUniforms.uCap.value = snowCover
+      caps.setCover(snowCover)
 
       // Invierno: las flores se entierran y los bichos escasean bajo la nieve.
       if (floraMat) { floraMat.transparent = true; floraMat.opacity = 1 - snowCover * 0.85 }
@@ -1452,8 +1351,8 @@ export function createScene(container, cfg, agentNames = []) {
         0.26 * dayF * snowCover,
       )
 
-      updateRain(step, snowing ? 0 : eco.rain)
-      updateSnow(step, clock, snowfall)
+      rain.update(step, snowing ? 0 : eco.rain)
+      snow.update(step, clock, snowfall)
 
       // Los agentes se frenan con nieve/frío.
       // Con lluvia (sobre todo fuerte) todo se calma: agentes, pájaros y bichos.
