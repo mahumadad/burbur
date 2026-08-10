@@ -27,7 +27,7 @@ Referencia de líneas: sobre `src/render/scene.js` **post-rebase** (1630 líneas
 consume `createStage`). Antes de cada extracción, `grep -n` para confirmar rangos, porque
 extracciones previas de esta misma fase desplazan los números.
 
-### Task A1: `engine/haze.js` — halo aditivo de color del mundo
+### Task 1: [A1] `engine/haze.js` — halo aditivo de color del mundo
 
 **Files:**
 - Create: `src/render/engine/haze.js`
@@ -103,7 +103,7 @@ git commit -m "Extract haze into engine/haze.js"
 
 ---
 
-### Task A2: `engine/weather.js` — lluvia + nieve + caps
+### Task 2: [A2] `engine/weather.js` — lluvia + nieve + caps
 
 **Files:**
 - Create: `src/render/engine/weather.js`
@@ -174,7 +174,7 @@ git commit -m "Extract rain/snow/caps into engine/weather.js"
 
 ---
 
-### Task A3: `engine/agents3d.js` — constructores de agente + motion
+### Task 3: [A3] `engine/agents3d.js` — constructores de agente + motion
 
 **Files:**
 - Create: `src/render/engine/agents3d.js`
@@ -246,7 +246,7 @@ git commit -m "Extract agent geometry + motion into engine/agents3d.js"
 
 ---
 
-### Task A4: `engine/points.js` — sistema de puntos tamaño-mundo + DOF
+### Task 4: [A4] `engine/points.js` — sistema de puntos tamaño-mundo + DOF
 
 **Files:**
 - Create: `src/render/engine/points.js`
@@ -418,7 +418,7 @@ git commit -m "Extract world-size point system + dynamic buffers into engine/poi
 
 ---
 
-### Task A5: `engine/trails.js` — estelas
+### Task 5: [A5] `engine/trails.js` — estelas
 
 **Files:**
 - Create: `src/render/engine/trails.js`
@@ -488,7 +488,7 @@ Enviar por `mcp__ccd_session_mgmt__send_message` a AGUA (`local_ac69e1ea-...`) y
 
 # FASE B — Mundo CIUDAD
 
-### Task B1: `CITY_CENSUS` (TDD, puro)
+### Task 6: [B1] `CITY_CENSUS` (TDD, puro)
 
 **Files:**
 - Modify: `src/sim/agents.js` (añadir export `CITY_CENSUS`)
@@ -569,7 +569,7 @@ git commit -m "Add CITY_CENSUS with urban fauna and actors"
 
 ---
 
-### Task B2: `cityLayout.js` — retícula de calles → bloques (TDD, puro)
+### Task 7: [B2] `cityLayout.js` — retícula de calles → bloques (TDD, puro)
 
 **Files:**
 - Create: `src/render/cityLayout.js`
@@ -667,7 +667,7 @@ git commit -m "Add pure city street/block layout generator"
 
 ---
 
-### Task B3: `city.js` esqueleto + registry `ready:true`
+### Task 8: [B3] `city.js` esqueleto + registry `ready:true`
 
 **Files:**
 - Create: `src/render/city.js`
@@ -737,7 +737,7 @@ git commit -m "Wire real city world skeleton into registry"
 
 ---
 
-### Task B4: suelo `pn` matrix + calles
+### Task 9: [B4] suelo `pn` matrix + calles
 
 **Files:** Modify `src/render/city.js`.
 
@@ -764,7 +764,7 @@ git commit -m "Add city ground grid (matrix) and street layout"
 
 ---
 
-### Task B5: edificios `bn`/`yn` — transparentes en capas + glow + matrix (LA ESTRELLA)
+### Task 10: [B5] edificios `bn`/`yn` — transparentes en capas + glow + matrix (LA ESTRELLA)
 
 **Files:** Modify `src/render/city.js`.
 
@@ -795,7 +795,7 @@ git commit -m "Add layered translucent glowing buildings (matrix)"
 
 ---
 
-### Task B6: `Sn` edificios bajos + `Cn` farolas + `wn` muebles + `Tn` charcos
+### Task 11: [B6] `Sn` edificios bajos + `Cn` farolas + `wn` muebles + `Tn` charcos
 
 **Files:** Modify `src/render/city.js`.
 
@@ -817,7 +817,7 @@ git commit -m "Add low buildings, streetlights, furniture and puddles"
 
 ---
 
-### Task B7: `Dn` pasto (46 700) + `kn` flores + `An` polvo
+### Task 12: [B7] `Dn` pasto (46 700) + `kn` flores + `An` polvo
 
 **Files:** Modify `src/render/city.js`.
 
@@ -842,7 +842,7 @@ git commit -m "Add city grass, flowers and street dust"
 
 ---
 
-### Task B8: agentes (pool ciudad, escala, tráfico, calles) + estelas + bichos
+### Task 13: [B8] agentes (pool ciudad, escala, tráfico, calles) + estelas + bichos
 
 **Files:** Modify `src/render/city.js`.
 
@@ -873,7 +873,7 @@ git commit -m "Add city agents (roster, scale, traffic height, street paths), tr
 
 ---
 
-### Task B9: clima/eco + haze naranja + scare + label + cierre
+### Task 14: [B9] clima/eco + haze naranja + scare + label + cierre
 
 **Files:** Modify `src/render/city.js`.
 
