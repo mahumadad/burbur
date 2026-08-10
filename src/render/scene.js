@@ -5,6 +5,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
+import { createPaths, createWalkers, updateWalkers } from '../sim/paths.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -18,20 +19,34 @@ function terrainHeight(x, z) {
 function fertility(x, z) {
   return fbm(x * 0.02 + 19, z * 0.02 + 41, 2)
 }
-/** 1 en el centro, 0 fuera de la isla; borde irregular. */
+/** 1 en el centro, 0 fuera de la isla; borde irregular y con caída larga a negro. */
 function islandMask(x, z, R) {
   const r = Math.hypot(x, z)
   const wobble = (noise2(x * 0.03, z * 0.03) - 0.5) * 0.22
   const t = 1 - r / (R * (1 + wobble))
-  return Math.max(0, Math.min(1, t * 2.4))
+  // Caída suave (no lineal) → el horizonte se disuelve en el negro.
+  const m = Math.max(0, Math.min(1, t * 1.5))
+  return m * m * (3 - 2 * m)
+}
+
+/**
+ * Pozos de luz: manchas iluminadas y zonas en sombra, como si un foco irregular
+ * cayera sobre el claro. Se hornea en el color: persiste incluso de noche.
+ */
+function lightPool(x, z) {
+  const a = fbm(x * 0.026 + 11, z * 0.026 + 29, 2)
+  const b = noise2(x * 0.011 + 61, z * 0.011 + 7)
+  const v = a * 0.62 + b * 0.38
+  // Rango amplio: zonas casi en sombra y pozos claramente iluminados.
+  return 0.34 + 1.75 * Math.pow(Math.max(0, v), 2.0)
 }
 
 // Gradiente del pasto por fertilidad: verde oliva → verde brillante.
 function grassColor(f, out) {
   const t = Math.max(0, Math.min(1, f))
-  out[0] = 0.18 + 0.30 * t
-  out[1] = 0.42 + 0.48 * t
-  out[2] = 0.10 + 0.22 * t
+  out[0] = 0.24 + 0.38 * t
+  out[1] = 0.58 + 0.62 * t
+  out[2] = 0.13 + 0.27 * t
 }
 
 export function createScene(container, cfg) {
@@ -113,7 +128,7 @@ export function createScene(container, cfg) {
       const vx = Math.cos(a) * lean
       const vz = Math.sin(a) * lean
       grassColor(fert + (rnd() - 0.5) * 0.2, base)
-      const k = mask
+      const k = mask * lightPool(x, z)
       const cr = base[0] * k, cg = base[1] * k, cb = base[2] * k
       const T = n * 12
       // base → medio
@@ -147,7 +162,7 @@ export function createScene(container, cfg) {
     [1.0, 0.88, 0.10], [0.95, 0.30, 0.30], [1.0, 0.69, 0.35],
   ]
 
-  function flower(x, y, z, scale) {
+  function flower(x, y, z, scale, lit = 1) {
     const h = (3 + rnd() * 3.6) * scale
     const a = rnd() * 6.2832
     const c = (0.5 + rnd() * 1.3) * scale
@@ -156,7 +171,8 @@ export function createScene(container, cfg) {
     const tx = x + lx, ty = y + h, tz = z + lz
     pushLine(x, y, z, mx, my, mz, STEM_LO, STEM_MID)
     pushLine(mx, my, mz, tx, ty, tz, STEM_MID, STEM_HI)
-    const col = FLOWER_COLS[(rnd() * FLOWER_COLS.length) | 0]
+    const src = FLOWER_COLS[(rnd() * FLOWER_COLS.length) | 0]
+    const col = [src[0] * lit, src[1] * lit, src[2] * lit]
     if (rnd() < 0.42) {
       const k = 2 + ((rnd() * 3) | 0)
       for (let i = 0; i < k; i++) {
@@ -185,65 +201,179 @@ export function createScene(container, cfg) {
       const d = spread * Math.sqrt(rnd()) * (1 + rnd() * 0.6)
       const fx = px + Math.cos(b) * d, fz = pz + Math.sin(b) * d
       if (islandMask(fx, fz, R) < 0.1) continue
-      flower(fx, G + terrainHeight(fx, fz), fz, 0.6 + rnd() * 0.75)
+      flower(fx, G + terrainHeight(fx, fz), fz, 0.6 + rnd() * 0.75,
+        Math.min(1.3, lightPool(fx, fz)))
     }
   }
 
   // ─── ÁRBOLES SECOS: ramas curvas recursivas (líneas) ──────────────────────
-  const BARK_LO = [0.30, 0.29, 0.27]
-  const BARK_HI = [0.72, 0.71, 0.66]
-  function branch(x, y, z, dx, dy, dz, len, depth) {
-    const ex = x + dx * len, ey = y + dy * len, ez = z + dz * len
-    const t = depth / 5
-    const c1 = [BARK_LO[0] + t * 0.3, BARK_LO[1] + t * 0.3, BARK_LO[2] + t * 0.3]
-    pushLine(x, y, z, ex, ey, ez, c1, BARK_HI)
+  const BARK_LO = [0.26, 0.25, 0.23]
+  const BARK_HI = [0.86, 0.85, 0.80]
+
+  /**
+   * Rama con grosor: en vez de una línea, un haz de N líneas paralelas que se
+   * estrecha con la profundidad. Además curva (varios tramos) y siembra puntos
+   * de corteza. Eso le da estructura de árbol y no de brizna.
+   */
+  function branch(x, y, z, dx, dy, dz, len, depth, thick, lit) {
+    const SEGS = 4
+    let cx = x, cy = y, cz = z
+    let vx = dx, vy = dy, vz = dz
+    const t0 = depth / 5
+    const c1 = [
+      BARK_LO[0] + t0 * 0.34, BARK_LO[1] + t0 * 0.34, BARK_LO[2] + t0 * 0.32,
+    ]
+    for (let s = 0; s < SEGS; s++) {
+      // Curvar poco a poco (gravedad + deriva) → ramas orgánicas, no rectas.
+      vx += (rnd() - 0.5) * 0.16
+      vy -= 0.05 * (1 - depth / 5)
+      vz += (rnd() - 0.5) * 0.16
+      const m = Math.hypot(vx, vy, vz) || 1
+      vx /= m; vy /= m; vz /= m
+      const sl = len / SEGS
+      const ex = cx + vx * sl, ey = cy + vy * sl, ez = cz + vz * sl
+      // Haz de líneas → grosor visible.
+      const strands = Math.max(1, Math.round(thick))
+      for (let k = 0; k < strands; k++) {
+        const ox = strands === 1 ? 0 : (rnd() - 0.5) * thick * 0.075
+        const oz = strands === 1 ? 0 : (rnd() - 0.5) * thick * 0.075
+        pushLine(cx + ox, cy, cz + oz, ex + ox, ey, ez + oz, c1, BARK_HI)
+      }
+      // Puntos de corteza: pocos y apagados, solo para dar textura.
+      const dots = Math.round(thick * 0.5)
+      for (let k = 0; k < dots; k++) {
+        const f = rnd()
+        const sh = (0.30 + 0.28 * rnd()) * lit
+        pushPoint(
+          cx + (ex - cx) * f + (rnd() - 0.5) * thick * 0.07,
+          cy + (ey - cy) * f,
+          cz + (ez - cz) * f + (rnd() - 0.5) * thick * 0.07,
+          [BARK_HI[0] * sh, BARK_HI[1] * sh, BARK_HI[2] * sh],
+          0.07 + rnd() * 0.06, 0,
+        )
+      }
+      cx = ex; cy = ey; cz = ez
+    }
     if (depth <= 0) return
-    const k = rnd() < 0.65 ? 2 : 3
+    const k = depth > 3 ? 2 : (rnd() < 0.6 ? 2 : 3)
     for (let i = 0; i < k; i++) {
-      const nx = dx + (rnd() - 0.5) * 0.9
-      const ny = dy + (rnd() - 0.2) * 0.35
-      const nz = dz + (rnd() - 0.5) * 0.9
+      const nx = vx + (rnd() - 0.5) * 1.15
+      const ny = vy + (rnd() - 0.25) * 0.5
+      const nz = vz + (rnd() - 0.5) * 1.15
       const m = Math.hypot(nx, ny, nz) || 1
-      branch(ex, ey, ez, nx / m, ny / m, nz / m, len * (0.62 + rnd() * 0.18), depth - 1)
+      branch(cx, cy, cz, nx / m, ny / m, nz / m,
+        len * (0.66 + rnd() * 0.16), depth - 1, thick * 0.56, lit)
     }
   }
-  for (let t = 0; t < 7; t++) {
-    const tr = R * (0.15 + 0.7 * rnd())
+
+  for (let t = 0; t < 9; t++) {
+    const tr = R * (0.12 + 0.72 * rnd())
     const ta = rnd() * 6.2832
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.35) continue
-    branch(tx, G + terrainHeight(tx, tz), tz, 0, 1, 0, 3.4 + rnd() * 1.8, 4)
+    const lit = Math.min(1.25, lightPool(tx, tz))
+    branch(tx, G + terrainHeight(tx, tz) - 0.4, tz, 0, 1, 0,
+      3.2 + rnd() * 1.8, 5, 4 + rnd() * 2, lit)
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
-  const ROCK = [0.30, 0.19, 0.16]
-  for (let i = 0; i < 4; i++) {
-    const rr = R * (0.15 + 0.6 * rnd())
+  const ROCK = [0.44, 0.31, 0.27]
+  const rockSpots = []
+  for (let i = 0; i < 14; i++) {
+    const rr = R * (0.10 + 0.72 * rnd())
     const ra = rnd() * 6.2832
     const cx = Math.cos(ra) * rr, cz = Math.sin(ra) * rr
     if (islandMask(cx, cz, R) < 0.4) continue
     const cy = G + terrainHeight(cx, cz)
-    const size = 2.4 + rnd() * 3
-    for (let k = 0; k < 600; k++) {
+    const size = 1.8 + rnd() * 4.2
+    const lit = Math.min(1.3, lightPool(cx, cz))
+    rockSpots.push({ x: cx, z: cz, r: size })
+    const dens = Math.round(340 + size * 160)
+    for (let k = 0; k < dens; k++) {
       const u = rnd() * 6.2832, v = Math.acos(2 * rnd() - 1)
       const rr2 = size * Math.cbrt(rnd())
       const sx = cx + Math.sin(v) * Math.cos(u) * rr2
-      const sy = cy + Math.abs(Math.cos(v)) * rr2 * 0.6
+      const sy = cy + Math.abs(Math.cos(v)) * rr2 * 0.55
       const sz = cz + Math.sin(v) * Math.sin(u) * rr2
-      const sh = 0.75 + 0.45 * rnd()
-      pushPoint(sx, sy, sz, [ROCK[0] * sh, ROCK[1] * sh, ROCK[2] * sh], 0.28 + rnd() * 0.28, 0)
+      const sh = (0.68 + 0.5 * rnd()) * lit
+      pushPoint(sx, sy, sz, [ROCK[0] * sh, ROCK[1] * sh, ROCK[2] * sh], 0.26 + rnd() * 0.26, 0)
+    }
+  }
+
+  // ─── HONGOS: tallo corto y grueso + sombrero de puntos ────────────────────
+  const CAP_COLS = [
+    [0.92, 0.86, 0.74], [0.86, 0.42, 0.30], [0.78, 0.70, 0.86],
+    [0.95, 0.72, 0.32], [0.72, 0.74, 0.70],
+  ]
+  function mushroom(x, y, z, scale, lit) {
+    const h = (0.9 + rnd() * 1.1) * scale
+    const stem = [0.62 * lit, 0.58 * lit, 0.50 * lit]
+    const stemHi = [0.86 * lit, 0.82 * lit, 0.72 * lit]
+    // Tallo: 2–3 líneas juntas → se lee grueso.
+    for (let s = 0; s < 3; s++) {
+      const ox = (rnd() - 0.5) * 0.10 * scale
+      const oz = (rnd() - 0.5) * 0.10 * scale
+      pushLine(x + ox, y, z + oz, x + ox * 0.5, y + h, z + oz * 0.5, stem, stemHi)
+    }
+    const base = CAP_COLS[(rnd() * CAP_COLS.length) | 0]
+    const col = [base[0] * lit, base[1] * lit, base[2] * lit]
+    // Sombrero: anillo de puntos + centro.
+    const capR = (0.34 + rnd() * 0.30) * scale
+    const ring = 7 + ((rnd() * 6) | 0)
+    for (let i = 0; i < ring; i++) {
+      const a = (i / ring) * 6.2832
+      pushPoint(x + Math.cos(a) * capR, y + h - 0.05 * scale, z + Math.sin(a) * capR,
+        col, (0.15 + rnd() * 0.12) * scale, 0)
+    }
+    pushPoint(x, y + h + 0.06 * scale, z, col, (0.24 + rnd() * 0.16) * scale, 0)
+  }
+
+  // Agrupados junto a rocas y árboles, como en la naturaleza.
+  for (const spot of rockSpots) {
+    if (rnd() < 0.35) continue
+    const k = 3 + ((rnd() * 7) | 0)
+    for (let i = 0; i < k; i++) {
+      const a = rnd() * 6.2832
+      const d = spot.r * (1.05 + rnd() * 0.9)
+      const mx = spot.x + Math.cos(a) * d, mz = spot.z + Math.sin(a) * d
+      if (islandMask(mx, mz, R) < 0.2) continue
+      mushroom(mx, G + terrainHeight(mx, mz), mz,
+        0.7 + rnd() * 0.8, Math.min(1.3, lightPool(mx, mz)))
+    }
+  }
+
+  // ─── SENDEROS: bucles punteados sobre el terreno ──────────────────────────
+  const paths = createPaths(cfg.paths, rnd)
+  const PATH_COL = [0.42, 0.05, 0.05]
+  for (const loop of paths.loops) {
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length]
+      const ax = a.x * R, az = a.z * R
+      const bx = b.x * R, bz = b.z * R
+      const segLen = Math.hypot(bx - ax, bz - az)
+      const dots = Math.max(1, Math.round(segLen / 1.15))
+      for (let d = 0; d < dots; d++) {
+        const f = d / dots
+        const px = ax + (bx - ax) * f
+        const pz = az + (bz - az) * f
+        const lit = Math.min(1.35, lightPool(px, pz))
+        pushPoint(px, G + terrainHeight(px, pz) + 0.28, pz,
+          [PATH_COL[0] * lit, PATH_COL[1] * lit, PATH_COL[2] * lit],
+          0.32 + rnd() * 0.16, 0)
+      }
     }
   }
 
   // ─── Polvo del borde de la isla ───────────────────────────────────────────
   for (let i = 0; i < cfg.world.dustCount; i++) {
     const a = rnd() * 6.2832
-    const rr = R * (0.95 + Math.pow(rnd(), 0.85) * 0.32)
+    // Ceñido al borde y con caída cuadrática → se disuelve en negro, sin banda.
+    const rr = R * (0.90 + Math.pow(rnd(), 1.6) * 0.16)
     const x = Math.cos(a) * rr, z = Math.sin(a) * rr
-    const fade = Math.max(0.08, 1 - (rr - R) / (R * 0.3))
-    const s = (0.25 + rnd() * 0.75) * fade
-    pushPoint(x, G + terrainHeight(x, z) + rnd() * 0.8, z,
-      [0.03 * s + 0.015, 0.15 * s + 0.025, 0.17 * s + 0.035], 0.15 + rnd() * 0.3, 0)
+    const edge = Math.max(0, 1 - (rr - R * 0.90) / (R * 0.16))
+    const s = (0.10 + rnd() * 0.30) * edge * edge
+    pushPoint(x, G + terrainHeight(x, z) + rnd() * 0.5, z,
+      [0.030 * s, 0.055 * s, 0.052 * s], 0.10 + rnd() * 0.16, 0)
   }
 
   // ─── Subir buffers ────────────────────────────────────────────────────────
@@ -321,10 +451,11 @@ export function createScene(container, cfg) {
     const pos = [], siz = []
     for (let i = 0; i < rc.hazeCount; i++) {
       const a = rnd() * 6.2832
-      const rr = Math.sqrt(rnd()) * R * 1.28
+      // Contenida dentro de la isla: fuera de ella el fondo queda negro puro.
+      const rr = Math.sqrt(rnd()) * R * 0.92
       const x = Math.cos(a) * rr, z = Math.sin(a) * rr
-      pos.push(x, G + 0.3 + rnd() * 12, z)
-      siz.push(3 + rnd() * 6.2)
+      pos.push(x, G + terrainHeight(x, z) + 0.3 + rnd() * 9, z)
+      siz.push(2.4 + rnd() * 5.2)
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
@@ -453,17 +584,16 @@ export function createScene(container, cfg) {
   let tHead = 0, tFrame = 0
 
   // ─── Mapeo simulación → mundo ─────────────────────────────────────────────
-  const B = cfg.fireflies.bounds
+  // Los agentes recorren los senderos; la altura la da el terreno.
+  const walkers = createWalkers(paths, n, rnd)
   const worldPos = new Float32Array(n * 3)
-  function mapPositions(swarm) {
-    const p = swarm.pos
-    const sx = (R * 0.72) / B.x
-    const sz = (R * 0.72) / B.z
+  function mapPositions(dt) {
+    updateWalkers(walkers, paths, dt)
     for (let i = 0; i < n; i++) {
-      const x = p[i * 3] * sx
-      const z = p[i * 3 + 2] * sz
+      const w = walkers[i]
+      const x = w.x * R, z = w.z * R
       worldPos[i * 3] = x
-      worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3 + (p[i * 3 + 1] + B.y) * 0.42
+      worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1
       worldPos[i * 3 + 2] = z
     }
   }
@@ -589,14 +719,16 @@ export function createScene(container, cfg) {
       updateRain(dt || 0.016, eco.rain)
     }
 
-    mapPositions(swarm)
+    mapPositions(dt || 0.016)
 
     for (let i = 0; i < n; i++) {
       const a = agents[i]
+      const w = walkers[i]
       a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
-      a.cage.rotation.y += dt * 0.5
-      a.cage.rotation.x += dt * 0.18
-      const pulse = 1 + swarm.flash[i] * 0.5
+      // Erguido y orientado al rumbo: nada de tumbos que deformen la silueta.
+      a.group.rotation.y = Math.atan2(w.hx, w.hz)
+      a.cage.rotation.y += dt * 0.22
+      const pulse = 1 + swarm.flash[i] * 0.35
       a.cage.scale.setScalar(pulse)
     }
 

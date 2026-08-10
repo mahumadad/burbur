@@ -16,7 +16,7 @@ export const CONFIG = {
   world: {
     radius: 62,          // radio de la isla
     groundY: 0,
-    dustCount: 8500,     // polvo del borde
+    dustCount: 3200,     // polvo del borde
   },
   fireflies: {
     count: 18,           // agentes visibles (murmur usa 15)
@@ -26,6 +26,12 @@ export const CONFIG = {
     omegaSpread: 0.18,
     bounds: { x: 12, y: 7, z: 10 },
     driftSpeed: 0.4,
+  },
+  paths: {
+    loopCount: 4,
+    minRadius: 0.34,
+    maxRadius: 0.78,
+    samples: 46,
   },
   ecosystem: {
     dayLengthSec: 540,   // día completo en 9 min → 45 s por fase
