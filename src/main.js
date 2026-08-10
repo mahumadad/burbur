@@ -6,10 +6,11 @@ import { createEcosystem } from './sim/ecosystem.js'
 import { createCensus } from './sim/agents.js'
 import { createEventEngine } from './sim/events.js'
 import { narrate } from './sim/narrator.js'
-import { worldById } from './worlds/registry.js'
+import { WORLDS, worldById } from './worlds/registry.js'
 import { createAudio } from './audio/engine.js'
 import { createHud } from './ui/hud.js'
 import { createEventLog } from './ui/eventlog.js'
+import { createWorldSelector } from './ui/selector.js'
 
 // Reloj HH:MM a partir del avance del día (para los timestamps del log).
 function clockLabel(eco) {
@@ -44,6 +45,7 @@ async function start() {
   // Cada mundo tiene lo SUYO (swarm, censo, escena, motor de eventos); al cambiar
   // se construye el nuevo y se hace dispose del viejo.
   let world = null
+  let selector = null
   function applyAccent(accent) {
     document.documentElement.style.setProperty('--accent', accent)
   }
@@ -61,10 +63,12 @@ async function start() {
     const old = world
     world = buildWorld(id)
     if (old) old.scene.dispose()
+    if (selector) selector.setActive(world.def.id)
   }
   // Nombre de paridad con murmur (el selector de mundo lo llama).
   window.setScene = switchWorld
   world = buildWorld('land')
+  selector = createWorldSelector(WORLDS, 'land', switchWorld)
 
   // Interacción: el mouse atrae a los individuos cercanos del mundo activo.
   let mouse = null

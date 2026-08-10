@@ -32,7 +32,7 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
 
   const el = document.createElement('div')
   el.className = 'eco'
-  el.style.setProperty('--accent', accent)
+  // El acento lo controla :root (--accent) según el mundo activo; el CSS ya lo lee.
   el.innerHTML = `
     <h4><span class="dot"></span>PLOT ECOSYSTEM</h4>
     <div class="row"><span>TIME</span><span data-f="time">—</span></div>
