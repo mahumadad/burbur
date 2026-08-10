@@ -29,7 +29,9 @@ export const CONFIG = {
     sepRadius: 0.10,
     drag: 0.965,
     maxSpeed: 0.075,
-    bound: 0.80,         // radio normalizado de contención
+    softR: 0.30,         // desde aquí empieza la fuerza hacia el centro
+    centerPull: 2.2,     // fuerza de la cuenca
+    bound: 0.82,         // tope duro
     // Campo de flujo: corrientes coherentes que varían lento.
     flowFreq: 5.1,
     flowPush: 0.030,

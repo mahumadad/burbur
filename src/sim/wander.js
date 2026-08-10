@@ -111,12 +111,18 @@ export function updateRoamers(rs, cfg, dt, rand = Math.random, time = 0, paths =
       }
     }
 
-    // Contención suave: al acercarse al borde, vuelve hacia el centro.
+    // Cuenca suave: fuerza hacia el centro que crece desde `softR`. Sin esto,
+    // el campo de flujo los arrastra al borde y orbitan el rim.
     const m = Math.hypot(r.x, r.z)
-    if (m > cfg.bound) {
-      const push = (m - cfg.bound) * 6
+    if (m > cfg.softR) {
+      const push = cfg.centerPull * (m - cfg.softR)
       r.vx -= (r.x / m) * push * dt
       r.vz -= (r.z / m) * push * dt
+    }
+    if (m > cfg.bound) { // tope duro
+      r.x = (r.x / m) * cfg.bound
+      r.z = (r.z / m) * cfg.bound
+      r.vx *= 0.4; r.vz *= 0.4
     }
 
     // Rozamiento y tope de velocidad.

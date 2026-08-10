@@ -5,7 +5,7 @@ import { createPaths, nearestOnPaths } from '../src/sim/paths.js'
 const BASE = {
   density: 0.66, wanderTurn: 2.2, wanderPush: 0.055,
   kickMin: 0.085, kickRange: 0.085, separation: 0.16, sepRadius: 0.10,
-  drag: 0.965, maxSpeed: 0.075, bound: 0.80,
+  drag: 0.965, maxSpeed: 0.075, softR: 0.30, centerPull: 2.2, bound: 0.82,
   flowFreq: 5.1, flowPush: 0.030, pathPull: 0, pathRadius: 0.14,
 }
 const PATHS_CFG = { loopCount: 3, minRadius: 0.34, maxRadius: 0.72, samples: 46 }
