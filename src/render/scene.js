@@ -10,6 +10,7 @@ import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
+import { createBugs, updateBugs, nearestBug } from '../sim/behaviors.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -87,6 +88,8 @@ export function createScene(container, cfg) {
   // Niebla negra: la distancia se funde en la oscuridad. La densidad la fija el clima.
   scene.fog = new THREE.FogExp2(0x000000, 0.004)
   let grassMat, floraMat, groundMat
+  // Puntos de interés (coordenadas normalizadas): destinos de los agentes.
+  const poiFlowers = []
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
@@ -257,6 +260,7 @@ export function createScene(container, cfg) {
     const pa = rnd() * 6.2832
     const px = Math.cos(pa) * pr, pz = Math.sin(pa) * pr
     if (islandMask(px, pz, R) < 0.25) continue
+    poiFlowers.push({ x: px / R, z: pz / R })
     const k = 6 + ((rnd() * 11) | 0)
     const spread = 2.5 + rnd() * 3.5
     const palette = patchPalette()
@@ -863,10 +867,53 @@ export function createScene(container, cfg) {
   scene.add(trail)
   let tHead = 0, tFrame = 0
 
+  // ─── BICHITOS: van de flor en flor, huyen de los cazadores ────────────────
+  const bugCfg = cfg.bugs
+  const bugCount = poiFlowers.length ? bugCfg.count : 0
+  const bugs = createBugs(bugCfg, poiFlowers, rnd)
+  const BUG_COLS = [[1, 1, 0.8], [1, 0.86, 0.32], [1, 0.6, 0.22], [1, 0.5, 0.72]]
+  const bugPos = new Float32Array(bugCount * 3)
+  const bugColArr = new Float32Array(bugCount * 3)
+  const bugSize = new Float32Array(bugCount)
+  for (let i = 0; i < bugCount; i++) {
+    const c = BUG_COLS[bugs[i].colorIdx % BUG_COLS.length]
+    bugColArr[i * 3] = c[0]; bugColArr[i * 3 + 1] = c[1]; bugColArr[i * 3 + 2] = c[2]
+    bugSize[i] = 0.34 + rnd() * 0.2
+  }
+  const bugGeom = new THREE.BufferGeometry()
+  bugGeom.setAttribute('position', new THREE.BufferAttribute(bugPos, 3))
+  bugGeom.setAttribute('hcol', new THREE.BufferAttribute(bugColArr, 3))
+  bugGeom.setAttribute('hsize', new THREE.BufferAttribute(bugSize, 1))
+  const bugMat = new THREE.ShaderMaterial({
+    uniforms: { uProj: pointUniforms.uProj },
+    blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+    vertexShader: `
+      attribute vec3 hcol; attribute float hsize; uniform float uProj;
+      varying vec3 vC;
+      void main(){ vC = hcol;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = clamp(hsize * uProj / max(-mv.z, 0.001), 1.0, 40.0);
+        gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `
+      precision mediump float; varying vec3 vC;
+      void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
+        if (d > 0.5) discard;
+        float a = smoothstep(0.5, 0.05, d);
+        gl_FragColor = vec4(vC, a); }`,
+  })
+  const bugMesh = new THREE.Points(bugGeom, bugMat)
+  bugMesh.frustumCulled = false
+  scene.add(bugMesh)
+
   // ─── Mapeo simulación → mundo ─────────────────────────────────────────────
   // TODOS deambulan libremente. Los caminos existen y los atraen, pero no los
   // encadenan: subiendo `pathPull` el mismo core sirve para calles de ciudad.
   const roamers = createRoamers(cfg.wander, n, rnd)
+  // Unos pocos son cazadores: persiguen al bicho más cercano.
+  const hunters = []
+  for (let i = 0; i < Math.min(bugCfg.hunters, n); i++) {
+    roamers[i].role = 'hunter'; roamers[i].aidx = i; hunters.push(roamers[i])
+  }
   const worldPos = new Float32Array(n * 3)
   const heads = new Float32Array(n * 2)
   let simTime = 0
@@ -1022,7 +1069,39 @@ export function createScene(container, cfg) {
       updateRain(dt || 0.016, eco.rain)
     }
 
-    mapPositions(dt || 0.016)
+    const step = dt || 0.016
+    mapPositions(step)
+
+    // Bichitos hacia las flores; cazadores hacia los bichitos.
+    const predations = []
+    if (bugCount) {
+      updateBugs(bugs, poiFlowers, bugCfg, step, rnd, hunters)
+      for (const h of hunters) {
+        const idx = nearestBug(bugs, h.x, h.z, bugCfg.huntRadius)
+        if (idx < 0) continue
+        const b = bugs[idx]
+        const dx = b.x - h.x, dz = b.z - h.z
+        const d = Math.hypot(dx, dz) || 1
+        h.vx += (dx / d) * bugCfg.huntPull * step
+        h.vz += (dz / d) * bugCfg.huntPull * step
+        if (d < bugCfg.catchRadius) {
+          b.alive = false; b.respawn = bugCfg.respawn
+          const dir = Math.abs(h.hx) > Math.abs(h.hz)
+            ? (h.hx > 0 ? 'right' : 'left') : (h.hz > 0 ? 'ahead' : 'behind')
+          predations.push({ hunterIdx: h.aidx, dir })
+        }
+      }
+      for (let i = 0; i < bugCount; i++) {
+        const b = bugs[i]
+        const wx = b.x * R, wz = b.z * R
+        bugPos[i * 3] = wx
+        bugPos[i * 3 + 1] = b.alive
+          ? G + terrainHeight(wx, wz) + bugCfg.height + Math.sin(b.phase) * bugCfg.bob
+          : -9999
+        bugPos[i * 3 + 2] = wz
+      }
+      bugGeom.getAttribute('position').needsUpdate = true
+    }
 
     for (let i = 0; i < n; i++) {
       const a = agents[i]
@@ -1057,6 +1136,7 @@ export function createScene(container, cfg) {
 
     controls.update()
     composer.render()
+    return predations
   }
 
   return { update, resize, renderer, camera, controls }

@@ -5,6 +5,7 @@ import { createAmbient } from './sim/ambient.js'
 import { createEcosystem } from './sim/ecosystem.js'
 import { createCensus, FOREST_CENSUS } from './sim/agents.js'
 import { createEventEngine } from './sim/events.js'
+import { narrate } from './sim/narrator.js'
 import { createScene } from './render/scene.js'
 import { createAudio } from './audio/engine.js'
 import { createHud } from './ui/hud.js'
@@ -89,7 +90,19 @@ async function start() {
     audio.setWind(Math.max(env.wind, eco.rain * 0.85))
     if (env.cricket && Math.random() < eco.activity) audio.cricket()
     if (env.owl) audio.owl()
-    scene.update(swarm, dt, eco)
+    const predations = scene.update(swarm, dt, eco)
+    // Un cazador atrapó a un bicho → evento de conflicto narrado.
+    if (predations && predations.length) {
+      const label = clockLabel(eco)
+      for (const p of predations) {
+        const who = pop.visible[p.hunterIdx]
+        if (!who) continue
+        const ev = { type: 'conflict', agent: who.name, agentIdx: p.hunterIdx, dir: p.dir }
+        const text = narrate({ ...ev, agentType: who.type }, { phase: eco.phase, weather: eco.weather })
+        eventLog.push({ ...ev, ...text }, label)
+        audio.accent(p.dir, p.hunterIdx)
+      }
+    }
     requestAnimationFrame(frame)
   }
   requestAnimationFrame(frame)
