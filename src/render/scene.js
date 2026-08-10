@@ -74,6 +74,8 @@ export function createScene(container, cfg) {
     composer.setSize(side, side)
     const el = renderer.domElement
     el.style.position = 'absolute'
+    el.style.width = side + 'px'
+    el.style.height = side + 'px'
     el.style.left = (container.clientWidth - side) / 2 + 'px'
     el.style.top = (container.clientHeight - side) / 2 + 'px'
   }
