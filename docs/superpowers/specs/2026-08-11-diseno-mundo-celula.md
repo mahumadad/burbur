@@ -576,7 +576,9 @@ HUD, el shake y el bucle de frames funcionan sin cambios.
    que se pegan al cruzar la membrana. No conoce la forma de la célula: pregunta por un predicado
    `inside(x,z)`, así que sirve igual contra un disco de test que contra la membrana real.
    ✅ implementado, 9 tests.
-4. **`CELL_CENSUS`** en `src/sim/agents.js` y el **léxico de célula** para el narrador.
+4. **`CELL_CENSUS`** en `src/sim/agents.js` y **`CELL_LEXICON`** en `src/sim/narrator.js`.
+   ✅ implementado, 13 tests. Las estructuras se marcan con `static: true` y `createCensus` ya no
+   mira solo el tipo `static_object` del bosque, así que el núcleo no sale a deambular.
 5. **Perfil de ecosistema** de la célula (12 fases del ciclo + 6 estados de medio).
 
 ### 8.4 Los tres cambios que el core sí necesita
@@ -632,9 +634,21 @@ que la célula tenga ciclo celular: añadir `ecosystem.setProfile({phases, weath
 llamarlo desde `buildWorld`. Es preferible a mover la instancia a por-mundo — mantiene el reloj
 continuo y son ~15 líneas.
 
-**(c) Parametrizar el léxico del narrador.**
-`ACTIONS` y `AMBIENT` son constantes de módulo en `narrator.js`. Se pasa el léxico como parámetro
-(`createEventEngine(pop, cfg)` con `cfg.lexicon`), con default al del bosque. Retro-compatible.
+**(c) Parametrizar el léxico del narrador. ✅ HECHO.**
+`narrate(ev, ctx, rand, lex)` recibe el léxico, con default a `FOREST_LEXICON` (el bosque no
+cambió). `createEventEngine(pop, cfg)` lo pasa desde `cfg.lexicon`. Un léxico trae `actions`,
+`ambient`, `place`, `fallbackType` y **puede reemplazar la plantilla de cualquier tipo de evento**
+con una función — así `shift` narra el ciclo celular en vez de la luz, y `conflict` distingue
+fagocitar un invasor de aplastar a uno de los propios.
+
+Además, `actions` admite **claves por nombre de agente**, no solo por tipo. Sin eso, el balde
+genérico le hacía "apilar una cisterna" al núcleo y "abrirse y cerrarse" a una fibra de estrés:
+en el bosque la genericidad no molesta, pero las estructuras de la célula hacen cosas demasiado
+distintas entre sí. El bosque no define claves por nombre, así que no le cambia nada.
+
+**Pendiente de cableado (F4):** `main.js:163` llama a `narrate(...)` directamente para los eventos
+de conflicto que devuelve `scene.update()`, sin léxico → hoy saldría en vocabulario de bosque. Al
+montar el mundo célula hay que pasarle el del mundo activo.
 
 **Menores, opcionales:**
 - `main.js:161` asume que los eventos que devuelve `scene.update()` tienen forma `{hunterIdx, dir}`
