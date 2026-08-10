@@ -1,6 +1,7 @@
 import { createScene } from '../render/scene.js'
+import { createCityScene } from '../render/city.js'
 import { createStubWorld } from './stub.js'
-import { FOREST_CENSUS } from '../sim/agents.js'
+import { FOREST_CENSUS, CITY_CENSUS } from '../sim/agents.js'
 
 // Registro de mundos. Cada mundo es un builder que construye su escena en el
 // container y devuelve la API común { update, resize, flash, dispose }. El host
@@ -20,9 +21,9 @@ export const WORLDS = [
     build: (container, cfg) => createStubWorld(container, cfg, { accent: '#aacdff', label: 'Pond' }),
   },
   {
-    id: 'city', label: 'Block ecosystem', accent: '#fab75e', ready: false,
-    census: FOREST_CENSUS,
-    build: (container, cfg) => createStubWorld(container, cfg, { accent: '#fab75e', label: 'Block' }),
+    id: 'city', label: 'Block ecosystem', accent: '#fab75e', ready: true,
+    census: CITY_CENSUS,
+    build: (container, cfg, names) => createCityScene(container, cfg, names),
   },
 ]
 
