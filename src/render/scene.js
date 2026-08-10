@@ -581,7 +581,9 @@ export function createScene(container, cfg, agentNames = []) {
   // `birth` (instante de brote, escalonado) y `kind` (0 hoja / 1 flor).
   const folPos = [], folCol = [], folSize = [], folPhase = [], folKind = [], folBirth = []
   const folFall = [], folRot = [] // color de otoño por hoja + orientación de la hoja
-  let treeBlooms = false
+  const petalAnchors = [] // posiciones+color de las flores sakura → lluvia de pétalos
+  let treeBlooms = false, treeSakura = false
+  const SAKURA = [[1.0, 0.72, 0.82], [1.0, 0.80, 0.90], [1.0, 0.60, 0.74], [0.98, 0.90, 0.96]]
   const LEAF_LO = [0.09, 0.20, 0.05], LEAF_HI = [0.30, 0.52, 0.13]
   const BLOSSOM = [[1.0, 0.72, 0.82], [1.0, 0.86, 0.40], [0.98, 0.95, 1.0], [1.0, 0.56, 0.66]]
   // Otoño: cada hoja vira a un color propio (rojos, naranjas, ámbar, marrones).
@@ -604,6 +606,16 @@ export function createScene(container, cfg, agentNames = []) {
     folFall.push(c[0], c[1], c[2]); folRot.push(0) // las flores no viran (aKind=1)
     folSize.push(0.55 + rnd() * 0.65); folPhase.push(rnd()); folKind.push(1)
     folBirth.push(0.02 + rnd() * 0.14)
+  }
+  // Flor de sakura: rosada, y su posición se guarda para soltar pétalos.
+  function addSakuraBlossom(p) {
+    const c = SAKURA[(rnd() * SAKURA.length) | 0]
+    const x = p.x + (rnd() - 0.5) * 1.4, y = p.y + (rnd() - 0.5) * 1.4, z = p.z + (rnd() - 0.5) * 1.4
+    folPos.push(x, y, z); folCol.push(c[0], c[1], c[2])
+    folFall.push(c[0], c[1], c[2]); folRot.push(0)
+    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(1)
+    folBirth.push(0.02 + rnd() * 0.12)
+    petalAnchors.push(x, y, z, c[0], c[1], c[2])
   }
 
   /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido. */
@@ -669,11 +681,19 @@ export function createScene(container, cfg, agentNames = []) {
       // Ramita externa: brotan las hojas (y flores si el árbol florece). Los
       // troncos caídos no echan follaje.
       if (!fallen) {
-        const leafN = 8 + ((rnd() * 8) | 0)
-        for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
-        if (treeBlooms && rnd() < 0.7) {
-          const nb = 2 + ((rnd() * 4) | 0)
-          for (let k = 0; k < nb; k++) addBlossom(spine[spine.length - 1])
+        if (treeSakura) {
+          // Sakura: pocas hojas verdes, canopy DENSO de flores rosadas.
+          const leafN = 2 + ((rnd() * 3) | 0)
+          for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+          const nb = 8 + ((rnd() * 10) | 0)
+          for (let k = 0; k < nb; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
+        } else {
+          const leafN = 8 + ((rnd() * 8) | 0)
+          for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+          if (treeBlooms && rnd() < 0.7) {
+            const nb = 2 + ((rnd() * 4) | 0)
+            for (let k = 0; k < nb; k++) addBlossom(spine[spine.length - 1])
+          }
         }
       }
       return
@@ -705,7 +725,8 @@ export function createScene(container, cfg, agentNames = []) {
     const tr = R * (0.19 + rnd() * 0.54)
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.3) continue
-    treeBlooms = rnd() < 0.55 // ~la mitad de los árboles dan flores en primavera
+    treeSakura = (t === 0) // un árbol es el sakura (canopy rosado + pétalos)
+    treeBlooms = !treeSakura && rnd() < 0.55 // ~la mitad del resto dan flores
     const treeLen = 8 + rnd() * 7
     branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.8, tz),
       new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
@@ -715,7 +736,7 @@ export function createScene(container, cfg, agentNames = []) {
     treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
     t++
   }
-  treeBlooms = false // los troncos caídos no florecen
+  treeBlooms = false; treeSakura = false // los troncos caídos no florecen
   const logs = 1 + (rnd() < 0.5 ? 1 : 0)
   for (let t = 0, guard = 0; t < logs && guard++ < 60; ) {
     const ta = rnd() * 6.2832
@@ -1117,7 +1138,7 @@ export function createScene(container, cfg, agentNames = []) {
   const fallVy = new Float32Array(FALL_N)
   const fallPh = new Float32Array(FALL_N)
   const fallActive = new Uint8Array(FALL_N)
-  let fallHead = 0, fallBudget = 0
+  let fallHead = 0, fallBudget = 0, petalBudget = 0
   const fallGeo = new THREE.BufferGeometry()
   fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
   fallGeo.setAttribute('color', new THREE.BufferAttribute(fallCol, 3))
@@ -1127,8 +1148,8 @@ export function createScene(container, cfg, agentNames = []) {
   }))
   fallMesh.frustumCulled = false
   scene.add(fallMesh)
-  function updateFallingLeaves(step, rate, autumn) {
-    // Emisión: presupuesto fraccional (hojas/seg) desde las ramas.
+  function updateFallingLeaves(step, rate, autumn, petalRate) {
+    // Emisión de HOJAS: presupuesto fraccional (hojas/seg) desde las ramas.
     if (leafAnchors.length && rate > 0) {
       fallBudget += rate * step
       while (fallBudget >= 1) {
@@ -1141,6 +1162,18 @@ export function createScene(container, cfg, agentNames = []) {
         fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
         fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
         fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
+      }
+    }
+    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
+    if (petalAnchors.length && petalRate > 0) {
+      petalBudget += petalRate * step
+      while (petalBudget >= 1) {
+        petalBudget -= 1
+        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
+        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
+        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
       }
     }
     for (let i = 0; i < FALL_N; i++) {
@@ -1681,7 +1714,9 @@ export function createScene(container, cfg, agentNames = []) {
       foliageUniforms.uAutumn.value = autumn
       // Hojas que se desprenden: en otoño y con lluvia (si aún hay hojas).
       const shedRate = leafAmt > 0.05 ? (autumn * 34 + eco.rain * 46 * leafAmt) : 0
-      updateFallingLeaves(step, shedRate, autumn)
+      // Pétalos de sakura: lluvia suave mientras florece, más con lluvia real.
+      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40)
+      updateFallingLeaves(step, shedRate, autumn, petalRate)
     }
 
     mapPositions(step)
