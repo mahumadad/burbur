@@ -6,9 +6,10 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 // Paleta estilo "glade" de murmur: pasto vibrante, relieve terroso, agentes saturados.
 const SKY = 0xa9dc86
 const GROUND_Y = -3.6
-const AGENT_COLORS = [
-  0x35e0e0, 0xff8a3a, 0xff6ab5, 0xffe14d, 0xffffff, 0xb06aff, 0x8fe04a,
-]
+// Especies de individuos: cada una con su forma (en el shader) y color, estilo murmur.
+// 0 anillo · 1 punto · 2 cubo (marco) · 3 cruz · 4 estrella.
+const SPECIES_COLORS = [0xb06aff, 0xff8a3a, 0x35e0e0, 0xffffff, 0xffe14d]
+const NUM_SPECIES = SPECIES_COLORS.length
 
 export function createScene(container, cfg) {
   const scene = new THREE.Scene()
@@ -202,12 +203,16 @@ export function createScene(container, cfg) {
   geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3))
   geom.setAttribute('aBrightness', new THREE.BufferAttribute(new Float32Array(n), 1))
   const colorArr = new Float32Array(n * 3)
+  const speciesArr = new Float32Array(n)
   const tmp = new THREE.Color()
   for (let i = 0; i < n; i++) {
-    tmp.set(AGENT_COLORS[i % AGENT_COLORS.length])
+    const sp = i % NUM_SPECIES
+    speciesArr[i] = sp
+    tmp.set(SPECIES_COLORS[sp])
     colorArr[i * 3] = tmp.r; colorArr[i * 3 + 1] = tmp.g; colorArr[i * 3 + 2] = tmp.b
   }
   geom.setAttribute('aColor', new THREE.BufferAttribute(colorArr, 3))
+  geom.setAttribute('aSpecies', new THREE.BufferAttribute(speciesArr, 1))
 
   const mat = new THREE.ShaderMaterial({
     transparent: true,
@@ -216,26 +221,47 @@ export function createScene(container, cfg) {
     vertexShader: `
       attribute float aBrightness;
       attribute vec3 aColor;
+      attribute float aSpecies;
       varying float vB;
       varying vec3 vC;
+      varying float vSp;
       uniform float uSize;
       void main() {
         vB = aBrightness;
         vC = aColor;
+        vSp = aSpecies;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = uSize * (0.55 + aBrightness) / -mv.z;
+        gl_PointSize = uSize * (0.6 + aBrightness) / -mv.z;
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: `
       varying float vB;
       varying vec3 vC;
+      varying float vSp;
       void main() {
-        float d = length(gl_PointCoord - 0.5);
-        float ring = smoothstep(0.50, 0.44, d) - smoothstep(0.44, 0.33, d);
-        float core = smoothstep(0.12, 0.0, d);
-        float a = clamp(ring * 0.95 + core * (0.55 + vB), 0.0, 1.0);
+        vec2 p = gl_PointCoord - 0.5;
+        float r = length(p);
+        int sp = int(vSp + 0.5);
+        float mask;
+        if (sp == 0) {
+          mask = smoothstep(0.50, 0.44, r) - smoothstep(0.44, 0.33, r);   // anillo
+        } else if (sp == 1) {
+          mask = smoothstep(0.42, 0.0, r);                                // punto
+        } else if (sp == 2) {
+          float b = max(abs(p.x), abs(p.y));
+          mask = smoothstep(0.47, 0.42, b) - smoothstep(0.42, 0.34, b);   // cubo (marco)
+        } else if (sp == 3) {
+          float bar = max(step(abs(p.x), 0.07), step(abs(p.y), 0.07));
+          mask = bar * step(r, 0.5);                                      // cruz
+        } else {
+          float ang = atan(p.y, p.x);
+          float spikes = pow(max(0.0, cos(ang * 4.0)), 6.0);
+          mask = smoothstep(0.5, 0.0, r) * mix(0.12, 1.0, spikes);        // estrella
+        }
+        float core = smoothstep(0.10, 0.0, r);
+        float a = clamp(mask + core * (0.4 + vB), 0.0, 1.0);
         vec3 col = vC * (0.95 + vB * 0.5);
-        gl_FragColor = vec4(col, a * (0.65 + 0.35 * vB));
+        gl_FragColor = vec4(col, a * (0.7 + 0.3 * vB));
       }`,
   })
   const points = new THREE.Points(geom, mat)
