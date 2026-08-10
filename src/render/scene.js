@@ -308,6 +308,7 @@ export function createScene(container, cfg, agentNames = []) {
     uTime: { value: 0 },
     uWet: { value: 0 },
     uR: { value: R },
+    uFlow: { value: new THREE.Vector2(0, 0) }, // dirección de corriente (del viento/lluvia)
   }
   {
     const SEGS = 72
@@ -336,13 +337,14 @@ export function createScene(container, cfg, agentNames = []) {
         }
       `,
       fragmentShader: `
-        uniform float uTime; uniform float uWet; uniform float uR;
+        uniform float uTime; uniform float uWet; uniform float uR; uniform vec2 uFlow;
         varying vec2 vXZ; varying float vLow;
         void main() {
-          // Agua reflectante: lámina azul-gris que refleja el cielo, con brillos
-          // que se deslizan lentamente por encima.
-          float s = sin(vXZ.x * 0.16 + vXZ.y * 0.11 + uTime * 0.8);
-          float s2 = sin(vXZ.x * 0.05 - vXZ.y * 0.07 - uTime * 0.5);
+          // Agua reflectante que FLUYE en una dirección: los brillos se arrastran
+          // según uFlow (corriente por viento/lluvia), no solo oscilan en el sitio.
+          vec2 q = vXZ + uFlow * uTime;
+          float s = sin(q.x * 0.16 + q.y * 0.11 + uTime * 0.8);
+          float s2 = sin(q.x * 0.05 - q.y * 0.07 - uTime * 0.5);
           float glint = smoothstep(0.55, 1.0, s) + 0.5 * smoothstep(0.7, 1.0, s2);
           vec3 col = vec3(0.16, 0.26, 0.34) + glint * vec3(0.55, 0.66, 0.78);
           float r = length(vXZ);
@@ -1173,14 +1175,51 @@ export function createScene(container, cfg, agentNames = []) {
   const fallCol = new Float32Array(FALL_N * 3)
   const fallVy = new Float32Array(FALL_N)
   const fallPh = new Float32Array(FALL_N)
+  const fallKind = new Float32Array(FALL_N) // 0 hoja (forma de hoja) / 1 pétalo (disco)
+  const fallRot = new Float32Array(FALL_N)
   const fallActive = new Uint8Array(FALL_N)
   let fallHead = 0, fallBudget = 0, petalBudget = 0
   const fallGeo = new THREE.BufferGeometry()
   fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
-  fallGeo.setAttribute('color', new THREE.BufferAttribute(fallCol, 3))
-  const fallMesh = new THREE.Points(fallGeo, new THREE.PointsMaterial({
-    size: 0.7, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.92, depthWrite: false, fog: true,
+  fallGeo.setAttribute('hcol', new THREE.BufferAttribute(fallCol, 3))
+  fallGeo.setAttribute('aKind', new THREE.BufferAttribute(fallKind, 1))
+  fallGeo.setAttribute('aRot', new THREE.BufferAttribute(fallRot, 1))
+  // Las hojas que caen tienen FORMA DE HOJA (óvalo apuntado que gira); los
+  // pétalos del sakura caen como discos. Comparte uProj/uT con los puntos.
+  const fallMesh = new THREE.Points(fallGeo, new THREE.ShaderMaterial({
+    uniforms: { uProj: pointUniforms.uProj, uT: pointUniforms.uT },
+    transparent: true, depthWrite: false,
+    vertexShader: `
+      attribute vec3 hcol; attribute float aKind; attribute float aRot;
+      uniform float uProj, uT;
+      varying vec3 vC; varying float vKind; varying float vRot;
+      void main() {
+        vC = hcol; vKind = aKind; vRot = aRot + uT * 2.0; // giran al caer
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float vd = max(-mv.z, 0.001);
+        gl_PointSize = clamp(0.85 * uProj / vd, 1.0, 48.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      varying vec3 vC; varying float vKind; varying float vRot;
+      void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        if (vKind > 0.5) {                 // pétalo: disco suave
+          float d = length(uv) * 2.0;
+          if (d > 1.0) discard;
+          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
+          return;
+        }
+        // hoja: óvalo apuntado rotado con nervadura (igual que el follaje)
+        float s = sin(vRot), c = cos(vRot);
+        vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+        float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
+        if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
+        float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
+        float rib = smoothstep(0.06, 0.0, abs(q.x));
+        gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
+      }`,
   }))
   fallMesh.frustumCulled = false
   scene.add(fallMesh)
@@ -1197,7 +1236,8 @@ export function createScene(container, cfg, agentNames = []) {
         fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
         fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
         fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
-        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
+        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28
+        fallKind[i] = 0; fallRot[i] = Math.random() * 6.28; fallActive[i] = 1 // HOJA
       }
     }
     // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
@@ -1209,7 +1249,8 @@ export function createScene(container, cfg, agentNames = []) {
         const i = fallHead; fallHead = (fallHead + 1) % FALL_N
         fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
         fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
-        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
+        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28
+        fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1 // PÉTALO (disco)
       }
     }
     for (let i = 0; i < FALL_N; i++) {
@@ -1220,7 +1261,9 @@ export function createScene(container, cfg, agentNames = []) {
       if (fallPos[i * 3 + 1] < G - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 } // toca suelo → recicla
     }
     fallGeo.attributes.position.needsUpdate = true
-    fallGeo.attributes.color.needsUpdate = true
+    fallGeo.attributes.hcol.needsUpdate = true
+    fallGeo.attributes.aKind.needsUpdate = true
+    fallGeo.attributes.aRot.needsUpdate = true
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
@@ -1704,7 +1747,7 @@ export function createScene(container, cfg, agentNames = []) {
       // Pasto: se mece con el viento + tinte de hora + húmedo, y se entierra en
       // nieve. El viento es una brisa base con ráfagas lentas, más fuerte con lluvia.
       if (grassMat) {
-        const breeze = 0.4 + 0.28 * Math.sin(clock * 0.23) + eco.rain * 0.5
+        const breeze = 0.4 + 0.28 * Math.sin(clock * 0.23) + eco.rain * 0.5 + (eco.wind || 0) * 0.9
         grassMat.uniforms.uTime.value = clock
         grassMat.uniforms.uWind.value.set(0.55 * breeze, 0.22 * breeze)
         grassMat.uniforms.uTint.value.copy(tintC).multiplyScalar(wetShade)
@@ -1724,6 +1767,9 @@ export function createScene(container, cfg, agentNames = []) {
       // Agua: charcos que aparecen al derretir (wet), brillando en las hondonadas.
       waterUniforms.uTime.value = clock
       waterUniforms.uWet.value = wet
+      // Corriente: dirección fija de "pendiente" escalada por viento+lluvia.
+      const flow = 2.5 + (eco.wind || 0) * 9 + eco.rain * 5
+      waterUniforms.uFlow.value.set(0.82 * flow, 0.34 * flow)
 
       // Sombras de nube: con día y cielo despejado, y TAMBIÉN sobre la nieve
       // (aunque el cielo esté algo cargado, para que el manto no quede plano).
@@ -1751,9 +1797,11 @@ export function createScene(container, cfg, agentNames = []) {
       const autumn = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
       foliageUniforms.uAutumn.value = autumn
       // Hojas que se desprenden: en otoño y con lluvia (si aún hay hojas).
-      const shedRate = leafAmt > 0.05 ? (autumn * 34 + eco.rain * 46 * leafAmt) : 0
-      // Pétalos de sakura: lluvia suave mientras florece, más con lluvia real.
-      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40)
+      // El viento también desprende hojas (y pétalos), no solo el otoño/la lluvia.
+      const gust = eco.rain + (eco.wind || 0) * 0.7
+      const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
+      // Pétalos de sakura: lluvia suave mientras florece, más con lluvia/viento.
+      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
       updateFallingLeaves(step, shedRate, autumn, petalRate)
     }
 

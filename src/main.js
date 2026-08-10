@@ -145,7 +145,9 @@ async function start() {
       if (Math.random() < 0.25 + eco.activity * 0.75) audio.triggerFlash(fl.y, fl.intensity)
     }
     const env = ambient.update(dt)
-    audio.setWind(Math.max(env.wind, eco.rain * 0.4))
+    const wind = Math.max(env.wind, eco.rain * 0.4)
+    eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas
+    audio.setWind(wind)
     // Lluvia: siseo por intensidad + goteo a un ritmo proporcional.
     audio.setRain(eco.rain)
     if (eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
