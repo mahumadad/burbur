@@ -239,6 +239,28 @@ export async function createAudio(cfg) {
     try { dripEnv.triggerAttackRelease(0.01) } catch (_) {}
   }
 
+  // Traqueteo del "shake": tren de clicks triangulares (800–2500 Hz) que decae
+  // en ~800 ms. Igual espíritu que el click-track del shake de murmur.
+  const rattleOut = new Tone.Gain(0.5).connect(limiter)
+  function rattle(ms = 800) {
+    const start = Tone.now()
+    let t = 0
+    while (t < ms / 1000) {
+      const osc = new Tone.Oscillator(800 + Math.random() * 1700, 'triangle')
+      const g = new Tone.Gain(0).connect(rattleOut)
+      osc.connect(g)
+      const at = start + t
+      const mag = 1 - (t / (ms / 1000)) * 0.35
+      g.gain.setValueAtTime(1e-4, at)
+      g.gain.linearRampToValueAtTime(0.28 * mag, at + 0.002)
+      g.gain.exponentialRampToValueAtTime(1e-4, at + 0.02 + Math.random() * 0.035)
+      osc.start(at); osc.stop(at + 0.12)
+      const kill = (t + 0.35) * 1000
+      setTimeout(() => { try { osc.dispose(); g.dispose() } catch (_) {} }, kill)
+      t += 0.04 + Math.random() * 0.075
+    }
+  }
+
   function setFlashVol(db) { flashGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setDroneVol(db) { droneGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
   function setBedVol(db) { bedGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
@@ -251,6 +273,6 @@ export async function createAudio(cfg) {
 
   return {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
-    setRain, drip, setFlashVol, setDroneVol, setBedVol, setMood,
+    setRain, drip, setFlashVol, setDroneVol, setBedVol, setMood, rattle,
   }
 }
