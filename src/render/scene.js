@@ -79,7 +79,7 @@ function grassColor(f, out) {
   out[2] = a[2] + (b[2] - a[2]) * k
 }
 
-export function createScene(container, cfg) {
+export function createScene(container, cfg, agentNames = []) {
   const R = cfg.world.radius
   const G = cfg.world.groundY
   const rc = cfg.render
@@ -109,6 +109,16 @@ export function createScene(container, cfg) {
   const renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setClearColor(0x000000, 1)
   container.appendChild(renderer.domElement)
+
+  // Etiqueta flotante que sigue al agente más cercano al centro (estilo murmur).
+  const label = document.createElement('div')
+  label.style.cssText = `position:absolute; left:0; top:0; z-index:6; pointer-events:none;
+    transform:translate(-50%,-100%); background:#000; color:#e2ddd1;
+    font:600 12px/1 ui-monospace,'DM Mono',monospace; letter-spacing:0.05em;
+    text-transform:uppercase; padding:5px 8px; border-radius:4px; white-space:nowrap;
+    opacity:0; transition:opacity 0.15s ease;`
+  container.appendChild(label)
+  const _proj = new THREE.Vector3()
 
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.target.set(0, 0, 0)
@@ -283,6 +293,60 @@ export function createScene(container, cfg) {
       if (islandMask(fx, fz, R) < 0.1) continue
       flower(fx, G + terrainHeight(fx, fz), fz, 0.6 + rnd() * 0.75,
         Math.min(1.3, lightPool(fx, fz)), palette)
+    }
+  }
+
+  // ─── BAYAS: tallos blancos que se bifurcan con racimos de puntos ──────────
+  const STEM_W = [1, 1, 1]
+  function berry(x, y, z) {
+    const r = rnd()
+    const col = r < 0.72 ? [1, 0.13 + rnd() * 0.06, 0.08]
+      : r < 0.9 ? [1, 0.45, 0.1] : [0.97, 0.97, 1]
+    pushPoint(x, y, z, col, 0.24 + rnd() * 0.24, 0)
+  }
+  function berryBush(x, gy, z, scale) {
+    const o = 0.1 + rnd() * 0.4
+    const a = rnd() * 6.2832
+    const s = Math.sin(o) * Math.cos(a), c = Math.cos(o), l = Math.sin(o) * Math.sin(a)
+    const u = (2 + rnd() * 2.8) * scale
+    const px = x + s * u * 0.55 + (rnd() - 0.5) * 0.5
+    const py = gy + c * u * 0.55
+    const pz = z + l * u * 0.55 + (rnd() - 0.5) * 0.5
+    pushLine(x, gy, z, px, py, pz, STEM_W, STEM_W)
+    const tx = x + s * u + (rnd() - 0.5) * 0.9
+    const ty = gy + c * u
+    const tz = z + l * u + (rnd() - 0.5) * 0.9
+    pushLine(px, py, pz, tx, ty, tz, STEM_W, STEM_W)
+    berry(tx, ty, tz)
+    const branches = 1 + ((rnd() * 3) | 0)
+    for (let b = 0; b < branches; b++) {
+      const S = 0.45 + rnd() * 0.5
+      const cx = x + (px - x) * S + (tx - px) * Math.max(0, S - 0.5)
+      const cy = gy + (py - gy) * S + (ty - py) * Math.max(0, S - 0.5)
+      const cz = z + (pz - z) * S + (tz - pz) * Math.max(0, S - 0.5)
+      const E = u * (0.22 + rnd() * 0.26)
+      const D = rnd() * 6.2832, O = 0.5 + rnd() * 0.7
+      const kx = cx + Math.sin(O) * Math.cos(D) * E
+      const ky = cy + Math.cos(O) * E
+      const kz = cz + Math.sin(O) * Math.sin(D) * E
+      pushLine(cx, cy, cz, kx, ky, kz, STEM_W, STEM_W)
+      berry(kx, ky, kz)
+      if (rnd() < 0.35) berry(cx, cy, cz)
+    }
+  }
+  // Esparcidas en el sotobosque, en pequeños grupos.
+  for (let p = 0; p < rc.berryClusters; p++) {
+    const br = R * (0.12 + 0.76 * rnd())
+    const ba = rnd() * 6.2832
+    const bx = Math.cos(ba) * br, bz = Math.sin(ba) * br
+    if (islandMask(bx, bz, R) < 0.25) continue
+    const g2 = 3 + ((rnd() * 6) | 0)
+    for (let i = 0; i < g2; i++) {
+      const d = 1.5 + rnd() * 3
+      const aa = rnd() * 6.2832
+      const wx = bx + Math.cos(aa) * d, wz = bz + Math.sin(aa) * d
+      if (islandMask(wx, wz, R) < 0.15) continue
+      berryBush(wx, G + terrainHeight(wx, wz), wz, 0.7 + rnd() * 0.6)
     }
   }
 
@@ -1085,6 +1149,7 @@ export function createScene(container, cfg) {
   const _dir = new THREE.Vector3()
   const _axis = new THREE.Vector3()
   const _q = new THREE.Quaternion()
+  let _lx = 0, _ly = 0
   let clock = 0
   function update(swarm, dt, eco) {
     clock += dt || 0.016
@@ -1176,6 +1241,26 @@ export function createScene(container, cfg) {
       const pulse = 1 + swarm.flash[i] * 0.35
       if (a.cage) a.cage.scale.setScalar(pulse)
       else a.group.scale.setScalar(a.baseScale * pulse)
+    }
+
+    // Etiqueta: el agente visible más cercano al centro de pantalla.
+    let bestI = -1, bestD = 0.16
+    for (let i = 0; i < n; i++) {
+      _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
+      if (_proj.z > 1) continue // detrás de la cámara
+      const d = Math.hypot(_proj.x, _proj.y)
+      if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+    }
+    if (bestI >= 0 && agentNames[bestI]) {
+      const w = renderer.domElement.clientWidth, h = renderer.domElement.clientHeight
+      const ox = parseFloat(renderer.domElement.style.left) || 0
+      const oy = parseFloat(renderer.domElement.style.top) || 0
+      label.style.left = ox + (_lx * 0.5 + 0.5) * w + 'px'
+      label.style.top = oy + (-_ly * 0.5 + 0.5) * h + 'px'
+      label.textContent = agentNames[bestI]
+      label.style.opacity = '1'
+    } else {
+      label.style.opacity = '0'
     }
 
     // Estelas: siembra espaciada y desvanecido lento → puntos separados, no manchones.
