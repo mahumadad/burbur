@@ -812,6 +812,20 @@ export function createScene(container, cfg, agentNames = []) {
     const baseY = cy + hh * 0.05
     mesh.position.set(cx, baseY, cz)
     scene.add(mesh)
+    // Look "matrix": la malla triangulada de la roca visible (wireframe) + un
+    // punto por vértice, para que la roca se lea como red y no como bloque liso.
+    const rwf = new THREE.LineSegments(
+      new THREE.WireframeGeometry(geo),
+      new THREE.LineBasicMaterial({ color: 0x9c8b6b, transparent: true, opacity: 0.16, fog: true }),
+    )
+    rwf.position.copy(mesh.position)
+    scene.add(rwf)
+    const rpts = new THREE.Points(geo, new THREE.PointsMaterial({
+      size: 0.5, sizeAttenuation: true, vertexColors: true,
+      transparent: true, opacity: 0.75, fog: true,
+    }))
+    rpts.position.copy(mesh.position)
+    scene.add(rpts)
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
     // Cima como posado + cúpula para caminar por encima (coords de mundo).
     poiPerch.push({ x: cx / R, z: cz / R, h: hh })
@@ -1512,7 +1526,9 @@ export function createScene(container, cfg, agentNames = []) {
         rc.hazeColor[1] * 0.4 + L[1] * 0.6,
         rc.hazeColor[2] * 0.6 + L[2] * 0.4,
       )
-      hazeUniforms.uAlpha.value = rc.hazeAlpha * (0.62 + eco.fog * 1.35) * (0.5 + g * 0.72) * 1.18
+      // Neblina como MOMENTO de clima: casi nula en despejado (dry still, fog 0.10),
+      // sube con lluvia/escarcha/niebla. Así no roba claridad todo el tiempo.
+      hazeUniforms.uAlpha.value = rc.hazeAlpha * Math.max(0, eco.fog - 0.12) * 2.4 * (0.5 + g * 0.6)
 
       // Sombras de nubes: derivan siempre; se ven cuando hay sol y cielo despejado
       // (nada de noche, ni con niebla o lluvia). Caen también sobre la nieve.
