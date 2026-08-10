@@ -23,7 +23,12 @@ export function createBugs(cfg, flowers, rand = Math.random) {
 }
 
 function retarget(bug, flowers, rand) {
-  const f = flowers[(rand() * flowers.length) | 0]
+  // Prefiere una flor LEJANA → el vuelo es visible, no un salto corto.
+  let f = flowers[(rand() * flowers.length) | 0]
+  for (let k = 0; k < 6; k++) {
+    const c = flowers[(rand() * flowers.length) | 0]
+    if (Math.hypot(c.x - bug.x, c.z - bug.z) > 0.22) { f = c; break }
+  }
   bug.tx = f.x; bug.tz = f.z
   bug.state = 'fly'
 }

@@ -11,6 +11,7 @@ import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createBugs, updateBugs, nearestBug } from '../sim/behaviors.js'
+import { createPerchers, updatePerchers } from '../sim/perch.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -90,6 +91,7 @@ export function createScene(container, cfg) {
   let grassMat, floraMat, groundMat
   // Puntos de interés (coordenadas normalizadas): destinos de los agentes.
   const poiFlowers = []
+  const poiPerch = []   // copas de árbol y cimas de roca {x, z, h}
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
@@ -376,9 +378,12 @@ export function createScene(container, cfg) {
     const tr = R * (0.19 + rnd() * 0.54)
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.3) continue
+    const treeLen = 8 + rnd() * 7
     branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.8, tz),
       new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
-      8 + rnd() * 7, 0.95 + rnd() * 0.65, 0, 3, rnd() * 97, false)
+      treeLen, 0.95 + rnd() * 0.65, 0, 3, rnd() * 97, false)
+    // Punto de posado en la copa.
+    poiPerch.push({ x: tx / R, z: tz / R, h: treeLen * 0.55 })
     t++
   }
   const logs = 1 + (rnd() < 0.5 ? 1 : 0)
@@ -483,6 +488,8 @@ export function createScene(container, cfg) {
     mesh.position.set(cx, baseY, cz)
     scene.add(mesh)
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
+    // Cima de la roca como punto de posado.
+    poiPerch.push({ x: cx / R, z: cz / R, h: hh })
 
     // Liquen anaranjado: lo que cubre la roca. Solo en caras que miran arriba.
     const lichenN = spec.mono ? 1100 : 420
@@ -845,11 +852,19 @@ export function createScene(container, cfg) {
         new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
     }
 
+    // Parámetros de movimiento (del bundle): los cubos ruedan como esfera, los
+    // planeadores se orientan al rumbo, los anillos giran en Y.
+    let effR = 3.3, rollMul = 0, glide = false, spinY = 0
+    if (kind === 'cyan') { rollMul = 1; effR = 3.3 }
+    else if (kind === 'eye') { glide = rnd() < 0.55; rollMul = glide ? 0 : 0.3; effR = 6 }
+    else if (kind === 'flag') { spinY = 0.5 }
+    else { spinY = 0.7 } // dbl
+
     // Cada individuo tiene su propia escala.
     const baseScale = 0.9 + rnd() * 0.55
     group.scale.setScalar(baseScale)
     scene.add(group)
-    agents.push({ group, cage, kind, baseScale })
+    agents.push({ group, cage, kind, baseScale, effR, rollMul, glide, spinY })
   }
 
   // ─── ESTELAS: puntos de tamaño-mundo que persisten ────────────────────────
@@ -879,14 +894,15 @@ export function createScene(container, cfg) {
   const bugCfg = cfg.bugs
   const bugCount = poiFlowers.length ? bugCfg.count : 0
   const bugs = createBugs(bugCfg, poiFlowers, rnd)
-  const BUG_COLS = [[1, 1, 0.8], [1, 0.86, 0.32], [1, 0.6, 0.22], [1, 0.5, 0.72]]
+  // Colores FRÍOS (cyan/blanco) para que contrasten con las flores cálidas.
+  const BUG_COLS = [[0.55, 1, 1], [0.8, 1, 0.95], [1, 1, 1], [0.5, 0.85, 1]]
   const bugPos = new Float32Array(bugCount * 3)
   const bugColArr = new Float32Array(bugCount * 3)
   const bugSize = new Float32Array(bugCount)
   for (let i = 0; i < bugCount; i++) {
     const c = BUG_COLS[bugs[i].colorIdx % BUG_COLS.length]
     bugColArr[i * 3] = c[0]; bugColArr[i * 3 + 1] = c[1]; bugColArr[i * 3 + 2] = c[2]
-    bugSize[i] = 0.34 + rnd() * 0.2
+    bugSize[i] = 0.42 + rnd() * 0.22
   }
   const bugGeom = new THREE.BufferGeometry()
   bugGeom.setAttribute('position', new THREE.BufferAttribute(bugPos, 3))
@@ -922,6 +938,10 @@ export function createScene(container, cfg) {
   for (let i = 0; i < Math.min(bugCfg.hunters, n); i++) {
     roamers[i].role = 'hunter'; roamers[i].aidx = i; hunters.push(roamers[i])
   }
+  // Pájaros: unos se posan en árboles/rocas, otros cruzan el cielo.
+  const perchAgents = createPerchers(n, {
+    startIndex: hunters.length, perchers: cfg.behaviors.perchers, sky: cfg.behaviors.sky,
+  }, rnd)
   const worldPos = new Float32Array(n * 3)
   const heads = new Float32Array(n * 2)
   let simTime = 0
@@ -929,11 +949,12 @@ export function createScene(container, cfg) {
   function mapPositions(dt) {
     simTime += dt
     updateRoamers(roamers, cfg.wander, dt, rnd, simTime, paths, nearestOnPaths)
+    updatePerchers(perchAgents, roamers, poiPerch, cfg.behaviors, dt, rnd)
     for (let i = 0; i < n; i++) {
       const src = roamers[i]
       const x = src.x * R, z = src.z * R
       worldPos[i * 3] = x
-      worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1
+      worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1 + perchAgents[i].yOff
       worldPos[i * 3 + 2] = z
       heads[i * 2] = src.hx
       heads[i * 2 + 1] = src.hz
@@ -1046,6 +1067,10 @@ export function createScene(container, cfg) {
   window.addEventListener('resize', resize)
 
   const tintC = new THREE.Color()
+  const _up = new THREE.Vector3(0, 1, 0)
+  const _dir = new THREE.Vector3()
+  const _axis = new THREE.Vector3()
+  const _q = new THREE.Quaternion()
   let clock = 0
   function update(swarm, dt, eco) {
     clock += dt || 0.016
@@ -1113,17 +1138,30 @@ export function createScene(container, cfg) {
 
     for (let i = 0; i < n; i++) {
       const a = agents[i]
+      const r = roamers[i]
       a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
-      // Erguido y orientado al rumbo: nada de tumbos que deformen la silueta.
-      a.group.rotation.y = Math.atan2(heads[i * 2], heads[i * 2 + 1])
-      // 'flag' y 'dbl' no tienen jaula: laten con el grupo entero.
-      const pulse = 1 + swarm.flash[i] * 0.35
-      if (a.cage) {
-        a.cage.rotation.y += dt * 0.22
-        a.cage.scale.setScalar(pulse)
-      } else {
-        a.group.scale.setScalar(a.baseScale * pulse)
+
+      // Velocidad en unidades de mundo (los roamers están normalizados).
+      const wvx = r.vx * R, wvz = r.vz * R
+      const wspeed = Math.hypot(wvx, wvz)
+      if (a.glide) {
+        // Planeador: se orienta hacia donde va.
+        if (wspeed > 0.05) a.group.rotation.y = Math.atan2(wvx, wvz)
+      } else if (a.rollMul > 0 && a.cage && wspeed > 1e-4) {
+        // Rueda como una esfera: eje = arriba × dirección, ángulo = dist/effR.
+        _dir.set(wvx, 0, wvz).normalize()
+        _axis.crossVectors(_up, _dir)
+        if (_axis.lengthSq() < 1e-5) _axis.set(1, 0, 0)
+        _axis.normalize()
+        _q.setFromAxisAngle(_axis, (wspeed * step) / a.effR * a.rollMul)
+        a.cage.quaternion.premultiply(_q)
+      } else if (a.spinY) {
+        a.group.rotation.y += a.spinY * step
       }
+
+      const pulse = 1 + swarm.flash[i] * 0.35
+      if (a.cage) a.cage.scale.setScalar(pulse)
+      else a.group.scale.setScalar(a.baseScale * pulse)
     }
 
     // Estelas: siembra espaciada y desvanecido lento → puntos separados, no manchones.
