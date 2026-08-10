@@ -91,7 +91,9 @@ export function createScene(container, cfg) {
   let grassMat, floraMat, groundMat
   // Puntos de interés (coordenadas normalizadas): destinos de los agentes.
   const poiFlowers = []
-  const poiPerch = []   // copas de árbol y cimas de roca {x, z, h}
+  const poiPerch = []      // copas de árbol y cimas de roca {x, z, h}
+  const treeObstacles = [] // troncos a bordear (normalizado {x, z, r})
+  const rockDomes = []     // rocas por encima (mundo {x, z, r, h})
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
@@ -382,8 +384,9 @@ export function createScene(container, cfg) {
     branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.8, tz),
       new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
       treeLen, 0.95 + rnd() * 0.65, 0, 3, rnd() * 97, false)
-    // Punto de posado en la copa.
+    // Punto de posado en la copa + obstáculo del tronco (se bordea).
     poiPerch.push({ x: tx / R, z: tz / R, h: treeLen * 0.55 })
+    treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
     t++
   }
   const logs = 1 + (rnd() < 0.5 ? 1 : 0)
@@ -488,8 +491,9 @@ export function createScene(container, cfg) {
     mesh.position.set(cx, baseY, cz)
     scene.add(mesh)
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
-    // Cima de la roca como punto de posado.
+    // Cima como posado + cúpula para caminar por encima (coords de mundo).
     poiPerch.push({ x: cx / R, z: cz / R, h: hh })
+    rockDomes.push({ x: cx, z: cz, r: Math.max(radX, radZ), h: hh })
 
     // Liquen anaranjado: lo que cubre la roca. Solo en caras que miran arriba.
     const lichenN = spec.mono ? 1100 : 420
@@ -948,13 +952,23 @@ export function createScene(container, cfg) {
 
   function mapPositions(dt) {
     simTime += dt
-    updateRoamers(roamers, cfg.wander, dt, rnd, simTime, paths, nearestOnPaths)
+    updateRoamers(roamers, cfg.wander, dt, rnd, simTime, paths, nearestOnPaths, treeObstacles)
     updatePerchers(perchAgents, roamers, poiPerch, cfg.behaviors, dt, rnd)
     for (let i = 0; i < n; i++) {
       const src = roamers[i]
       const x = src.x * R, z = src.z * R
+      // Sobre una roca: se sube por su cúpula en vez de atravesarla.
+      let lift = 0
+      for (const d of rockDomes) {
+        const ox = x - d.x, oz = z - d.z
+        const dd = Math.hypot(ox, oz)
+        if (dd < d.r) {
+          const up = d.h * Math.sqrt(Math.max(0, 1 - (dd / d.r) ** 2))
+          if (up > lift) lift = up
+        }
+      }
       worldPos[i * 3] = x
-      worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1 + perchAgents[i].yOff
+      worldPos[i * 3 + 1] = G + terrainHeight(x, z) + 3.1 + perchAgents[i].yOff + lift
       worldPos[i * 3 + 2] = z
       heads[i * 2] = src.hx
       heads[i * 2 + 1] = src.hz

@@ -32,6 +32,7 @@ export const CONFIG = {
     softR: 0.58,         // cuenca amplia: dejan casi todo el disco libre
     centerPull: 1.0,     // fuerza suave (no los amontona al centro)
     bound: 0.84,         // tope duro
+    obstaclePush: 3.5,   // fuerza para bordear árboles
     // Campo de flujo: corrientes coherentes que varían lento.
     flowFreq: 5.1,
     flowPush: 0.042,

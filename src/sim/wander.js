@@ -45,7 +45,7 @@ const _flow = { x: 0, z: 0 }
  * @param {object|null} paths  red de senderos, o null
  * @param {(paths:object,x:number,z:number)=>{x:number,z:number,d2:number}} nearest
  */
-export function updateRoamers(rs, cfg, dt, rand = Math.random, time = 0, paths = null, nearest = null) {
+export function updateRoamers(rs, cfg, dt, rand = Math.random, time = 0, paths = null, nearest = null, obstacles = null) {
   const n = rs.length
 
   // Separación mutua: se empujan para no encimarse.
@@ -123,6 +123,24 @@ export function updateRoamers(rs, cfg, dt, rand = Math.random, time = 0, paths =
       r.x = (r.x / m) * cfg.bound
       r.z = (r.z / m) * cfg.bound
       r.vx *= 0.4; r.vz *= 0.4
+    }
+
+    // Obstáculos sólidos (árboles): se bordean, no se atraviesan.
+    if (obstacles) {
+      for (const o of obstacles) {
+        const dx = r.x - o.x, dz = r.z - o.z
+        const d2 = dx * dx + dz * dz
+        if (d2 < o.r * o.r && d2 > 1e-8) {
+          const d = Math.sqrt(d2)
+          const push = cfg.obstaclePush * (1 - d / o.r)
+          r.vx += (dx / d) * push * dt
+          r.vz += (dz / d) * push * dt
+          // Empujar también la posición para no quedar dentro.
+          const overlap = o.r - d
+          r.x += (dx / d) * overlap * 0.5
+          r.z += (dz / d) * overlap * 0.5
+        }
+      }
     }
 
     // Rozamiento y tope de velocidad.
