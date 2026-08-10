@@ -33,6 +33,23 @@ export function createPaths(cfg, rand = Math.random) {
   return { loops }
 }
 
+/**
+ * Punto de camino más cercano a (x,z). Lo usa la atracción a senderos: sirve
+ * igual para sendas de bosque que para calles de ciudad.
+ */
+export function nearestOnPaths(paths, x, z) {
+  let bx = 0, bz = 0, best = Infinity
+  for (const loop of paths.loops) {
+    for (let i = 0; i < loop.length; i++) {
+      const p = loop[i]
+      const dx = p.x - x, dz = p.z - z
+      const d2 = dx * dx + dz * dz
+      if (d2 < best) { best = d2; bx = p.x; bz = p.z }
+    }
+  }
+  return { x: bx, z: bz, d2: best }
+}
+
 /** Largo acumulado de un bucle (cerrado), para avanzar a velocidad constante. */
 function loopLength(pts) {
   let sum = 0
