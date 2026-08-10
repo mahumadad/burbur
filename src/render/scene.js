@@ -1,8 +1,10 @@
 import * as THREE from 'three'
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js'
-import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js'
-import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js'
 import { createStage } from './stage.js'
+import { createHaze } from './engine/haze.js'
+import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
+import { createAgentKit, updateAgentMotion } from './engine/agents3d.js'
+import { createDraw } from './engine/points.js'
+import { createTrails } from './engine/trails.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -102,23 +104,8 @@ export function createScene(container, cfg, agentNames = []) {
   const _proj = new THREE.Vector3()
 
   // ─── Acumuladores: un solo buffer de líneas y uno de puntos ────────────────
-  const linePos = []
-  const lineCol = []
-  const ptPos = []
-  const ptCol = []
-  const ptSize = []
-  const ptPhase = []
-
-  function pushLine(x1, y1, z1, x2, y2, z2, c1, c2) {
-    linePos.push(x1, y1, z1, x2, y2, z2)
-    lineCol.push(c1[0], c1[1], c1[2], c2[0], c2[1], c2[2])
-  }
-  function pushPoint(x, y, z, col, size, phase) {
-    ptPos.push(x, y, z)
-    ptCol.push(col[0], col[1], col[2])
-    ptSize.push(size)
-    ptPhase.push(phase || 0)
-  }
+  const draw = createDraw(rc)
+  const { pushPoint, pushLine, pointMaterial, uniforms: pointUniforms } = draw
 
   // ─── SUELO: malla que rellena los huecos entre hojas ──────────────────────
   // Sin ella se ve el negro a través del pasto y el claro pierde luminosidad.
@@ -965,70 +952,12 @@ export function createScene(container, cfg, agentNames = []) {
 
   // ─── Subir buffers ────────────────────────────────────────────────────────
   {
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePos), 3))
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lineCol), 3))
     floraMat = new THREE.LineBasicMaterial({ vertexColors: true, fog: true })
     snowMats.push(floraMat)
-    scene.add(new THREE.LineSegments(geo, floraMat))
+    draw.finalizeLines(scene, floraMat)
   }
 
-  // Shader de puntos: tamaño en unidades de MUNDO + balanceo + DOF falso.
-  const pointUniforms = {
-    uProj: { value: 1000 },
-    uT: { value: 0 },
-    uFocus: { value: rc.dofFocus },
-    uAperture: { value: rc.dofAperture },
-  }
-  const pointMat = new THREE.ShaderMaterial({
-    uniforms: pointUniforms,
-    transparent: true,
-    depthWrite: false,
-    vertexShader: `
-      attribute vec3 hcol; attribute float hsize; attribute float hphs;
-      uniform float uProj, uT, uFocus, uAperture;
-      varying vec3 vC; varying float vSoft;
-      void main() {
-        vC = hcol;
-        vec3 p = position;
-        if (hphs > 0.0) {                       // balanceo de vegetación
-          float ph = hphs * 6.2831;
-          p.x += sin(uT * 0.7 + ph) * 0.42;
-          p.z += cos(uT * 0.6 + ph * 1.7) * 0.42;
-          p.y += sin(uT * 1.1 + ph * 2.3) * 0.16;
-          vC *= 0.92 + 0.12 * sin(uT * 2.0 + ph * 5.0);
-        }
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
-        float vd = max(-mv.z, 0.001);
-        float coc = abs(vd - uFocus);           // DOF falso: crece al desenfocar
-        float worldR = hsize + uAperture * coc * 0.02;
-        gl_PointSize = clamp(worldR * uProj / vd, 1.0, 64.0);
-        // Difuminado contenido: las flores deben leerse como discos nítidos.
-        vSoft = clamp(coc / (uFocus * 1.6), 0.0, 0.45);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vC; varying float vSoft;
-      void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        float d = length(uv) * 2.0;
-        if (d > 1.0) discard;
-        float edge = mix(0.06, 0.40, vSoft);    // borde casi duro; se ablanda poco
-        float a = 1.0 - smoothstep(1.0 - edge, 1.0, d);
-        gl_FragColor = vec4(vC, a);
-      }`,
-  })
-  {
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ptPos), 3))
-    geo.setAttribute('hcol', new THREE.BufferAttribute(new Float32Array(ptCol), 3))
-    geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(ptSize), 1))
-    geo.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(ptPhase), 1))
-    const pts = new THREE.Points(geo, pointMat)
-    pts.frustumCulled = false
-    scene.add(pts)
-  }
+  draw.finalizePoints(scene)
 
   // ─── FOLLAJE de los árboles: hojas/flores que brotan y abren con la estación.
   // Comparten uProj/uT con los puntos; uSeason escalona el brote por-punto;
@@ -1155,127 +1084,16 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
-  const hazeUniforms = {
-    uProj: { value: 1000 },
-    uColor: { value: new THREE.Vector3(...rc.hazeColor) },
-    uAlpha: { value: rc.hazeAlpha },
-  }
-  {
-    const pos = [], siz = []
-    for (let i = 0; i < rc.hazeCount; i++) {
-      const a = rnd() * 6.2832
-      // Contenida dentro de la isla: fuera de ella el fondo queda negro puro.
-      const rr = Math.sqrt(rnd()) * R * 0.92
-      const x = Math.cos(a) * rr, z = Math.sin(a) * rr
-      pos.push(x, G + terrainHeight(x, z) + 0.3 + rnd() * 9, z)
-      siz.push(2.4 + rnd() * 5.2)
-    }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
-    geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(siz), 1))
-    const mat = new THREE.ShaderMaterial({
-      uniforms: hazeUniforms,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      depthWrite: false,
-      vertexShader: `
-        attribute float hsize; uniform float uProj;
-        void main() {
-          vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = clamp(hsize * uProj / max(-mv.z, 0.001), 1.0, 96.0);
-          gl_Position = projectionMatrix * mv;
-        }`,
-      fragmentShader: `
-        precision mediump float;
-        uniform vec3 uColor; uniform float uAlpha;
-        void main() {
-          vec2 uv = gl_PointCoord - 0.5; float d2 = dot(uv, uv);
-          if (d2 > 0.25) discard;
-          float a = 1.0 - sqrt(d2) * 2.0; a = a * a * uAlpha;
-          gl_FragColor = vec4(uColor, 1.0) * a;
-        }`,
-    })
-    const h = new THREE.Points(geo, mat)
-    h.frustumCulled = false
-    scene.add(h)
-  }
+  const hazeUniforms = createHaze(scene, {
+    R, G, count: rc.hazeCount, color: rc.hazeColor, alpha: rc.hazeAlpha,
+    heightFn: terrainHeight,
+  }).uniforms
 
   // ─── AGENTES: jaula de aristas + criatura molecular + tallo ───────────────
   // Un color por especie: la estela hereda el color de su individuo.
   const AGENT_COLORS = [PALETTE.cyan, PALETTE.magenta, PALETTE.white, PALETTE.yellow]
-  // Líneas gruesas de verdad: LineBasicMaterial ignora linewidth en casi todas
-  // las plataformas, así que las jaulas usan LineMaterial (grosor en píxeles).
-  const fatMaterials = []
-  function fatLine(positions, color) {
-    const mat = new LineMaterial({ color, linewidth: rc.agentLineWidth })
-    mat.resolution.set(1, 1)
-    fatMaterials.push(mat)
-    const geo = new LineSegmentsGeometry()
-    geo.setPositions(positions)
-    const seg = new LineSegments2(geo, mat)
-    seg.computeLineDistances()
-    return seg
-  }
-  function edgesOf(geometry, color) {
-    const e = new THREE.EdgesGeometry(geometry)
-    const arr = Array.from(e.attributes.position.array)
-    e.dispose()
-    geometry.dispose()
-    return fatLine(arr, color)
-  }
-  function ringLoop(radius, segments, color) {
-    const pos = []
-    for (let i = 0; i < segments; i++) {
-      const a = (i / segments) * Math.PI * 2
-      const b = ((i + 1) / segments) * Math.PI * 2
-      pos.push(Math.cos(a) * radius, 0, Math.sin(a) * radius,
-        Math.cos(b) * radius, 0, Math.sin(b) * radius)
-    }
-    return fatLine(pos, color)
-  }
-  const pick = (arr) => arr[(rnd() * arr.length) | 0]
-
-  /**
-   * Criatura interna: núcleo naranja + 3–4 satélites en direcciones FIJAS
-   * (por eso se lee igual desde cualquier ángulo), unidos por enlaces.
-   */
-  function creature(t) {
-    const g = new THREE.Group()
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.6 * t, 16, 12),
-      new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
-    const dirs = [
-      new THREE.Vector3(1, 0.5, 0.3), new THREE.Vector3(-0.8, -0.4, 0.6),
-      new THREE.Vector3(0.25, -0.95, -0.55), new THREE.Vector3(0.7, 0.6, -0.7),
-    ]
-    const cols = [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyanSat]
-    const k = 3 + (rnd() < 0.5 ? 1 : 0)
-    const seg = []
-    for (let i = 0; i < k; i++) {
-      const p = dirs[i].clone().normalize().multiplyScalar((1.5 + rnd() * 0.45) * t)
-      const s = new THREE.Mesh(
-        new THREE.SphereGeometry((0.3 + rnd() * 0.12) * t, 12, 10),
-        new THREE.MeshBasicMaterial({ color: cols[(i + ((rnd() * 4) | 0)) % 4] }))
-      s.position.copy(p)
-      g.add(s)
-      seg.push(0, 0, 0, p.x, p.y, p.z)
-    }
-    g.add(fatLine(seg, PALETTE.bond))
-    return g
-  }
-
-  /** Cuña/planeador: prisma triangular de 9 aristas. */
-  function wedge(e) {
-    const t = 5.2, n = 2.2, r = 1.6, lo = -0.7, hi = 0.8
-    const P = (x, y, z) => [x * e, y * e, z * e]
-    const s = P(0, lo, t), c = P(-n, lo, -r), l = P(n, lo, -r)
-    const u = P(0, hi, t * 0.45), d = P(-n * 0.5, hi, -r), f = P(n * 0.5, hi, -r)
-    const seg = (a, b) => [...a, ...b]
-    return [
-      ...seg(s, c), ...seg(c, l), ...seg(l, s),
-      ...seg(u, d), ...seg(d, f), ...seg(f, u),
-      ...seg(s, u), ...seg(c, d), ...seg(l, f),
-    ]
-  }
+  const kit = createAgentKit(rc)
+  const { fatLine, edgesOf, ringLoop, creature, wedge, pick } = kit
 
   // Las 4 especies del bosque, tal como las arma el original.
   const SPECIES = ['cyan', 'flag', 'eye', 'dbl']
@@ -1350,27 +1168,7 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   // ─── ESTELAS: puntos de tamaño-mundo que persisten ────────────────────────
-  const TRAIL = rc.trailLen
-  const tPos = new Float32Array(n * TRAIL * 3)
-  const tCol = new Float32Array(n * TRAIL * 3)
-  const tSize = new Float32Array(n * TRAIL)
-  const tmpC = new THREE.Color()
-  for (let i = 0; i < n; i++) {
-    tmpC.set(AGENT_COLORS[i % AGENT_COLORS.length])
-    for (let s = 0; s < TRAIL; s++) {
-      const k = (i * TRAIL + s) * 3
-      tCol[k] = tmpC.r; tCol[k + 1] = tmpC.g; tCol[k + 2] = tmpC.b
-    }
-  }
-  const trailGeom = new THREE.BufferGeometry()
-  trailGeom.setAttribute('position', new THREE.BufferAttribute(tPos, 3))
-  trailGeom.setAttribute('hcol', new THREE.BufferAttribute(tCol, 3))
-  trailGeom.setAttribute('hsize', new THREE.BufferAttribute(tSize, 1))
-  trailGeom.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(n * TRAIL), 1))
-  const trail = new THREE.Points(trailGeom, pointMat)
-  trail.frustumCulled = false
-  scene.add(trail)
-  let tHead = 0, tFrame = 0
+  const trails = createTrails(scene, n, AGENT_COLORS, rc, pointMaterial)
 
   // ─── BICHITOS: van de flor en flor, huyen de los cazadores ────────────────
   const bugCfg = cfg.bugs
@@ -1454,127 +1252,26 @@ export function createScene(container, cfg, agentNames = []) {
     }
   }
 
-  // ─── LLUVIA: líneas que caen, recicladas al llegar al suelo ───────────────
-  const RAIN_N = 1400
-  const rainPos = new Float32Array(RAIN_N * 6)
-  const rainTop = new Float32Array(RAIN_N * 3)
-  const RAIN_H = 46
-  for (let i = 0; i < RAIN_N; i++) {
-    const a = rnd() * 6.2832
-    const rr = Math.sqrt(rnd()) * R * 1.1
-    rainTop[i * 3] = Math.cos(a) * rr
-    rainTop[i * 3 + 1] = G + rnd() * RAIN_H
-    rainTop[i * 3 + 2] = Math.sin(a) * rr
-  }
-  const rainGeom = new THREE.BufferGeometry()
-  rainGeom.setAttribute('position', new THREE.BufferAttribute(rainPos, 3))
-  const rainMat = new THREE.LineBasicMaterial({
-    color: 0xbcd6e8, transparent: true, opacity: 0, depthWrite: false,
-  })
-  const rainMesh = new THREE.LineSegments(rainGeom, rainMat)
-  rainMesh.frustumCulled = false
-  rainMesh.visible = false
-  scene.add(rainMesh)
-
-  function updateRain(dt, intensity) {
-    rainMesh.visible = intensity > 0.01
-    if (!rainMesh.visible) return
-    rainMat.opacity = 0.16 + 0.34 * intensity
-    const fall = (26 + 42 * intensity) * dt
-    const streak = 1.6 + 3.4 * intensity
-    for (let i = 0; i < RAIN_N; i++) {
-      let y = rainTop[i * 3 + 1] - fall
-      if (y < G - 4) y = G + RAIN_H
-      rainTop[i * 3 + 1] = y
-      const x = rainTop[i * 3], z = rainTop[i * 3 + 2]
-      const k = i * 6
-      rainPos[k] = x;             rainPos[k + 1] = y;           rainPos[k + 2] = z
-      rainPos[k + 3] = x + 0.5;   rainPos[k + 4] = y - streak;  rainPos[k + 5] = z
-    }
-    rainGeom.getAttribute('position').needsUpdate = true
-  }
-
-  // ─── NIEVE: copos que caen lento y derivan; densidad por intensidad ───────
-  const SNOW_N = 5000
-  const SNOW_H = 46
-  const snowPos = new Float32Array(SNOW_N * 3)
-  const snowPhase = new Float32Array(SNOW_N)
-  for (let i = 0; i < SNOW_N; i++) {
-    const a = rnd() * 6.2832, rr = Math.sqrt(rnd()) * R * 1.05
-    snowPos[i * 3] = Math.cos(a) * rr
-    snowPos[i * 3 + 1] = G + rnd() * SNOW_H
-    snowPos[i * 3 + 2] = Math.sin(a) * rr
-    snowPhase[i] = rnd() * 6.2832
-  }
-  const snowGeom = new THREE.BufferGeometry()
-  snowGeom.setAttribute('position', new THREE.BufferAttribute(snowPos, 3))
-  const snowMat = new THREE.ShaderMaterial({
-    uniforms: { uProj: pointUniforms.uProj },
-    transparent: true, depthWrite: false, blending: THREE.NormalBlending,
-    vertexShader: `uniform float uProj; void main(){
-      vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = clamp(0.55 * uProj / max(-mv.z, 0.001), 1.5, 34.0);
-      gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
-      if(d > 0.5) discard;
-      gl_FragColor = vec4(1.0, 1.0, 1.0, smoothstep(0.5, 0.15, d)); }`,
-  })
-  const snowMesh = new THREE.Points(snowGeom, snowMat)
-  snowMesh.frustumCulled = false
-  snowMesh.visible = false
-  scene.add(snowMesh)
-
-  function updateSnow(dt, clockT, intensity) {
-    snowMesh.visible = intensity > 0.01
-    if (!snowMesh.visible) return
-    const active = Math.floor(intensity * SNOW_N)
-    const fall = (7 + 7 * intensity) * dt
-    for (let i = 0; i < SNOW_N; i++) {
-      if (i >= active) { snowPos[i * 3 + 1] = -9999; continue }
-      let y = snowPos[i * 3 + 1] - fall
-      if (y < G - 2) { y = G + SNOW_H; }
-      snowPos[i * 3 + 1] = y
-      // Deriva lateral suave (revoloteo).
-      snowPos[i * 3] += Math.sin(clockT * 0.8 + snowPhase[i]) * 6 * dt
-      snowPos[i * 3 + 2] += Math.cos(clockT * 0.6 + snowPhase[i] * 1.3) * 6 * dt
-    }
-    snowGeom.getAttribute('position').needsUpdate = true
-  }
-
-  // Nieve acumulada sobre rocas/árboles: puntos que crecen con la acumulación.
-  const capUniforms = { uProj: pointUniforms.uProj, uCap: { value: 0 } }
-  {
-    const capGeom = new THREE.BufferGeometry()
-    capGeom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(capPos), 3))
-    const capMat = new THREE.ShaderMaterial({
-      uniforms: capUniforms, transparent: true, depthWrite: false,
-      vertexShader: `uniform float uProj, uCap; varying float vC; void main(){ vC = uCap;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = clamp(0.7 * uCap * uProj / max(-mv.z, 0.001), 0.0, 30.0);
-        gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `varying float vC; void main(){ if(vC < 0.02) discard;
-        vec2 uv = gl_PointCoord - 0.5; if(length(uv) > 0.5) discard;
-        gl_FragColor = vec4(0.96, 0.98, 1.0, 1.0); }`,
-    })
-    const capMesh = new THREE.Points(capGeom, capMat)
-    capMesh.frustumCulled = false
-    scene.add(capMesh)
-  }
+  const rain = createRain(scene, R, G)
+  const snow = createSnow(scene, R, G, pointUniforms.uProj)
+  const caps = createSnowCaps(scene, capPos, pointUniforms.uProj)
 
   // El escenario ya trae el lente y el resize; aquí solo se registra lo que
   // depende de la resolución en este mundo (uProj de los puntos, líneas gruesas).
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
     hazeUniforms.uProj.value = m.proj
-    for (const mat of fatMaterials) mat.resolution.set(m.w * m.dpr, m.h * m.dpr)
+    kit.setResolution(m.w * m.dpr, m.h * m.dpr)
   })
 
   const tintC = new THREE.Color()
   const _snowC = new THREE.Color()
-  const _up = new THREE.Vector3(0, 1, 0)
-  const _dir = new THREE.Vector3()
-  const _axis = new THREE.Vector3()
-  const _q = new THREE.Quaternion()
+  const tmp = {
+    up: new THREE.Vector3(0, 1, 0),
+    dir: new THREE.Vector3(),
+    axis: new THREE.Vector3(),
+    q: new THREE.Quaternion(),
+  }
   let _lx = 0, _ly = 0
   const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
@@ -1644,7 +1341,7 @@ export function createScene(container, cfg, agentNames = []) {
       }
       // La nieve se acumula: capa blanca sobre el suelo.
       if (snowGroundMat) snowGroundMat.opacity = Math.min(0.95, snowCover * 1.2)
-      capUniforms.uCap.value = snowCover
+      caps.setCover(snowCover)
 
       // Invierno: las flores se entierran y los bichos escasean bajo la nieve.
       if (floraMat) { floraMat.transparent = true; floraMat.opacity = 1 - snowCover * 0.85 }
@@ -1661,8 +1358,8 @@ export function createScene(container, cfg, agentNames = []) {
         0.26 * dayF * snowCover,
       )
 
-      updateRain(step, snowing ? 0 : eco.rain)
-      updateSnow(step, clock, snowfall)
+      rain.update(step, snowing ? 0 : eco.rain)
+      snow.update(step, clock, snowfall)
 
       // Los agentes se frenan con nieve/frío.
       // Con lluvia (sobre todo fuerte) todo se calma: agentes, pájaros y bichos.
@@ -1718,29 +1415,10 @@ export function createScene(container, cfg, agentNames = []) {
       bugGeom.getAttribute('position').needsUpdate = true
     }
 
+    updateAgentMotion(agents, roamers, R, step, worldPos, tmp)
+
     for (let i = 0; i < n; i++) {
       const a = agents[i]
-      const r = roamers[i]
-      a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
-
-      // Velocidad en unidades de mundo (los roamers están normalizados).
-      const wvx = r.vx * R, wvz = r.vz * R
-      const wspeed = Math.hypot(wvx, wvz)
-      if (a.glide) {
-        // Planeador: se orienta hacia donde va.
-        if (wspeed > 0.05) a.group.rotation.y = Math.atan2(wvx, wvz)
-      } else if (a.rollMul > 0 && a.cage && wspeed > 1e-4) {
-        // Rueda como una esfera: eje = arriba × dirección, ángulo = dist/effR.
-        _dir.set(wvx, 0, wvz).normalize()
-        _axis.crossVectors(_up, _dir)
-        if (_axis.lengthSq() < 1e-5) _axis.set(1, 0, 0)
-        _axis.normalize()
-        _q.setFromAxisAngle(_axis, (wspeed * step) / a.effR * a.rollMul)
-        a.cage.quaternion.premultiply(_q)
-      } else if (a.spinY) {
-        a.group.rotation.y += a.spinY * step
-      }
-
       const pulse = 1 + swarm.flash[i] * 0.35
       if (a.cage) a.cage.scale.setScalar(pulse)
       else a.group.scale.setScalar(a.baseScale * pulse)
@@ -1765,20 +1443,7 @@ export function createScene(container, cfg, agentNames = []) {
     }
 
     // Estelas: siembra espaciada y desvanecido lento → puntos separados, no manchones.
-    for (let k = 0; k < n * TRAIL; k++) tSize[k] *= 0.997
-    if (tFrame % 7 === 0) {
-      for (let i = 0; i < n; i++) {
-        const slot = (i * TRAIL + tHead) * 3
-        tPos[slot] = worldPos[i * 3]
-        tPos[slot + 1] = worldPos[i * 3 + 1] - 1.2
-        tPos[slot + 2] = worldPos[i * 3 + 2]
-        tSize[i * TRAIL + tHead] = rc.trailSize * 0.13
-      }
-      tHead = (tHead + 1) % TRAIL
-    }
-    tFrame++
-    trailGeom.getAttribute('position').needsUpdate = true
-    trailGeom.getAttribute('hsize').needsUpdate = true
+    trails.update(worldPos)
 
     // Relámpago: el overlay se apaga rápido tras el destello.
     // El escenario cierra el frame: destello, respiración de la vista y render.
