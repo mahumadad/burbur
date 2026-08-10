@@ -238,9 +238,9 @@ export function createScene(container, cfg) {
   // ─── ÁRBOLES SECOS: ramas curvas recursivas (líneas) ──────────────────────
   // Los árboles son TUBOS ahusados (malla), no líneas: por eso en el original
   // tienen silueta sólida y facetas visibles.
-  const BARK_LO = [0.13, 0.12, 0.11]
-  const BARK_HI = [0.80, 0.78, 0.71]
-  const treePos = [], treeIdx = [], treeCol = []
+  const TREE_FILL = 0x130d09   // relleno casi negro
+  const TREE_EDGE = 0xd9d9ba   // aristas color hueso
+  const treePos = [], treeIdx = []
 
   /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido. */
   function tube(spine, r0, r1, segs, seed) {
@@ -267,13 +267,6 @@ export function createScene(container, cfg) {
           p.y + (bx.y * cv + by.y * sv) * rad,
           p.z + (bx.z * cv + by.z * sv) * rad,
         )
-        const shade = 0.18 + h * 0.5 + (noise2(p.x * 0.33 + seed, p.z * 0.33) - 0.5) * 0.5
-        const t = Math.max(0, Math.min(1, shade))
-        treeCol.push(
-          BARK_LO[0] + (BARK_HI[0] - BARK_LO[0]) * t,
-          BARK_LO[1] + (BARK_HI[1] - BARK_LO[1]) * t,
-          BARK_LO[2] + (BARK_HI[2] - BARK_LO[2]) * t,
-        )
       }
     }
     for (let c = 0; c < n - 1; c++) {
@@ -291,14 +284,15 @@ export function createScene(container, cfg) {
    * arriba), envuelta en un tubo que se adelgaza. Los hijos salen del extremo
    * o de un punto intermedio, abiertos en un cono.
    */
-  function branch(start, dir, len, radius, depth, maxDepth, seed) {
+  function branch(start, dir, len, radius, depth, maxDepth, seed, fallen) {
     const SEG = 4
     const spine = [start.clone()]
     const cur = start.clone()
     const d = dir.clone()
     for (let p = 0; p < SEG; p++) {
       d.x += (rnd() - 0.5) * 0.55
-      d.y += (rnd() - 0.5) * 0.38 + 0.16
+      // Los troncos caídos casi no suben; los erguidos tienen sesgo hacia arriba.
+      d.y += (rnd() - 0.5) * 0.38 + (fallen ? 0.02 : 0.16)
       d.z += (rnd() - 0.5) * 0.55
       d.normalize()
       cur.addScaledVector(d, len / SEG)
@@ -324,28 +318,50 @@ export function createScene(container, cfg) {
       const from = i === 0 ? spine[spine.length - 1]
         : spine[1 + ((rnd() * (spine.length - 1)) | 0)]
       branch(from.clone(), v, len * (0.6 + rnd() * 0.22),
-        rEnd * (0.85 + rnd() * 0.2), depth + 1, maxDepth, seed)
+        rEnd * (0.85 + rnd() * 0.2), depth + 1, maxDepth, seed, fallen)
     }
   }
 
-  for (let t = 0; t < 11; t++) {
-    const tr = R * (0.12 + 0.62 * rnd())
+  // Pocos árboles y bien separados: 3–5 en pie, 1–2 troncos caídos.
+  const standing = 3 + ((rnd() * 3) | 0)
+  for (let t = 0, guard = 0; t < standing && guard++ < 80; ) {
     const ta = rnd() * 6.2832
+    const tr = R * (0.19 + rnd() * 0.54)
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
-    if (islandMask(tx, tz, R) < 0.35) continue
-    branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.4, tz),
-      new THREE.Vector3(0, 1, 0), 5.6 + rnd() * 2.6, 1.35 + rnd() * 0.5,
-      0, 3, rnd() * 97)
+    if (islandMask(tx, tz, R) < 0.3) continue
+    branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.8, tz),
+      new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
+      8 + rnd() * 7, 0.95 + rnd() * 0.65, 0, 3, rnd() * 97, false)
+    t++
   }
+  const logs = 1 + (rnd() < 0.5 ? 1 : 0)
+  for (let t = 0, guard = 0; t < logs && guard++ < 60; ) {
+    const ta = rnd() * 6.2832
+    const tr = R * (0.12 + rnd() * 0.40)
+    const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
+    if (islandMask(tx, tz, R) < 0.3) continue
+    branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) + 0.35, tz),
+      new THREE.Vector3(rnd() - 0.5, 0.06, rnd() - 0.5).normalize(),
+      9 + rnd() * 8, 0.55 + rnd() * 0.4, 2, 3, rnd() * 97, true)
+    t++
+  }
+
   if (treeIdx.length) {
     const tg = new THREE.BufferGeometry()
     tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
-    tg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(treeCol), 3))
     tg.setIndex(treeIdx)
-    tg.computeVertexNormals()
+    // Relleno oscuro plano...
     scene.add(new THREE.Mesh(tg, new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide, fog: true,
+      color: TREE_FILL, side: THREE.DoubleSide, fog: true,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
     })))
+    // ...y las ARISTAS encima: es lo que deja ver la geometría del tubo.
+    scene.add(new THREE.LineSegments(
+      new THREE.WireframeGeometry(tg),
+      new THREE.LineBasicMaterial({
+        color: TREE_EDGE, transparent: true, opacity: 0.55, fog: true,
+      }),
+    ))
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
@@ -606,10 +622,8 @@ export function createScene(container, cfg) {
   }
 
   // ─── AGENTES: jaula de aristas + criatura molecular + tallo ───────────────
-  const AGENT_COLORS = [
-    PALETTE.cyan, PALETTE.magenta, PALETTE.yellow,
-    PALETTE.white, PALETTE.blue, PALETTE.pink,
-  ]
+  // Un color por especie: la estela hereda el color de su individuo.
+  const AGENT_COLORS = [PALETTE.cyan, PALETTE.magenta, PALETTE.white, PALETTE.yellow]
   // Líneas gruesas de verdad: LineBasicMaterial ignora linewidth en casi todas
   // las plataformas, así que las jaulas usan LineMaterial (grosor en píxeles).
   const fatMaterials = []
@@ -640,54 +654,112 @@ export function createScene(container, cfg) {
     }
     return fatLine(pos, color)
   }
-  /** Criatura interna: esferitas unidas por enlaces al centro. */
-  function molecule(scale, color) {
+  const pick = (arr) => arr[(rnd() * arr.length) | 0]
+
+  /**
+   * Criatura interna: núcleo naranja + 3–4 satélites en direcciones FIJAS
+   * (por eso se lee igual desde cualquier ángulo), unidos por enlaces.
+   */
+  function creature(t) {
     const g = new THREE.Group()
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.6 * t, 16, 12),
+      new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
+    const dirs = [
+      new THREE.Vector3(1, 0.5, 0.3), new THREE.Vector3(-0.8, -0.4, 0.6),
+      new THREE.Vector3(0.25, -0.95, -0.55), new THREE.Vector3(0.7, 0.6, -0.7),
+    ]
+    const cols = [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyanSat]
+    const k = 3 + (rnd() < 0.5 ? 1 : 0)
     const seg = []
-    const k = 3 + ((rnd() * 3) | 0)
     for (let i = 0; i < k; i++) {
-      const p = new THREE.Vector3(
-        (rnd() - 0.5) * 2.2 * scale,
-        (rnd() - 0.5) * 1.6 * scale,
-        (rnd() - 0.5) * 2.2 * scale,
-      )
+      const p = dirs[i].clone().normalize().multiplyScalar((1.5 + rnd() * 0.45) * t)
       const s = new THREE.Mesh(
-        new THREE.SphereGeometry((0.3 + rnd() * 0.12) * scale, 8, 6),
-        new THREE.MeshBasicMaterial({ color }),
-      )
+        new THREE.SphereGeometry((0.3 + rnd() * 0.12) * t, 12, 10),
+        new THREE.MeshBasicMaterial({ color: cols[(i + ((rnd() * 4) | 0)) % 4] }))
       s.position.copy(p)
       g.add(s)
       seg.push(0, 0, 0, p.x, p.y, p.z)
     }
-    const lg = new THREE.BufferGeometry()
-    lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(seg), 3))
-    g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: PALETTE.bond })))
+    g.add(fatLine(seg, PALETTE.bond))
     return g
   }
 
+  /** Cuña/planeador: prisma triangular de 9 aristas. */
+  function wedge(e) {
+    const t = 5.2, n = 2.2, r = 1.6, lo = -0.7, hi = 0.8
+    const P = (x, y, z) => [x * e, y * e, z * e]
+    const s = P(0, lo, t), c = P(-n, lo, -r), l = P(n, lo, -r)
+    const u = P(0, hi, t * 0.45), d = P(-n * 0.5, hi, -r), f = P(n * 0.5, hi, -r)
+    const seg = (a, b) => [...a, ...b]
+    return [
+      ...seg(s, c), ...seg(c, l), ...seg(l, s),
+      ...seg(u, d), ...seg(d, f), ...seg(f, u),
+      ...seg(s, u), ...seg(c, d), ...seg(l, f),
+    ]
+  }
+
+  // Las 4 especies del bosque, tal como las arma el original.
+  const SPECIES = ['cyan', 'flag', 'eye', 'dbl']
   const n = cfg.fireflies.count
   const agents = []
   for (let i = 0; i < n; i++) {
-    const color = AGENT_COLORS[i % AGENT_COLORS.length]
+    const kind = SPECIES[i % SPECIES.length]
     const group = new THREE.Group()
-    const cage = new THREE.Group()
-    const kind = i % 4
-    if (kind === 0) cage.add(edgesOf(new THREE.BoxGeometry(4.6, 4.6, 4.6), color))
-    else if (kind === 1) cage.add(edgesOf(new THREE.OctahedronGeometry(3.1), color))
-    else if (kind === 2) cage.add(edgesOf(new THREE.TetrahedronGeometry(3.4), color))
-    else cage.add(ringLoop(2.7, 34, color))
-    group.add(cage)
-    group.add(molecule(0.8, PALETTE.orange))
-    // Tallo al suelo + bolita superior (la firma visual de murmur)
-    if (kind === 3 || kind === 1) {
-      group.add(fatLine([0, 0, 0, 0, 2.6, 0], PALETTE.magenta))
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.32, 10, 8),
+    let cage = null
+
+    if (kind === 'cyan') {
+      // Jaula cúbica de lado 6 + criatura dentro.
+      cage = new THREE.Group()
+      cage.add(edgesOf(new THREE.BoxGeometry(6, 6, 6), PALETTE.cyan))
+      cage.add(creature(1.15))
+      group.add(cage)
+    } else if (kind === 'eye') {
+      // Cuña planeadora (o octaedro) blanca + anillo, mástil y bolita.
+      cage = new THREE.Group()
+      cage.add(rnd() < 0.55
+        ? fatLine(wedge(1.15), PALETTE.white)
+        : edgesOf(new THREE.OctahedronGeometry(3.6), PALETTE.white))
+      group.add(cage)
+      const deco = new THREE.Group()
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
+        new THREE.MeshBasicMaterial({ color: PALETTE.magenta, side: THREE.DoubleSide }))
+      disc.rotation.x = -Math.PI / 2
+      deco.add(disc)
+      deco.add(ringLoop(1.55, 40, PALETTE.cyanEye))
+      deco.add(fatLine([0, 1, 0, 0, 4, 0], PALETTE.magenta))
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10),
         new THREE.MeshBasicMaterial({ color: PALETTE.white }))
-      ball.position.set(0, 2.6, 0)
-      group.add(ball)
+      ball.position.set(0, 4, 0)
+      deco.add(ball)
+      group.add(deco)
+    } else if (kind === 'flag') {
+      // Trípode: triángulo abajo, mástil y anillo arriba.
+      const lo = -2.6, hi = 5, r = 2.8
+      const tri = [
+        0, lo, r, -r * 0.86, lo, -r * 0.5,
+        -r * 0.86, lo, -r * 0.5, r * 0.86, lo, -r * 0.5,
+        r * 0.86, lo, -r * 0.5, 0, lo, r,
+      ]
+      group.add(fatLine(tri, pick([PALETTE.blue, PALETTE.magenta, PALETTE.cyanSat])))
+      group.add(fatLine([0, lo, 0, 0, hi, 0],
+        pick([PALETTE.yellow, PALETTE.magenta, PALETTE.orange])))
+      const ring = ringLoop(0.85, 30, pick([PALETTE.pink, PALETTE.cyanEye, PALETTE.yellow]))
+      ring.position.y = hi
+      group.add(ring)
+    } else {
+      // 'dbl': dos anillos amarillos y un núcleo naranja.
+      const a = ringLoop(1.15, 34, PALETTE.yellow); a.position.y = 0.5
+      const b = ringLoop(0.75, 30, PALETTE.yellow); b.position.y = -0.5
+      group.add(a); group.add(b)
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10),
+        new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
     }
+
+    // Cada individuo tiene su propia escala.
+    const baseScale = 0.9 + rnd() * 0.55
+    group.scale.setScalar(baseScale)
     scene.add(group)
-    agents.push({ group, cage, kind })
+    agents.push({ group, cage, kind, baseScale })
   }
 
   // ─── ESTELAS: puntos de tamaño-mundo que persisten ────────────────────────
@@ -866,9 +938,14 @@ export function createScene(container, cfg) {
       a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
       // Erguido y orientado al rumbo: nada de tumbos que deformen la silueta.
       a.group.rotation.y = Math.atan2(heads[i * 2], heads[i * 2 + 1])
-      a.cage.rotation.y += dt * 0.22
+      // 'flag' y 'dbl' no tienen jaula: laten con el grupo entero.
       const pulse = 1 + swarm.flash[i] * 0.35
-      a.cage.scale.setScalar(pulse)
+      if (a.cage) {
+        a.cage.rotation.y += dt * 0.22
+        a.cage.scale.setScalar(pulse)
+      } else {
+        a.group.scale.setScalar(a.baseScale * pulse)
+      }
     }
 
     // Estelas: siembra espaciada y desvanecido lento → puntos separados, no manchones.
