@@ -96,3 +96,25 @@ export function updateSwarm(swarm, cfg, dt) {
   }
   return flashes
 }
+
+export function attract(swarm, cfg, wx, wy, strength) {
+  const { pos, vel, count: n } = swarm
+  const r = cfg.neighborRadius * 2
+  const r2 = r * r
+  for (let i = 0; i < n; i++) {
+    const dx = wx - pos[i * 3], dy = wy - pos[i * 3 + 1]
+    const d2 = dx * dx + dy * dy
+    if (d2 < r2) {
+      const f = strength * (1 - Math.sqrt(d2) / r)
+      vel[i * 3] += dx * f
+      vel[i * 3 + 1] += dy * f
+    }
+  }
+}
+
+export function perturbPhases(swarm, amount, rand = Math.random) {
+  const p = swarm.phases
+  for (let i = 0; i < p.length; i++) {
+    p[i] = (p[i] + (rand() * 2 - 1) * amount + TWO_PI) % TWO_PI
+  }
+}
