@@ -1,7 +1,9 @@
 # Diseño del mundo CÉLULA (`cell`)
 
 **Fecha:** 2026-08-11
-**Estado:** diseño — **no implementado**. Este doc existe para revisarse antes de escribir código.
+**Estado:** diseño **aprobado** (decisiones cerradas en §9 el 2026-08-11). La capa pura de
+motilidad ya está implementada (`src/sim/membrane.js`, `src/sim/motility.js`); el render (F1)
+espera la extracción de `engine/*` que lidera la sesión de ciudad.
 **Alcance:** un cuarto mundo del registro, hermano de `land` / `water` / `city`, cuyo tema central
 es **cómo se mueve una célula**.
 **Base técnica:** el motor tal como está hoy sobre `main` (merge `93eae1c`) —
@@ -658,18 +660,20 @@ recorre también los worktrees y cuenta 96 tests en vez de 24.
 
 ---
 
-## 9. Preguntas abiertas para el usuario
+## 9. Decisiones tomadas
 
-1. **¿Macrófago?** Es la recomendación (§1) porque hace creíbles a la vez la motilidad rápida, la
-   quimiotaxis, la fagocitosis de bacterias y el estrés oxidativo. Alternativas: fibroblasto (más
-   quieto, sin depredación) o ameba *Dictyostelium* (motilidad aún más espectacular, pero sin
-   marco inmune ni invasores).
-2. **¿Cámara fija con sustrato deslizante (recomendado) o cámara siguiendo a la célula?** (§3.3)
-3. **¿Se entra directo con `ready: true` o primero un stub como `water`/`city`?** Recomiendo
-   entrar con F1 ya jugable — el stub no aporta nada aquí porque el mundo no depende de mapear
-   ningún bundle externo.
-4. **¿Se espera a que la sesión de ciudad termine `engine/*` antes de arrancar F1?** Es la
-   dependencia real (§8.4a): sin esas primitivas, el mundo célula duplicaría ~800 líneas de
-   `scene.js`. Recomiendo esperar y usar el tiempo en F2 (`membrane.js`/`motility.js`), que son
-   módulos puros sin Three.js y no dependen de la extracción.
-5. **Log en inglés**: se mantiene por consistencia con los otros tres mundos. Confirmar.
+Cerradas con el usuario el **2026-08-11**. Ya no son opciones: son el marco del que cuelga todo lo
+anterior.
+
+1. **La célula es un macrófago.** Descartados fibroblasto (migra a ~0.5 µm/min: se vería estático,
+   y no fagocita) y ameba *Dictyostelium* (mejor motilidad, pero sin marco inmune los invasores
+   pierden sentido narrativo). Consecuencia: §2.1 y §7 quedan tal como están escritos.
+2. **Célula centrada, sustrato deslizante** (§3.3, opción 2). No se toca `OrbitControls` ni la
+   cuenca de `wander.js`. Ya implementado: `subX`/`subZ` en `src/sim/motility.js`.
+3. **`cell` entra al registro directo con F1 jugable** (`ready: true` recién cuando haya célula
+   reconocible en pantalla). Sin stub: el stub tenía sentido para `water`/`city` porque esperaban
+   el mapeo del bundle de murmur, y célula no depende de ningún bundle externo.
+4. **Se espera la Fase A de `engine/*`** de la sesión de ciudad antes de F1, y mientras tanto se
+   avanza F2 en módulos puros. Descartado arrancar F1 con buffers propios provisionales (deuda de
+   render que después habría que migrar).
+5. **El events log queda en inglés**, por consistencia con los otros tres mundos.
