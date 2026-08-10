@@ -1700,5 +1700,23 @@ export function createScene(container, cfg, agentNames = []) {
   }
 
   function flash(v) { flashV = Math.min(1, v) }
-  return { update, resize, renderer, camera, controls, flash }
+
+  // Desmontar el mundo: libera GPU y saca los nodos del DOM. Lo usa el host al
+  // cambiar de mundo (el nuevo mundo se construye desde cero en el mismo container).
+  function dispose() {
+    window.removeEventListener('resize', resize)
+    if (idleTimer) clearTimeout(idleTimer)
+    controls.dispose()
+    scene.traverse((o) => {
+      if (o.geometry) o.geometry.dispose()
+      const m = o.material
+      if (Array.isArray(m)) m.forEach((x) => x.dispose())
+      else if (m) m.dispose()
+    })
+    composer.dispose()
+    renderer.dispose()
+    for (const el of [renderer.domElement, label, flashEl]) el.remove()
+  }
+
+  return { update, resize, renderer, camera, controls, flash, dispose }
 }

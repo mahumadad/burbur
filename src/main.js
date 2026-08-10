@@ -3,10 +3,10 @@ import { CONFIG } from './config.js'
 import { createSwarm, updateSwarm, attract, perturbPhases } from './sim/fireflies.js'
 import { createAmbient } from './sim/ambient.js'
 import { createEcosystem } from './sim/ecosystem.js'
-import { createCensus, FOREST_CENSUS } from './sim/agents.js'
+import { createCensus } from './sim/agents.js'
 import { createEventEngine } from './sim/events.js'
 import { narrate } from './sim/narrator.js'
-import { createScene } from './render/scene.js'
+import { worldById } from './worlds/registry.js'
 import { createAudio } from './audio/engine.js'
 import { createHud } from './ui/hud.js'
 import { createEventLog } from './ui/eventlog.js'
@@ -29,13 +29,10 @@ async function start() {
   overlay.classList.add('hidden')
 
   await Tone.start()
-  const swarm = createSwarm(CONFIG.fireflies)
-  const pop = createCensus(FOREST_CENSUS, CONFIG.fireflies.count)
-  const scene = createScene(app, CONFIG, pop.visible.map((v) => v.name))
+  // Piezas GLOBALES (persisten entre mundos): audio, ambiente, ecosistema, HUD.
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
   const ecosystem = createEcosystem(CONFIG.ecosystem)
-  const events = createEventEngine(pop, CONFIG.events)
   const eventLog = createEventLog('#8fe04a')
   const hud = createHud('#8fe04a', {
     // MUSIC = latidos + drone; WORLD = cama atmosférica.
@@ -43,7 +40,33 @@ async function start() {
     onWorld: (db) => audio.setBedVol(db - 8),
   })
 
-  // Interacción: el mouse atrae a los individuos cercanos.
+  // ── Registro de mundos: el mundo activo se construye/reemplaza en caliente ──
+  // Cada mundo tiene lo SUYO (swarm, censo, escena, motor de eventos); al cambiar
+  // se construye el nuevo y se hace dispose del viejo.
+  let world = null
+  function applyAccent(accent) {
+    document.documentElement.style.setProperty('--accent', accent)
+  }
+  function buildWorld(id) {
+    const def = worldById(id)
+    const swarm = createSwarm(CONFIG.fireflies)
+    const pop = createCensus(def.census, CONFIG.fireflies.count)
+    const scene = def.build(app, CONFIG, pop.visible.map((v) => v.name))
+    const events = createEventEngine(pop, CONFIG.events)
+    applyAccent(def.accent)
+    return { def, swarm, pop, scene, events }
+  }
+  function switchWorld(id) {
+    if (world && world.def.id === id) return
+    const old = world
+    world = buildWorld(id)
+    if (old) old.scene.dispose()
+  }
+  // Nombre de paridad con murmur (el selector de mundo lo llama).
+  window.setScene = switchWorld
+  world = buildWorld('land')
+
+  // Interacción: el mouse atrae a los individuos cercanos del mundo activo.
   let mouse = null
   app.addEventListener('pointermove', (e) => {
     const rect = app.getBoundingClientRect()
@@ -54,7 +77,7 @@ async function start() {
   app.addEventListener('pointerleave', () => { mouse = null })
   // Barra espaciadora: perturba las fases (desincroniza → mira cómo re-sincronizan).
   window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') { e.preventDefault(); perturbPhases(swarm, Math.PI) }
+    if (e.code === 'Space') { e.preventDefault(); perturbPhases(world.swarm, Math.PI) }
   })
 
   let last = performance.now()
@@ -62,6 +85,8 @@ async function start() {
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
+    // Se leen del mundo activo cada frame → tras un cambio, apuntan al nuevo.
+    const { swarm, pop, scene, events } = world
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
     const eco = ecosystem.update(dt)
     hud.update(eco)
