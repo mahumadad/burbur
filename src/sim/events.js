@@ -71,6 +71,7 @@ export function createEventEngine(pop, cfg, rand = Math.random) {
       { type, agent, agentType, dir },
       { phase: world.phase, weather: world.weather },
       rand,
+      cfg.lexicon,
     )
     return {
       t: world.time, type, agent, agentType, agentIdx, dir,
