@@ -22,10 +22,11 @@ function weightedPick(pairs, rand) {
   return pairs[0][0]
 }
 
-function pickCensus(census, phase, rand) {
-  // Peso por hora: nocturnos de noche, cantores al alba.
+function pickCensus(census, phase, weather, rand) {
+  // Peso por hora Y clima: nocturnos de noche, cantores al alba/ocaso, aves
+  // chicas casi mudas con lluvia, pocos transeúntes (ver timeWeight).
   let total = 0
-  const w = census.map((a) => { const x = timeWeight(a, phase); total += x; return x })
+  const w = census.map((a) => { const x = timeWeight(a, phase, weather); total += x; return x })
   let r = rand() * total
   for (let i = 0; i < census.length; i++) { if ((r -= w[i]) <= 0) return census[i] }
   return census[0]
@@ -59,7 +60,7 @@ export function createEventEngine(pop, cfg, rand = Math.random) {
       if (type === 'sound' && rand() < cfg.ambientProb) {
         source = rand() < 0.5 ? 'ghost' : 'cache'
       } else {
-        const a = pickCensus(pop.census, world.phase, rand)
+        const a = pickCensus(pop.census, world.phase, world.weather, rand)
         agent = a.name; agentType = a.type
         source = rand() < 0.5 ? 'ghost' : 'cache'
         lastActor = a
