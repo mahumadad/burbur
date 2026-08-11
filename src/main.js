@@ -135,9 +135,12 @@ async function start() {
       }
     }
 
+    // Sonidos de exterior gateados por mundo: la célula no truena ni llueve.
+    const ax = world.def.audio || {}
     // Tormenta: relámpagos y truenos cuando llueve (más con lluvia fuerte).
-    // NO cuando hace frío suficiente para nevar (nada de "thundersnow").
-    if (eco.rain > 0.3 && eco.temperature > -3) {
+    // NO cuando hace frío suficiente para nevar (nada de "thundersnow"), ni en
+    // mundos sin lluvia (interior).
+    if (ax.rain !== false && eco.rain > 0.3 && eco.temperature > -3) {
       lightningCooldown -= dt
       if (lightningCooldown <= 0 && Math.random() < 1.1 * dt * eco.rain) {
         lightningCooldown = 2.5 + Math.random() * 5
@@ -159,12 +162,13 @@ async function start() {
     const wind = Math.max(env.wind, eco.rain * 0.4)
     eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas
     audio.setWind(wind)
-    // Lluvia: siseo por intensidad + goteo a un ritmo proporcional.
-    audio.setRain(eco.rain)
-    if (eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
-    // Los grillos son de clima cálido: enmudecen con el frío.
-    if (env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
-    if (env.owl) audio.owl()
+    // Lluvia: siseo por intensidad + goteo a un ritmo proporcional. En mundos
+    // sin lluvia (célula) se silencia aunque el "clima" del perfil tenga agua.
+    audio.setRain(ax.rain === false ? 0 : eco.rain)
+    if (ax.rain !== false && eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
+    // Los grillos son de clima cálido: enmudecen con el frío y fuera del bosque/laguna.
+    if (ax.insects !== false && env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
+    if (ax.owl !== false && env.owl) audio.owl()
     const predations = scene.update(swarm, dt, eco)
     // Un cazador atrapó a un bicho → evento de conflicto narrado.
     if (predations && predations.length) {
