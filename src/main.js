@@ -73,9 +73,10 @@ async function start() {
   }
   function switchWorld(id) {
     if (world && world.def.id === id) return
-    const old = world
+    // Liberar el mundo viejo (y su contexto WebGL) ANTES de construir el nuevo,
+    // así nunca hay dos contextos vivos a la vez (evita la pantalla negra).
+    if (world) world.scene.dispose()
     world = buildWorld(id)
-    if (old) old.scene.dispose()
     eventLog.clear() // el REGISTRO es por mundo: se vacía al cambiar
     if (selector) selector.setActive(world.def.id)
   }

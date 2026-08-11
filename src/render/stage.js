@@ -170,6 +170,10 @@ export function createStage(container, cfg) {
     })
     composer.dispose()
     renderer.dispose()
+    // Liberar el CONTEXTO WebGL explícitamente: renderer.dispose() NO lo suelta,
+    // y como cada mundo crea un renderer nuevo, sin esto los contextos se acumulan
+    // hasta que el navegador mata el activo → pantalla negra al cambiar de mundo.
+    renderer.forceContextLoss()
     for (const el of [renderer.domElement, labelEl, flashEl]) el.remove()
   }
 
