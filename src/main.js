@@ -8,6 +8,7 @@ import { createEventEngine } from './sim/events.js'
 import { narrate } from './sim/narrator.js'
 import { WORLDS, worldById } from './worlds/registry.js'
 import { createAudio } from './audio/engine.js'
+import { unlockIOSAudio } from './audio/ios-unmute.js'
 import { createHud } from './ui/hud.js'
 import { createEventLog } from './ui/eventlog.js'
 import { createWorldSelector } from './ui/selector.js'
@@ -30,6 +31,9 @@ async function start() {
   running = true
   overlay.classList.add('hidden')
 
+  // iOS silencia el Web Audio con el switch de silencio; esto lo desbloquea
+  // DENTRO del gesto del tap (debe ir antes del primer await).
+  unlockIOSAudio()
   await Tone.start()
   // Piezas GLOBALES (persisten entre mundos): audio, ambiente, ecosistema, HUD.
   const audio = await createAudio(CONFIG)
