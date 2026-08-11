@@ -637,6 +637,10 @@ export function createPond(container, cfg, agentNames = []) {
   }
   function huntHerons(step, predations) {
     const F = fish.state.fish
+    // Refugio con lluvia (paridad con ciudad/bosque vía sim/perch.js): a más
+    // lluvia, las garzas prefieren quedarse posadas y casi no salen a pescar.
+    // Con rain=0 todo queda idéntico al comportamiento seco.
+    const shelter = eco.rain || 0
     for (let i = 0; i < n; i++) {
       const a = agents[i]
       if (!a.hunter) continue
@@ -666,13 +670,21 @@ export function createPond(container, cfg, agentNames = []) {
         worldPos[i * 3 + 1] = a.perch.y + Math.sin(clock * 1.3 + a.idx) * 0.08
         roamers[i].x = worldPos[i * 3] / LR; roamers[i].z = worldPos[i * 3 + 2] / LR
         roamers[i].vx *= 0.8; roamers[i].vz *= 0.8
-        if (a.stateT <= 0) { a.hstate = 'fly'; a.stateT = 5 + q() * 7 }
+        if (a.stateT <= 0) {
+          // Si llueve, se quedan refugiadas otro rato en vez de salir a volar.
+          if (q() < shelter) a.stateT = 4 + q() * 6
+          else { a.hstate = 'fly'; a.stateT = 5 + q() * 7 }
+        }
       } else { // 'fly' — vuela normal; al terminar decide qué hacer
         if (a.stateT <= 0) {
           const r = q()
-          if (r < 0.35) {            // posarse en una piedra
+          // Con lluvia crece la prob. de posarse (hasta ~0.85) y la ventana de
+          // pesca se cierra: seco → 0.35/0.50 (idéntico al original).
+          const perchP = 0.35 + shelter * 0.5
+          const strikeP = perchP + 0.15 * (1 - shelter)
+          if (r < perchP) {          // posarse en una piedra
             a.hstate = 'perch'; a.perch = heronPerch(); a.stateT = 5 + q() * 8
-          } else if (r < 0.5) {      // ir a pescar (ocasional)
+          } else if (r < strikeP) {  // ir a pescar (ocasional)
             let best = -1, bestD = 55
             for (let fi = 0; fi < F.length; fi++) {
               const d = Math.hypot(F[fi].x * mt - worldPos[i * 3], F[fi].z * mt - worldPos[i * 3 + 2])
