@@ -1,8 +1,4 @@
-# Reproducir el tronco (log) del "secret pond" de alikim
 
-Guía exacta, extraída del código de la herramienta
-`alikim.com/_lush/tree/?group=blossom&name=secret pond` (paneles de config +
-`_lush/tree/js/lpf.js`).
 
 ## Cómo construye alikim
 
