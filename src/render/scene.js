@@ -12,6 +12,14 @@ import { createPaths, nearestOnPaths } from '../sim/paths.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createBugs, updateBugs, nearestBug } from '../sim/behaviors.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
+import { phenology } from '../sim/phenology.js'
+import { createLitter, tintLeafAnchors } from './tree/litter.js'
+import { createTreeFactory } from './tree/index.js'
+import { createTreeLife, updateTreeLife, seedMature } from '../sim/treeLife.js'
+// Alias: el bosque ya usa el nombre `SPECIES` para las 6 especies de
+// criaturas-luciérnaga (ver más abajo); la tabla de especies de árbol se
+// importa con otro nombre para no chocar.
+import { SPECIES as TREE_SPECIES } from './tree/species.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -456,10 +464,10 @@ export function createScene(container, cfg, agentNames = []) {
         const yr = (0.3 + rnd() * 1.0) * scale
         const cx = tx + Math.cos(b) * xr, cy = ty + yr, cz = tz + Math.sin(b) * xr
         pushLine(tx, ty, tz, cx, cy, cz, STEM_MID, STEM_HI)
-        pushPoint(cx, cy, cz, col, (0.34 + rnd() * 0.34) * scale, rnd())
+        pushPoint(cx, cy, cz, col, (0.34 + rnd() * 0.34) * scale, rnd(), 1)
       }
     } else {
-      pushPoint(tx, ty + 0.1 * scale, tz, col, (0.44 + rnd() * 0.42) * scale, rnd())
+      pushPoint(tx, ty + 0.1 * scale, tz, col, (0.44 + rnd() * 0.42) * scale, rnd(), 1)
     }
   }
 
@@ -481,6 +489,32 @@ export function createScene(container, cfg, agentNames = []) {
       if (islandMask(fx, fz, R) < 0.1) continue
       flower(fx, G + terrainHeight(fx, fz), fz, 0.6 + rnd() * 0.75,
         Math.min(1.3, lightPool(fx, fz)), palette)
+    }
+  }
+
+  // ─── NOMEOLVIDES: flora de suelo, no un árbol (Task 6) ────────────────────
+  // Racimo bajo y muy denso, azul con centro amarillo, solo en las zonas
+  // sombrías del claro. `hbloom=1` (el último argumento de pushPoint) los
+  // marca como cabeza de flor: la lluvia fuerte también los cierra, igual
+  // que al resto del prado (ver litter/Task 2).
+  const NOMEOLVIDES = [[0.42, 0.62, 0.95], [0.60, 0.76, 1.0], [0.34, 0.52, 0.88]]
+  const NOMEOLVIDES_CENTRO = [1.0, 0.86, 0.30]
+  for (let p = 0; p < 3; p++) {
+    const pa = rnd() * 6.2832, pr = R * (0.2 + rnd() * 0.5)
+    const px = Math.cos(pa) * pr, pz = Math.sin(pa) * pr
+    if (islandMask(px, pz, R) < 0.25) continue
+    if (lightPool(px, pz) > 0.9) continue     // solo a la sombra
+    poiFlowers.push({ x: px / R, z: pz / R })
+    for (let i = 0, k = 40 + ((rnd() * 30) | 0); i < k; i++) {
+      const b = rnd() * 6.2832, d = 2.2 * Math.sqrt(rnd())
+      const fx = px + Math.cos(b) * d, fz = pz + Math.sin(b) * d
+      if (islandMask(fx, fz, R) < 0.1) continue
+      const fy = G + terrainHeight(fx, fz)
+      const h = 0.9 + rnd() * 0.7        // muy bajos, a ras de pasto
+      pushLine(fx, fy, fz, fx, fy + h, fz, STEM_LO, STEM_MID)
+      const c = NOMEOLVIDES[(rnd() * NOMEOLVIDES.length) | 0]
+      pushPoint(fx, fy + h, fz, c, 0.30 + rnd() * 0.14, rnd(), 1)
+      pushPoint(fx, fy + h, fz, NOMEOLVIDES_CENTRO, 0.11, rnd(), 1)
     }
   }
 
@@ -1059,112 +1093,89 @@ export function createScene(container, cfg, agentNames = []) {
       folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
       folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
   }
-  const FALL_N = 280
-  const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
-  const fallCol = new Float32Array(FALL_N * 3)
-  const fallVy = new Float32Array(FALL_N)
-  const fallPh = new Float32Array(FALL_N)
-  const fallKind = new Float32Array(FALL_N) // 0 hoja (forma de hoja) / 1 pétalo (disco)
-  const fallRot = new Float32Array(FALL_N)
-  const fallActive = new Uint8Array(FALL_N)
-  let fallHead = 0, fallBudget = 0, petalBudget = 0
-  const fallGeo = new THREE.BufferGeometry()
-  fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
-  fallGeo.setAttribute('hcol', new THREE.BufferAttribute(fallCol, 3))
-  fallGeo.setAttribute('aKind', new THREE.BufferAttribute(fallKind, 1))
-  fallGeo.setAttribute('aRot', new THREE.BufferAttribute(fallRot, 1))
-  // Las hojas que caen tienen FORMA DE HOJA (óvalo apuntado que gira); los
-  // pétalos del sakura caen como discos. Comparte uProj/uT con los puntos.
-  const fallMesh = new THREE.Points(fallGeo, new THREE.ShaderMaterial({
-    uniforms: { uProj: pointUniforms.uProj, uT: pointUniforms.uT },
-    transparent: true, depthWrite: false,
-    vertexShader: `
-      attribute vec3 hcol; attribute float aKind; attribute float aRot;
-      uniform float uProj, uT;
-      varying vec3 vC; varying float vKind; varying float vRot;
-      void main() {
-        vC = hcol; vKind = aKind; vRot = aRot + uT * 2.0; // giran al caer
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        float vd = max(-mv.z, 0.001);
-        gl_PointSize = clamp(0.85 * uProj / vd, 1.0, 48.0);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vC; varying float vKind; varying float vRot;
-      void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        if (vKind > 0.5) {                 // pétalo: disco suave
-          float d = length(uv) * 2.0;
-          if (d > 1.0) discard;
-          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
-          return;
-        }
-        // hoja: óvalo apuntado rotado con nervadura (igual que el follaje)
-        float s = sin(vRot), c = cos(vRot);
-        vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
-        float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
-        if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
-        float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
-        float rib = smoothstep(0.06, 0.0, abs(q.x));
-        gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
-      }`,
-  }))
-  fallMesh.frustumCulled = false
-  scene.add(fallMesh)
-  function updateFallingLeaves(step, rate, autumn, petalRate) {
-    // Emisión de HOJAS: presupuesto fraccional (hojas/seg) desde las ramas.
-    if (leafAnchors.length && rate > 0) {
-      fallBudget += rate * step
-      while (fallBudget >= 1) {
-        fallBudget -= 1
-        const a = ((Math.random() * (leafAnchors.length / 9)) | 0) * 9
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = leafAnchors[a]; fallPos[i * 3 + 1] = leafAnchors[a + 1]; fallPos[i * 3 + 2] = leafAnchors[a + 2]
-        // La hoja que cae hereda su propio viraje de otoño (verde→su color).
-        fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
-        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
-        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
-        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28
-        fallKind[i] = 0; fallRot[i] = Math.random() * 6.28; fallActive[i] = 1 // HOJA
-      }
+
+  // ─── ÁRBOLES LUSH: abedul y manzano (Task 5) ────────────────────────────
+  // Se suman a los árboles de puntos que ya existen (arriba): NO los
+  // reemplazan. Se plantan lejos de ellos y entre sí usando `treeObstacles`,
+  // para que las dos estéticas no se encimen. El manzano es la única especie
+  // con fruto — el resto tiene `colors.fruit = null`. Cada árbol emite desde
+  // sus propias anclas, así que no hay pool combinado de fruto.
+  const arboles = createTreeFactory(THREE, noise2)
+  const lush = []
+  // Mismos años que el sakura de la ciudad (Task 4): plantón→joven→maduro→
+  // senescente→caído→rebrote.
+  const VIDA_CFG_LUSH = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+  const DEBUG_GROWN = new URLSearchParams(location.search).has('grown')
+
+  // Punto de siembra para un árbol lush: dentro de la isla, lejos de los
+  // árboles de puntos (`treeObstacles`) y de los otros lush ya plantados.
+  // Se usa al sembrar y, más adelante, cuando uno rebrota.
+  function puntoLush() {
+    for (let guard = 0; guard < 120; guard++) {
+      const ta = rnd() * 6.2832
+      const tr = R * (0.22 + rnd() * 0.5)
+      const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
+      if (islandMask(tx, tz, R) < 0.3) continue
+      if (treeObstacles.some((o) => Math.hypot(tx / R - o.x, tz / R - o.z) < 0.18)) continue
+      if (lush.some((l) => Math.hypot(tx - l.x, tz - l.z) < 14)) continue
+      return { tx, tz, gy: G + terrainHeight(tx, tz) }
     }
-    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
-    if (petalAnchors.length && petalRate > 0) {
-      petalBudget += petalRate * step
-      while (petalBudget >= 1) {
-        petalBudget -= 1
-        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
-        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
-        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28
-        fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1 // PÉTALO (disco)
-      }
-    }
-    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
-    if (petalAnchors.length && petalRate > 0) {
-      petalBudget += petalRate * step
-      while (petalBudget >= 1) {
-        petalBudget -= 1
-        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
-        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
-        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
-      }
-    }
-    for (let i = 0; i < FALL_N; i++) {
-      if (!fallActive[i]) continue
-      fallPos[i * 3 + 1] -= fallVy[i] * step
-      fallPos[i * 3] += Math.sin(clock * 2.0 + fallPh[i]) * 1.5 * step
-      fallPos[i * 3 + 2] += Math.cos(clock * 1.7 + fallPh[i] * 1.3) * 1.5 * step
-      if (fallPos[i * 3 + 1] < G - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 } // toca suelo → recicla
-    }
-    fallGeo.attributes.position.needsUpdate = true
-    fallGeo.attributes.hcol.needsUpdate = true
-    fallGeo.attributes.aKind.needsUpdate = true
-    fallGeo.attributes.aRot.needsUpdate = true
+    return null
+  }
+
+  const ESPECIES_BOSQUE = ['abedul', 'abedul', 'manzano']
+  for (const especie of ESPECIES_BOSQUE) {
+    const p = puntoLush()
+    if (!p) continue
+    const { tx, tz, gy } = p
+    const origin = new THREE.Vector3(tx, gy - 0.8, tz)
+    const t = arboles.createTree({
+      species: especie,
+      origin,
+      dir: new THREE.Vector3((rnd() - 0.5) * 0.4, 1, (rnd() - 0.5) * 0.4).normalize(),
+      rnd,
+    })
+    t.especie = especie
+    // Ciclo de vida (Task 4): arranca como plantón. `origin` queda guardado
+    // porque la posición real vive HORNEADA en la geometría (`growSkeleton`
+    // la usa como punto de partida); para reubicar el árbol al rebrotar,
+    // `group.position` se usa como un DESPLAZAMIENTO relativo a este punto.
+    t.vida = createTreeLife(VIDA_CFG_LUSH, rnd)
+    // Depuración: ?grown deja los árboles adultos de entrada, porque con ?season
+    // fija el año no da la vuelta y si no se quedarían de plantón para siempre.
+    if (DEBUG_GROWN) seedMature(t.vida, VIDA_CFG_LUSH)
+    t.setGrowth(t.vida.growth)
+    t.origin = origin
+    t.perch = null   // un plantón no ofrece posadero (se registra al crecer)
+    t.x = tx; t.z = tz; t.gy = gy
+    scene.add(t.group)
+    lush.push(t)
+    treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
+    // Las anclas lush NO se mezclan con el pool de los árboles de puntos: cada
+    // árbol lush emite desde LAS SUYAS y solo cuando está poblado (ver el update).
+    // Además evita mezclar strides distintos (viejo 9 floats, lush 6).
+  }
+
+  const litter = createLitter({
+    THREE, count: 320, ground: G, pointUniforms,
+  })
+  scene.add(litter.mesh)
+  // Anclas de los árboles de PUNTOS (siempre poblados). Los lush emiten desde
+  // las suyas, aparte. `anclas.leaf` lleva el color virado; `anclas.petal` es
+  // pos+color directo.
+  const anclas = {
+    leaf: new Float32Array((leafAnchors.length / 9) * 6),
+    petal: new Float32Array(petalAnchors),
+  }
+  // Las anclas de hoja llevan el color YA VIRADO (verde→otoño). Se recalculan
+  // cuando el otoño avanza de forma apreciable — no cada frame, que sería
+  // tirar CPU a la basura. La interpolación vive en litter.js (tintLeafAnchors)
+  // porque el bosque y la ciudad la necesitan por igual.
+  let autumnCache = -1
+  function anclasHoja(autumn) {
+    if (Math.abs(autumn - autumnCache) < 0.02) return anclas.leaf
+    autumnCache = autumn
+    return tintLeafAnchors(leafAnchors, anclas.leaf, autumn)
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
@@ -1385,13 +1396,18 @@ export function createScene(container, cfg, agentNames = []) {
     }
     return [sx, sy]
   }
-  const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1, rainShelter = 0
+  // Última fenología calculada: la usa `scare()` para saber cuánto follaje/flor
+  // tiene puesto el árbol ahora mismo (un árbol pelado no suelta nada).
+  let lastPhen = { leaf: 0, flower: 0, fruit: 0 }
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
     pointUniforms.uT.value = clock
+    // Eventos del ciclo de vida de los árboles lush (caída), para el
+    // registro. Se combinan con `predations` justo antes de retornar.
+    const treeEvents = []
 
     // El ecosistema pinta el mundo: luz de la hora, niebla y neblina del clima.
     if (eco) {
@@ -1484,23 +1500,98 @@ export function createScene(container, cfg, agentNames = []) {
       // Con lluvia los pájaros se refugian: se posan en árboles/rocas y se quedan.
       rainShelter = eco.rain
 
-      // Estaciones: ciclo lento (~210 s = un "año"). Brote → hoja plena → ámbar
-      // + caída → ramas peladas. La lluvia tira algunas hojas y borra flores.
-      // +0.35 → el mundo arranca en VERANO (con hojas) y el ciclo avanza desde ahí.
-      // La estación la maneja el host (para compartirla con el HUD); fallback local.
+      // Estaciones: la curva la calcula src/sim/phenology.js (con tests). Aquí
+      // solo se traduce a uniforms y a tasas de emisión.
+      // +0.35 → el mundo arranca en VERANO. La estación la maneja el host (para
+      // compartirla con el HUD); este es el fallback local.
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
-      const leafAmt = seasonT < 0.5 ? ss01(0, 0.2, seasonT) : 1 - ss01(0.62, 0.8, seasonT)
-      const flowerAmt = ss01(0.02, 0.1, seasonT) * (1 - ss01(0.2, 0.32, seasonT))
+      const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 })
       foliageUniforms.uSeason.value = seasonT
-      foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
-      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
-      const autumn = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
-      foliageUniforms.uAutumn.value = autumn
-      // Hojas/pétalos que se desprenden: otoño + lluvia + VIENTO (si aún hay hojas).
-      const gust = eco.rain + (eco.wind || 0) * 0.7
-      const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
-      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
-      updateFallingLeaves(step, shedRate, autumn, petalRate)
+      foliageUniforms.uLeaf.value = phen.leafShown
+      foliageUniforms.uFlower.value = phen.flowerShown
+      foliageUniforms.uAutumn.value = phen.autumn
+      pointUniforms.uBloom.value = phen.meadow
+
+      // Árboles lush (Task 5): cada especie con su propia curva de fenología,
+      // cacheada por nombre para no recalcularla varias veces por frame. El
+      // follaje de puntos de los árboles viejos (arriba) sigue con
+      // DEFAULT_CURVE — no cambia.
+      const phenPorEspecie = {}
+      const phenDe = (e) => (phenPorEspecie[e] ||=
+        phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, TREE_SPECIES[e].curve))
+      const gust = (eco.rain || 0) + (eco.wind || 0) * 0.7
+      const litterEnv = { wind: eco.wind || 0, windDir: eco.windDir || 0 }
+      for (let ti = 0; ti < lush.length; ti++) {
+        const t = lush[ti]
+        const ph = phenDe(t.especie)
+        const ev = updateTreeLife(t.vida, VIDA_CFG_LUSH, step, seasonT)
+        t.setGrowth(t.vida.growth)
+        // Cuánta copa hay realmente puesta: un árbol vacío (plantón recién
+        // rebrotado) no debe botar nada, por más que la estación sea de caída.
+        const frac = t.foliageFrac()
+        // El vigor recorta la copa: un árbol viejo o recién nacido sostiene
+        // menos hoja/flor/fruto que uno maduro.
+        t.update({
+          ...ph,
+          leaf: ph.leaf * t.vida.vigor,
+          leafShown: ph.leafShown * t.vida.vigor,
+        }, clock)
+        if (t.vida.stage === 'fallen') t.group.rotation.z = t.vida.tilt * Math.PI * 0.42
+
+        // Emisión POR ÁRBOL desde SUS anclas, escalada por vigor × copa real: un
+        // árbol vacío no emite, y las hojas nacen SOLO donde ese árbol tiene copa.
+        const dens = t.vida.vigor * frac
+        // Cuánto follaje tiene puesto AHORA: lo usa el shake para soltar en
+        // proporción, per-árbol (un árbol vacío no suelta al agitar).
+        t._leafAmt = ph.leaf * dens; t._flowerAmt = ph.flower * dens; t._fruitAmt = ph.fruit * dens
+        const src = 'lush' + ti
+        litter.emitRate('leaf', ph.shed * dens, step, t.leafAnchors, src)
+        litter.emitRate('petal', ph.petals * dens, step, t.flowerAnchors, src)
+        // Solo el manzano fructifica (las demás tienen curve.fruit = null y
+        // ph.fruit da 0 siempre): el fruto cae A PLOMO (perfil `fruit` de
+        // litter.js), a diferencia de la hoja, que deriva de lado.
+        if (ph.fruit > 0) {
+          litter.emitRate('fruit', ph.fruit * (0.6 + gust * 4) * dens, step, t.fruitAnchors, src)
+        }
+
+        // Un plantón no ofrece posadero: se registra recién al dejar de serlo.
+        if (!t.perch && t.vida.stage !== 'sapling' && t.vida.stage !== 'fallen') {
+          t.perch = { x: t.x / R, z: t.z / R, h: TREE_SPECIES[t.especie].form.len * 0.55 }
+          poiPerch.push(t.perch)
+        }
+
+        if (ev.cayo) {
+          // Se va el posadero del árbol que cayó, y las aves que estaban ahí
+          // se sueltan: si no, quedan flotando en el vacío.
+          const k = poiPerch.indexOf(t.perch)
+          if (k >= 0) poiPerch.splice(k, 1)
+          for (const a of perchAgents) {
+            if (a.target === t.perch) { a.target = null; a.mode = 'roam'; a.timer = 0 }
+          }
+          t.perch = null
+          treeEvents.push({ type: 'treeLife', kind: 'fall' })
+        }
+
+        if (ev.rebroto) {
+          // Rebrota en otro punto del claro: la posición real vive horneada
+          // en la geometría, así que se mueve por DESPLAZAMIENTO relativo al
+          // origen con el que se generó el árbol.
+          const p = puntoLush()
+          if (p) {
+            t.group.position.set(p.tx - t.origin.x, (p.gy - 0.8) - t.origin.y, p.tz - t.origin.z)
+            t.x = p.tx; t.z = p.tz; t.gy = p.gy
+          }
+          t.group.rotation.z = 0
+        }
+      }
+
+      // Árboles de puntos (los de siempre): también emiten desde SUS anclas, con
+      // su propia curva. Están siempre poblados, así que no se gatean por vida.
+      litter.emitRate('leaf', phen.shed, step, anclasHoja(phen.autumn), 'puntos')
+      litter.emitRate('petal', phen.petals, step, anclas.petal, 'puntos')
+      // Una sola vez por frame: avanza la física de todo lo que ya cae.
+      litter.step(step, litterEnv)
+      lastPhen = { leaf: phen.leaf, flower: phen.flower }
     }
 
     mapPositions(step)
@@ -1574,6 +1665,7 @@ export function createScene(container, cfg, agentNames = []) {
     // Relámpago: el overlay se apaga rápido tras el destello.
     // El escenario cierra el frame: destello, respiración de la vista y render.
     stage.render(step)
+    if (treeEvents.length) predations.push(...treeEvents)
     return predations
   }
 
@@ -1595,12 +1687,31 @@ export function createScene(container, cfg, agentNames = []) {
       b.tx = (Math.random() * 2 - 1) * 0.85
       b.tz = (Math.random() * 2 - 1) * 0.85
     }
+    // El shake sacude la copa: suelta en proporción a lo que hay puesto, y desde
+    // las anclas de cada fuente. Un árbol pelado (o vacío) no suelta nada.
+    // Árboles de puntos (siempre poblados):
+    litter.burst('leaf', 40 * strength * lastPhen.leaf, anclas.leaf)
+    litter.burst('petal', 50 * strength * lastPhen.flower, anclas.petal)
+    // Cada árbol lush, desde SUS anclas y según SU follaje actual: el manzano
+    // vacío no bota manzanas, el sakura en flor suelta una nube de pétalos.
+    for (const t of lush) {
+      litter.burst('leaf', 40 * strength * (t._leafAmt || 0), t.leafAnchors)
+      litter.burst('petal', 50 * strength * (t._flowerAmt || 0), t.flowerAnchors)
+      litter.burst('fruit', 24 * strength * (t._fruitAmt || 0), t.fruitAnchors)
+    }
   }
 
-  // El desmontaje (GPU + nodos del DOM) lo hace el escenario compartido.
+  // El desmontaje: libera la hojarasca y los árboles lush, y delega el resto
+  // (GPU + nodos del DOM) en el escenario compartido.
+  function dispose() {
+    litter.dispose()
+    arboles.dispose()
+    stage.dispose()
+  }
+
   return {
     update, scare, setPointer,
-    resize: stage.resize, flash: stage.flash, dispose: stage.dispose,
+    resize: stage.resize, flash: stage.flash, dispose,
     renderer: stage.renderer, camera, controls,
   }
 }

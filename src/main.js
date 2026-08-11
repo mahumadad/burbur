@@ -26,10 +26,25 @@ const overlay = document.getElementById('overlay')
 const app = document.getElementById('app')
 let running = false
 
+// La semilla de la puerta late en los colores de los 6 mundos que hay adentro
+// (acentos del registry), pasando suave de uno al otro — un guiño a lo que espera.
+const seedEl = document.querySelector('.seed')
+let seedTimer = null
+if (seedEl) {
+  const accents = ['#b6d184', '#aacdff', '#fab75e', '#c9a6ff', '#f2a0c8', '#9cc47a']
+  let ci = 0
+  seedEl.style.color = accents[0]
+  seedTimer = setInterval(() => { seedEl.style.color = accents[ci = (ci + 1) % accents.length] }, 3200)
+}
+
 async function start() {
   if (running) return
   running = true
-  overlay.classList.add('hidden')
+  // La semilla se abre y el velo se disuelve mientras el mundo aparece detrás;
+  // el overlay se saca del DOM al terminar la animación (~1.3s).
+  overlay.classList.add('leaving')
+  setTimeout(() => overlay.classList.add('hidden'), 1300)
+  if (seedTimer) clearInterval(seedTimer)
 
   // iOS silencia el Web Audio con el switch de silencio; esto lo desbloquea
   // DENTRO del gesto del tap (debe ir antes del primer await).
@@ -39,11 +54,19 @@ async function start() {
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
   const ecosystem = createEcosystem(CONFIG.ecosystem)
+  // Depuración: ?season=0.6&wind=1 congela la estación y el viento para poder
+  // revisar las cuatro estaciones sin esperar los 210 s de un año. ?grown (leído
+  // en cada mundo) además nace los árboles adultos: con la estación fija el año
+  // no da la vuelta, así que sin esto se quedarían de plantón y no verías la copa.
+  const qs = new URLSearchParams(location.search)
+  const fijoSeason = qs.has('season') ? parseFloat(qs.get('season')) : null
+  const fijoWind = qs.has('wind') ? parseFloat(qs.get('wind')) : null
   const eventLog = createEventLog('#8fe04a')
   const hud = createHud('#8fe04a', {
-    // MUSIC = latidos + drone; WORLD = cama atmosférica.
-    onMusic: (db) => { audio.setFlashVol(db); audio.setDroneVol(db - 4) },
-    onWorld: (db) => audio.setBedVol(db - 8),
+    // Tres capas independientes (los sliders del panel).
+    onDrone: (db) => audio.setDroneVol(db),        // FONDO: el drone ambiental
+    onWorld: (db) => audio.setWeatherVol(db),      // MUNDO: truenos, viento, lluvia
+    onActivity: (db) => audio.setActivityVol(db),  // ACTIVIDAD: la fauna y los eventos
   })
 
   // ── Registro de mundos: el mundo activo se construye/reemplaza en caliente ──
@@ -188,6 +211,8 @@ async function start() {
     const env = ambient.update(dt)
     const wind = Math.max(env.wind, eco.rain * 0.4)
     eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas
+    if (fijoSeason != null) eco.seasonT = fijoSeason
+    if (fijoWind != null) eco.wind = fijoWind
     audio.setWind(wind)
     // Lluvia: siseo por intensidad + goteo a un ritmo proporcional. En mundos
     // sin lluvia (célula) se silencia aunque el "clima" del perfil tenga agua.
