@@ -26,7 +26,7 @@ export function createTrails(scene, n, agentColors, rc, pointMaterial) {
         tPos[slot] = worldPos[i * 3]
         tPos[slot + 1] = worldPos[i * 3 + 1] - 1.2
         tPos[slot + 2] = worldPos[i * 3 + 2]
-        tSize[i * TRAIL + tHead] = rc.trailSize * 0.13
+        tSize[i * TRAIL + tHead] = rc.trailSize * 0.17 // puntos un poco más gruesos (paridad murmur)
       }
       tHead = (tHead + 1) % TRAIL
     }

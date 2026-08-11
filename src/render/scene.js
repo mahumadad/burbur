@@ -134,30 +134,10 @@ export function createScene(container, cfg, agentNames = []) {
     snowMats.push(groundMat)
     scene.add(new THREE.Mesh(geo, groundMat))
 
-    // "Matrix": la malla triangulada del suelo se hace visible como wireframe.
-    // Es lo que hace que las superficies se lean como red y que los objetos
-    // parezcan disolverse dentro de ellas (como las rocas/árboles).
-    const wfGeo = new THREE.WireframeGeometry(geo)
-    // La grilla se apaga con la máscara de isla: fuera del mapa no debe verse
-    // flotando (el suelo ya se funde a negro por su color por vértice).
-    {
-      const wp = wfGeo.attributes.position
-      const wc = new Float32Array(wp.count * 3)
-      const WF = [0.56, 0.63, 0.42]
-      for (let i = 0; i < wp.count; i++) {
-        const m = islandMask(wp.getX(i), wp.getZ(i), R)
-        const k = m * m // cae más rápido que el suelo → el borde no queda marcado
-        wc[i * 3] = WF[0] * k
-        wc[i * 3 + 1] = WF[1] * k
-        wc[i * 3 + 2] = WF[2] * k
-      }
-      wfGeo.setAttribute('color', new THREE.BufferAttribute(wc, 3))
-    }
-    const gwf = new THREE.LineSegments(
-      wfGeo,
-      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.22, fog: true }),
-    )
-    scene.add(gwf)
+    // NB: el detalle "matrix" del suelo lo dan los PUNTOS (abajo), no una grilla
+    // de líneas — las aristas del wireframe se quitaron a pedido (se veían como
+    // líneas sobre el pasto). La fusión de elementos con la superficie viene del
+    // punteado, no del wireframe.
 
     // Punteado del suelo: nube de puntos MATE (sin brillo aditivo) sembrada
     // sobre el terreno → el detalle fino de murmur, visible sobre todo en las
@@ -295,6 +275,7 @@ export function createScene(container, cfg, agentNames = []) {
     uTime: { value: 0 },
     uWet: { value: 0 },
     uR: { value: R },
+    uFlow: { value: new THREE.Vector2(0, 0) }, // dirección de corriente (del viento/lluvia)
   }
   {
     const SEGS = 72
@@ -323,13 +304,14 @@ export function createScene(container, cfg, agentNames = []) {
         }
       `,
       fragmentShader: `
-        uniform float uTime; uniform float uWet; uniform float uR;
+        uniform float uTime; uniform float uWet; uniform float uR; uniform vec2 uFlow;
         varying vec2 vXZ; varying float vLow;
         void main() {
-          // Agua reflectante: lámina azul-gris que refleja el cielo, con brillos
-          // que se deslizan lentamente por encima.
-          float s = sin(vXZ.x * 0.16 + vXZ.y * 0.11 + uTime * 0.8);
-          float s2 = sin(vXZ.x * 0.05 - vXZ.y * 0.07 - uTime * 0.5);
+          // Agua reflectante que FLUYE en una dirección: los brillos se arrastran
+          // según uFlow (corriente por viento/lluvia), no solo oscilan en el sitio.
+          vec2 q = vXZ + uFlow * uTime;
+          float s = sin(q.x * 0.16 + q.y * 0.11 + uTime * 0.8);
+          float s2 = sin(q.x * 0.05 - q.y * 0.07 - uTime * 0.5);
           float glint = smoothstep(0.55, 1.0, s) + 0.5 * smoothstep(0.7, 1.0, s2);
           vec3 col = vec3(0.16, 0.26, 0.34) + glint * vec3(0.55, 0.66, 0.78);
           float r = length(vXZ);
@@ -568,7 +550,9 @@ export function createScene(container, cfg, agentNames = []) {
   // `birth` (instante de brote, escalonado) y `kind` (0 hoja / 1 flor).
   const folPos = [], folCol = [], folSize = [], folPhase = [], folKind = [], folBirth = []
   const folFall = [], folRot = [] // color de otoño por hoja + orientación de la hoja
-  let treeBlooms = false
+  const petalAnchors = [] // posiciones+color de las flores sakura → lluvia de pétalos
+  let treeBlooms = false, treeSakura = false
+  const SAKURA = [[1.0, 0.72, 0.82], [1.0, 0.80, 0.90], [1.0, 0.60, 0.74], [0.98, 0.90, 0.96]]
   const LEAF_LO = [0.09, 0.20, 0.05], LEAF_HI = [0.30, 0.52, 0.13]
   const BLOSSOM = [[1.0, 0.72, 0.82], [1.0, 0.86, 0.40], [0.98, 0.95, 1.0], [1.0, 0.56, 0.66]]
   // Otoño: cada hoja vira a un color propio (rojos, naranjas, ámbar, marrones).
@@ -591,6 +575,16 @@ export function createScene(container, cfg, agentNames = []) {
     folFall.push(c[0], c[1], c[2]); folRot.push(0) // las flores no viran (aKind=1)
     folSize.push(0.55 + rnd() * 0.65); folPhase.push(rnd()); folKind.push(1)
     folBirth.push(0.02 + rnd() * 0.14)
+  }
+  // Flor de sakura: rosada, y su posición se guarda para soltar pétalos.
+  function addSakuraBlossom(p) {
+    const c = SAKURA[(rnd() * SAKURA.length) | 0]
+    const x = p.x + (rnd() - 0.5) * 1.4, y = p.y + (rnd() - 0.5) * 1.4, z = p.z + (rnd() - 0.5) * 1.4
+    folPos.push(x, y, z); folCol.push(c[0], c[1], c[2])
+    folFall.push(c[0], c[1], c[2]); folRot.push(0)
+    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(1)
+    folBirth.push(0.02 + rnd() * 0.12)
+    petalAnchors.push(x, y, z, c[0], c[1], c[2])
   }
 
   /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido. */
@@ -656,11 +650,19 @@ export function createScene(container, cfg, agentNames = []) {
       // Ramita externa: brotan las hojas (y flores si el árbol florece). Los
       // troncos caídos no echan follaje.
       if (!fallen) {
-        const leafN = 8 + ((rnd() * 8) | 0)
-        for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
-        if (treeBlooms && rnd() < 0.7) {
-          const nb = 2 + ((rnd() * 4) | 0)
-          for (let k = 0; k < nb; k++) addBlossom(spine[spine.length - 1])
+        if (treeSakura) {
+          // Sakura: pocas hojas verdes, canopy DENSO de flores rosadas.
+          const leafN = 2 + ((rnd() * 3) | 0)
+          for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+          const nb = 8 + ((rnd() * 10) | 0)
+          for (let k = 0; k < nb; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
+        } else {
+          const leafN = 8 + ((rnd() * 8) | 0)
+          for (let k = 0; k < leafN; k++) addLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+          if (treeBlooms && rnd() < 0.7) {
+            const nb = 2 + ((rnd() * 4) | 0)
+            for (let k = 0; k < nb; k++) addBlossom(spine[spine.length - 1])
+          }
         }
       }
       return
@@ -692,7 +694,8 @@ export function createScene(container, cfg, agentNames = []) {
     const tr = R * (0.19 + rnd() * 0.54)
     const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
     if (islandMask(tx, tz, R) < 0.3) continue
-    treeBlooms = rnd() < 0.55 // ~la mitad de los árboles dan flores en primavera
+    treeSakura = (t === 0) // un árbol es el sakura (canopy rosado + pétalos)
+    treeBlooms = !treeSakura && rnd() < 0.55 // ~la mitad del resto dan flores
     const treeLen = 8 + rnd() * 7
     branch(new THREE.Vector3(tx, G + terrainHeight(tx, tz) - 0.8, tz),
       new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
@@ -702,7 +705,7 @@ export function createScene(container, cfg, agentNames = []) {
     treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
     t++
   }
-  treeBlooms = false // los troncos caídos no florecen
+  treeBlooms = false; treeSakura = false // los troncos caídos no florecen
   const logs = 1 + (rnd() < 0.5 ? 1 : 0)
   for (let t = 0, guard = 0; t < logs && guard++ < 60; ) {
     const ta = rnd() * 6.2832
@@ -735,13 +738,15 @@ export function createScene(container, cfg, agentNames = []) {
         color: TREE_EDGE, transparent: true, opacity: 0.55, fog: true,
       }),
     ))
+    // (Sin punteado sobre el tronco: se veía feo. El árbol se lee por sus aristas.)
   }
 
   // ─── ROCAS: nubes de puntos reales (no dither) ────────────────────────────
   // Rocas: MALLA (esfera deformada por ruido, base aplanada) → silueta dura.
   // Encima, puntos de musgo solo en las caras que miran hacia arriba.
-  const ROCK_LO = [0.30, 0.185, 0.15]
-  const ROCK_HI = [0.64, 0.47, 0.40]
+  // Marrón más uniforme (antes el HI era muy claro → la roca se veía en dos colores).
+  const ROCK_LO = [0.26, 0.17, 0.13]
+  const ROCK_HI = [0.42, 0.29, 0.23]
   const rockSpots = []
   // Formación agrupada: un monolito alto rodeado de bloques medianos y chicos.
   const hubX = (rnd() * 2 - 1) * 11, hubZ = (rnd() * 2 - 1) * 11
@@ -808,20 +813,30 @@ export function createScene(container, cfg, agentNames = []) {
     const baseY = cy + hh * 0.05
     mesh.position.set(cx, baseY, cz)
     scene.add(mesh)
-    // Look "matrix": la malla triangulada de la roca visible (wireframe) + un
-    // punto por vértice, para que la roca se lea como red y no como bloque liso.
-    const rwf = new THREE.LineSegments(
-      new THREE.WireframeGeometry(geo),
-      new THREE.LineBasicMaterial({ color: 0x9c8b6b, transparent: true, opacity: 0.16, fog: true }),
-    )
-    rwf.position.copy(mesh.position)
-    scene.add(rwf)
-    const rpts = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 0.5, sizeAttenuation: true, vertexColors: true,
-      transparent: true, opacity: 0.75, fog: true,
-    }))
-    rpts.position.copy(mesh.position)
-    scene.add(rpts)
+    // La roca NO va cubierta de puntos (se veía como dos colores/red encima). El
+    // único punteado es en la BASE: un faldón esparcido donde la roca toca el
+    // suelo → disuelve el borde (la "fusión con el suelo" que sí gusta).
+    {
+      const fn = spec.mono ? 460 : 190
+      const fp = new Float32Array(fn * 3), fc = new Float32Array(fn * 3)
+      const rr = Math.max(radX, radZ)
+      for (let k = 0; k < fn; k++) {
+        const ang = rnd() * 6.2832
+        const rad = rr * (0.55 + rnd() * 0.6) // anillo alrededor de la base
+        const px = cx + Math.cos(ang) * rad, pz = cz + Math.sin(ang) * rad
+        const up = Math.pow(rnd(), 2.2) * 2.2 // densos abajo, ralos hacia arriba
+        fp[k * 3] = px; fp[k * 3 + 1] = G + terrainHeight(px, pz) + up; fp[k * 3 + 2] = pz
+        const t = 0.45 + rnd() * 0.4
+        fc[k * 3] = 0.17 * t; fc[k * 3 + 1] = 0.12 * t; fc[k * 3 + 2] = 0.09 * t
+      }
+      const fg = new THREE.BufferGeometry()
+      fg.setAttribute('position', new THREE.BufferAttribute(fp, 3))
+      fg.setAttribute('color', new THREE.BufferAttribute(fc, 3))
+      scene.add(new THREE.Points(fg, new THREE.PointsMaterial({
+        size: 0.4, sizeAttenuation: true, vertexColors: true,
+        transparent: true, opacity: 0.75, fog: true,
+      })))
+    }
     rockSpots.push({ x: cx, z: cz, r: Math.max(radX, radZ) * 0.95 })
     // Cima como posado + cúpula para caminar por encima (coords de mundo).
     poiPerch.push({ x: cx / R, z: cz / R, h: hh })
@@ -1045,19 +1060,56 @@ export function createScene(container, cfg, agentNames = []) {
   const fallCol = new Float32Array(FALL_N * 3)
   const fallVy = new Float32Array(FALL_N)
   const fallPh = new Float32Array(FALL_N)
+  const fallKind = new Float32Array(FALL_N) // 0 hoja (forma de hoja) / 1 pétalo (disco)
+  const fallRot = new Float32Array(FALL_N)
   const fallActive = new Uint8Array(FALL_N)
-  let fallHead = 0, fallBudget = 0
+  let fallHead = 0, fallBudget = 0, petalBudget = 0
   const fallGeo = new THREE.BufferGeometry()
   fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
-  fallGeo.setAttribute('color', new THREE.BufferAttribute(fallCol, 3))
-  const fallMesh = new THREE.Points(fallGeo, new THREE.PointsMaterial({
-    size: 0.7, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.92, depthWrite: false, fog: true,
+  fallGeo.setAttribute('hcol', new THREE.BufferAttribute(fallCol, 3))
+  fallGeo.setAttribute('aKind', new THREE.BufferAttribute(fallKind, 1))
+  fallGeo.setAttribute('aRot', new THREE.BufferAttribute(fallRot, 1))
+  // Las hojas que caen tienen FORMA DE HOJA (óvalo apuntado que gira); los
+  // pétalos del sakura caen como discos. Comparte uProj/uT con los puntos.
+  const fallMesh = new THREE.Points(fallGeo, new THREE.ShaderMaterial({
+    uniforms: { uProj: pointUniforms.uProj, uT: pointUniforms.uT },
+    transparent: true, depthWrite: false,
+    vertexShader: `
+      attribute vec3 hcol; attribute float aKind; attribute float aRot;
+      uniform float uProj, uT;
+      varying vec3 vC; varying float vKind; varying float vRot;
+      void main() {
+        vC = hcol; vKind = aKind; vRot = aRot + uT * 2.0; // giran al caer
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float vd = max(-mv.z, 0.001);
+        gl_PointSize = clamp(0.85 * uProj / vd, 1.0, 48.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      varying vec3 vC; varying float vKind; varying float vRot;
+      void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        if (vKind > 0.5) {                 // pétalo: disco suave
+          float d = length(uv) * 2.0;
+          if (d > 1.0) discard;
+          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
+          return;
+        }
+        // hoja: óvalo apuntado rotado con nervadura (igual que el follaje)
+        float s = sin(vRot), c = cos(vRot);
+        vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+        float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
+        if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
+        float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
+        float rib = smoothstep(0.06, 0.0, abs(q.x));
+        gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
+      }`,
   }))
   fallMesh.frustumCulled = false
   scene.add(fallMesh)
-  function updateFallingLeaves(step, rate, autumn) {
-    // Emisión: presupuesto fraccional (hojas/seg) desde las ramas.
+  function updateFallingLeaves(step, rate, autumn, petalRate) {
+    // Emisión de HOJAS: presupuesto fraccional (hojas/seg) desde las ramas.
     if (leafAnchors.length && rate > 0) {
       fallBudget += rate * step
       while (fallBudget >= 1) {
@@ -1069,7 +1121,33 @@ export function createScene(container, cfg, agentNames = []) {
         fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
         fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
         fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
-        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
+        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28
+        fallKind[i] = 0; fallRot[i] = Math.random() * 6.28; fallActive[i] = 1 // HOJA
+      }
+    }
+    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
+    if (petalAnchors.length && petalRate > 0) {
+      petalBudget += petalRate * step
+      while (petalBudget >= 1) {
+        petalBudget -= 1
+        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
+        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
+        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28
+        fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1 // PÉTALO (disco)
+      }
+    }
+    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
+    if (petalAnchors.length && petalRate > 0) {
+      petalBudget += petalRate * step
+      while (petalBudget >= 1) {
+        petalBudget -= 1
+        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
+        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
+        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
       }
     }
     for (let i = 0; i < FALL_N; i++) {
@@ -1080,7 +1158,9 @@ export function createScene(container, cfg, agentNames = []) {
       if (fallPos[i * 3 + 1] < G - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 } // toca suelo → recicla
     }
     fallGeo.attributes.position.needsUpdate = true
-    fallGeo.attributes.color.needsUpdate = true
+    fallGeo.attributes.hcol.needsUpdate = true
+    fallGeo.attributes.aKind.needsUpdate = true
+    fallGeo.attributes.aRot.needsUpdate = true
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
@@ -1089,14 +1169,26 @@ export function createScene(container, cfg, agentNames = []) {
     heightFn: terrainHeight,
   }).uniforms
 
-  // ─── AGENTES: jaula de aristas + criatura molecular + tallo ───────────────
-  // Un color por especie: la estela hereda el color de su individuo.
-  const AGENT_COLORS = [PALETTE.cyan, PALETTE.magenta, PALETTE.white, PALETTE.yellow]
+  // ─── AGENTES: jaula de aristas + molécula de colores + tallo ──────────────
+  // Un color por especie: la estela hereda el color de su individuo (alineado
+  // con SPECIES por índice).
+  const AGENT_COLORS = [
+    PALETTE.cyan, PALETTE.white, PALETTE.cyanSat,
+    PALETTE.white, PALETTE.magenta, PALETTE.yellow,
+  ]
   const kit = createAgentKit(rc)
-  const { fatLine, edgesOf, ringLoop, creature, wedge, pick } = kit
+  const { fatLine, ringLoop, boxCage, parallelepipedCage, frustumCage, edgesOf, creature, pick } = kit
 
-  // Las 4 especies del bosque, tal como las arma el original.
-  const SPECIES = ['cyan', 'flag', 'eye', 'dbl']
+  // Set de colores de la molécula por especie (cols[0] = núcleo).
+  const MOL = {
+    cube: [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyan],
+    slab: [PALETTE.magenta, PALETTE.white, PALETTE.yellow, PALETTE.orange],
+    frustum: [PALETTE.yellow, PALETTE.orange, PALETTE.white],
+    octa: [PALETTE.white, PALETTE.cyan, PALETTE.magenta],
+  }
+
+  // 6 especies del bosque: 4 jaulas prismáticas con molécula + trípode + doble anillo.
+  const SPECIES = ['cube', 'slab', 'frustum', 'octa', 'flag', 'dbl']
   const n = cfg.fireflies.count
   const agents = []
   for (let i = 0; i < n; i++) {
@@ -1104,31 +1196,30 @@ export function createScene(container, cfg, agentNames = []) {
     const group = new THREE.Group()
     let cage = null
 
-    if (kind === 'cyan') {
-      // Jaula cúbica de lado 6 + criatura dentro.
+    if (kind === 'cube') {
+      // Cubo cian de lado 6 + molécula (núcleo naranja).
       cage = new THREE.Group()
-      cage.add(edgesOf(new THREE.BoxGeometry(6, 6, 6), PALETTE.cyan))
-      cage.add(creature(1.15))
+      cage.add(boxCage(6, 6, 6, PALETTE.cyan))
+      cage.add(creature(1.15, MOL.cube))
       group.add(cage)
-    } else if (kind === 'eye') {
-      // Cuña planeadora (o octaedro) blanca + anillo, mástil y bolita.
+    } else if (kind === 'slab') {
+      // Paralelepípedo blanco alto con 2 travesaños + molécula magenta.
       cage = new THREE.Group()
-      cage.add(rnd() < 0.55
-        ? fatLine(wedge(1.15), PALETTE.white)
-        : edgesOf(new THREE.OctahedronGeometry(3.6), PALETTE.white))
+      cage.add(parallelepipedCage(5, 9, 5, PALETTE.white, 2))
+      cage.add(creature(1.1, MOL.slab))
       group.add(cage)
-      const deco = new THREE.Group()
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
-        new THREE.MeshBasicMaterial({ color: PALETTE.magenta, side: THREE.DoubleSide }))
-      disc.rotation.x = -Math.PI / 2
-      deco.add(disc)
-      deco.add(ringLoop(1.55, 40, PALETTE.cyanEye))
-      deco.add(fatLine([0, 1, 0, 0, 4, 0], PALETTE.magenta))
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10),
-        new THREE.MeshBasicMaterial({ color: PALETTE.white }))
-      ball.position.set(0, 4, 0)
-      deco.add(ball)
-      group.add(deco)
+    } else if (kind === 'frustum') {
+      // Pirámide cortada (base 6, tope 3, alt 6) + molécula amarilla.
+      cage = new THREE.Group()
+      cage.add(frustumCage(6, 3, 6, PALETTE.cyan))
+      cage.add(creature(1.05, MOL.frustum))
+      group.add(cage)
+    } else if (kind === 'octa') {
+      // Octaedro blanco + molécula blanca.
+      cage = new THREE.Group()
+      cage.add(edgesOf(new THREE.OctahedronGeometry(3.6), PALETTE.white))
+      cage.add(creature(1.0, MOL.octa))
+      group.add(cage)
     } else if (kind === 'flag') {
       // Trípode: triángulo abajo, mástil y anillo arriba.
       const lo = -2.6, hi = 5, r = 2.8
@@ -1155,8 +1246,10 @@ export function createScene(container, cfg, agentNames = []) {
     // Parámetros de movimiento (del bundle): los cubos ruedan como esfera, los
     // planeadores se orientan al rumbo, los anillos giran en Y.
     let effR = 3.3, rollMul = 0, glide = false, spinY = 0
-    if (kind === 'cyan') { rollMul = 1; effR = 3.3 }
-    else if (kind === 'eye') { glide = rnd() < 0.55; rollMul = glide ? 0 : 0.3; effR = 6 }
+    if (kind === 'cube') { rollMul = 1; effR = 3.3 }
+    else if (kind === 'slab') { spinY = 0.3 }
+    else if (kind === 'frustum') { glide = true; effR = 6 }
+    else if (kind === 'octa') { rollMul = 0.4; effR = 3.6 }
     else if (kind === 'flag') { spinY = 0.5 }
     else { spinY = 0.7 } // dbl
 
@@ -1273,6 +1366,21 @@ export function createScene(container, cfg, agentNames = []) {
     q: new THREE.Quaternion(),
   }
   let _lx = 0, _ly = 0
+  let ptrX = null, ptrY = null // posición del mouse en NDC (null = fuera del canvas)
+  function setPointer(x, y) { ptrX = x; ptrY = y }
+  // El lente fisheye del post-proceso desplaza la posición VISUAL del agente
+  // respecto a su NDC lógico (nulo al centro, fuerte al borde). Para que el hover
+  // matchee lo que se ve, distorsiono la proyección igual que el shader del lente.
+  const _fk = Math.min(rc.fisheye, 0.62)
+  function lensNDC(px, py) {
+    let sx = px, sy = py
+    for (let it = 0; it < 3; it++) {
+      const rn = Math.hypot(sx, sy) / 0.7071
+      const f = (1 - _fk) + _fk * rn * rn
+      sx = px / f; sy = py / f
+    }
+    return [sx, sy]
+  }
   const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1
@@ -1313,8 +1421,10 @@ export function createScene(container, cfg, agentNames = []) {
       // Nieve: SOLO cuando hace mucho frío (ocasional). Se acumula; al subir la
       // temperatura sobre 0 se derrite → deja el suelo húmedo (agua).
       // Nieve muy ocasional: solo con frío marcado y algo de precipitación.
-      const snowing = eco.temperature <= -3 && eco.rain > 0.1
-      const snowfall = snowing ? Math.max(0.5, eco.rain) : 0
+      // Nieve con frío marcado (la escarcha, temp -6, ahora SÍ nieva aunque no
+      // haya lluvia registrada; antes el AND con lluvia la hacía imposible).
+      const snowing = eco.temperature <= -3
+      const snowfall = snowing ? (0.6 + eco.rain * 0.6) : 0
       snowCover += snowfall * 0.09 * step
       if (eco.temperature > 0 && snowCover > 0) {
         const melt = (eco.temperature) * 0.03 * step
@@ -1330,7 +1440,7 @@ export function createScene(container, cfg, agentNames = []) {
       // Pasto: se mece con el viento + tinte de hora + húmedo, y se entierra en
       // nieve. El viento es una brisa base con ráfagas lentas, más fuerte con lluvia.
       if (grassMat) {
-        const breeze = 0.4 + 0.28 * Math.sin(clock * 0.23) + eco.rain * 0.5
+        const breeze = 0.4 + 0.28 * Math.sin(clock * 0.23) + eco.rain * 0.5 + (eco.wind || 0) * 0.9
         grassMat.uniforms.uTime.value = clock
         grassMat.uniforms.uWind.value.set(0.55 * breeze, 0.22 * breeze)
         grassMat.uniforms.uTint.value.copy(tintC).multiplyScalar(wetShade)
@@ -1350,6 +1460,9 @@ export function createScene(container, cfg, agentNames = []) {
       // Agua: charcos que aparecen al derretir (wet), brillando en las hondonadas.
       waterUniforms.uTime.value = clock
       waterUniforms.uWet.value = wet
+      // Corriente: dirección fija de "pendiente" escalada por viento+lluvia.
+      const flow = 2.5 + (eco.wind || 0) * 9 + eco.rain * 5
+      waterUniforms.uFlow.value.set(0.82 * flow, 0.34 * flow)
 
       // Sombras de nube: con día y cielo despejado, y TAMBIÉN sobre la nieve
       // (aunque el cielo esté algo cargado, para que el manto no quede plano).
@@ -1368,7 +1481,8 @@ export function createScene(container, cfg, agentNames = []) {
       // Estaciones: ciclo lento (~210 s = un "año"). Brote → hoja plena → ámbar
       // + caída → ramas peladas. La lluvia tira algunas hojas y borra flores.
       // +0.35 → el mundo arranca en VERANO (con hojas) y el ciclo avanza desde ahí.
-      const seasonT = (clock / 210 + 0.35) % 1
+      // La estación la maneja el host (para compartirla con el HUD); fallback local.
+      const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const leafAmt = seasonT < 0.5 ? ss01(0, 0.2, seasonT) : 1 - ss01(0.62, 0.8, seasonT)
       const flowerAmt = ss01(0.02, 0.1, seasonT) * (1 - ss01(0.2, 0.32, seasonT))
       foliageUniforms.uSeason.value = seasonT
@@ -1376,9 +1490,11 @@ export function createScene(container, cfg, agentNames = []) {
       foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
       const autumn = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
       foliageUniforms.uAutumn.value = autumn
-      // Hojas que se desprenden: en otoño y con lluvia (si aún hay hojas).
-      const shedRate = leafAmt > 0.05 ? (autumn * 34 + eco.rain * 46 * leafAmt) : 0
-      updateFallingLeaves(step, shedRate, autumn)
+      // Hojas/pétalos que se desprenden: otoño + lluvia + VIENTO (si aún hay hojas).
+      const gust = eco.rain + (eco.wind || 0) * 0.7
+      const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
+      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
+      updateFallingLeaves(step, shedRate, autumn, petalRate)
     }
 
     mapPositions(step)
@@ -1424,13 +1540,17 @@ export function createScene(container, cfg, agentNames = []) {
       else a.group.scale.setScalar(a.baseScale * pulse)
     }
 
-    // Etiqueta: el agente visible más cercano al centro de pantalla.
-    let bestI = -1, bestD = 0.16
-    for (let i = 0; i < n; i++) {
-      _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
-      if (_proj.z > 1) continue // detrás de la cámara
-      const d = Math.hypot(_proj.x, _proj.y)
-      if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+    // Etiqueta: SOLO al pasar el mouse por encima de un agente (no en el centro).
+    let bestI = -1
+    if (ptrX !== null) {
+      let bestD = 0.14 // umbral de "encima" en NDC (agentes chicos y en movimiento)
+      for (let i = 0; i < n; i++) {
+        _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
+        if (_proj.z > 1) continue // detrás de la cámara
+        const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
+        const d = Math.hypot(vx - ptrX, vy - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = vx; _ly = vy }
+      }
     }
     if (bestI >= 0 && agentNames[bestI]) {
       const { w, h, ox, oy } = stage.metrics
@@ -1473,7 +1593,7 @@ export function createScene(container, cfg, agentNames = []) {
 
   // El desmontaje (GPU + nodos del DOM) lo hace el escenario compartido.
   return {
-    update, scare,
+    update, scare, setPointer,
     resize: stage.resize, flash: stage.flash, dispose: stage.dispose,
     renderer: stage.renderer, camera, controls,
   }

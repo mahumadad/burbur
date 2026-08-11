@@ -1,4 +1,5 @@
-// Panel ECOSYSTEM: lectura técnica del estado del mundo (estilo murmur).
+// Panel ECOSISTEMA: lectura técnica del estado del mundo (estilo murmur).
+import { phaseES, weatherES, seasonES } from '../i18n.js'
 
 const CSS = `
 .eco {
@@ -34,22 +35,37 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
   el.className = 'eco'
   // El acento lo controla :root (--accent) según el mundo activo; el CSS ya lo lee.
   el.innerHTML = `
-    <h4><span class="dot"></span>PLOT ECOSYSTEM</h4>
-    <div class="row"><span>TIME</span><span data-f="time">—</span></div>
-    <div class="row"><span>WEATHER</span><span data-f="weather">—</span></div>
-    <div class="row"><span>TEMPERATURE</span><span data-f="temp">—</span></div>
+    <h4><span class="dot"></span>ECOSISTEMA</h4>
+    <div class="row"><span data-l="time">HORA</span><span data-f="time">—</span></div>
+    <div class="row"><span data-l="weather">CLIMA</span><span data-f="weather">—</span></div>
+    <div class="row" data-row="season"><span data-l="season">ESTACIÓN</span><span data-f="season">—</span></div>
+    <div class="row"><span>TEMPERATURA</span><span data-f="temp">—</span></div>
     <div class="sep"></div>
-    <div class="row"><span>ACTIVITY</span><span data-f="actv">—</span></div>
+    <div class="row"><span>ACTIVIDAD</span><span data-f="actv">—</span></div>
     <div class="bar"><i data-f="actbar" style="width:0%"></i></div>
-    <div class="row"><span>TENSION</span><span data-f="tenv">—</span></div>
+    <div class="row"><span>TENSIÓN</span><span data-f="tenv">—</span></div>
     <div class="bar warn"><i data-f="tenbar" style="width:0%"></i></div>
     <div class="sep"></div>
-    <div class="row"><span>MUSIC</span><input type="range" data-f="music" min="0" max="100" value="100"></div>
-    <div class="row"><span>WORLD</span><input type="range" data-f="world" min="0" max="100" value="100"></div>`
+    <div class="row"><span>MÚSICA</span><input type="range" data-f="music" min="0" max="100" value="100"></div>
+    <div class="row"><span>MUNDO</span><input type="range" data-f="world" min="0" max="100" value="100"></div>`
   document.body.appendChild(el)
 
   const f = {}
   el.querySelectorAll('[data-f]').forEach((n) => { f[n.dataset.f] = n })
+  const labels = {}
+  el.querySelectorAll('[data-l]').forEach((n) => { labels[n.dataset.l] = n })
+  const seasonRow = el.querySelector('[data-row="season"]')
+  let showSeason = true
+
+  // Cada mundo puede renombrar/ocultar filas del panel. La célula no tiene
+  // estación (se oculta) y su "hora" es el ciclo y su "clima" es el medio.
+  function setWorld(hud) {
+    labels.time.textContent = (hud && hud.time) || 'HORA'
+    labels.weather.textContent = (hud && hud.weather) || 'CLIMA'
+    showSeason = !(hud && hud.season === null)
+    seasonRow.style.display = showSeason ? '' : 'none'
+    if (showSeason) labels.season.textContent = (hud && hud.season) || 'ESTACIÓN'
+  }
 
   // 0–100 % → dB (−40 dB = silencio práctico)
   const pctToDb = (v) => (v <= 0 ? -60 : -40 + (v / 100) * 40)
@@ -58,8 +74,9 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
 
   let lastPhase = null, lastWeather = null
   function update(s) {
-    if (s.phase !== lastPhase) { f.time.textContent = s.phase; lastPhase = s.phase }
-    if (s.weather !== lastWeather) { f.weather.textContent = s.weather; lastWeather = s.weather }
+    if (s.phase !== lastPhase) { f.time.textContent = phaseES(s.phase); lastPhase = s.phase }
+    if (s.weather !== lastWeather) { f.weather.textContent = weatherES(s.weather); lastWeather = s.weather }
+    if (showSeason) f.season.textContent = seasonES(s.seasonT)
     f.temp.textContent = s.temperature + '°C'
     f.actv.textContent = Math.round(s.activity * 100) + '%'
     f.tenv.textContent = s.tension.toFixed(2)
@@ -67,5 +84,5 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
     f.tenbar.style.width = (s.tension * 100).toFixed(0) + '%'
   }
 
-  return { update, el }
+  return { update, el, setWorld }
 }

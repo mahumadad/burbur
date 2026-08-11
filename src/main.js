@@ -53,10 +53,18 @@ async function start() {
   function buildWorld(id) {
     const def = worldById(id)
     const swarm = createSwarm(CONFIG.fireflies)
-    const pop = createCensus(def.census, CONFIG.fireflies.count)
+    // El mundo puede declarar qué slots vuelan (`def.aerial`): esos solo reciben
+    // aves. Sin declararlo, el censo asigna como siempre.
+    const pop = createCensus(def.census, CONFIG.fireflies.count, undefined,
+      def.aerial ? (i) => def.aerial(i, CONFIG) : null)
+    // El vocabulario del mundo (fases y climas) cambia con el mundo; el reloj no.
+    ecosystem.setProfile(def.ecosystem)
     const scene = def.build(app, CONFIG, pop.visible.map((v) => v.name))
-    const events = createEventEngine(pop, CONFIG.events)
+    // Cada mundo narra con su propio vocabulario; sin léxico, el del bosque.
+    const events = createEventEngine(pop, { ...CONFIG.events, lexicon: def.lexicon })
     applyAccent(def.accent)
+    // El panel ECOSISTEMA se adapta al mundo (la célula oculta la estación, etc.).
+    hud.setWorld(def.hud)
     return { def, swarm, pop, scene, events }
   }
   function switchWorld(id) {
@@ -64,6 +72,7 @@ async function start() {
     const old = world
     world = buildWorld(id)
     if (old) old.scene.dispose()
+    eventLog.clear() // el REGISTRO es por mundo: se vacía al cambiar
     if (selector) selector.setActive(world.def.id)
   }
   // Nombre de paridad con murmur (el selector de mundo lo llama).
@@ -88,8 +97,13 @@ async function start() {
     const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1
     const ny = -(((e.clientY - rect.top) / rect.height) * 2 - 1)
     mouse = { x: nx * CONFIG.fireflies.bounds.x, y: ny * CONFIG.fireflies.bounds.y }
+    // El nombre del agente aparece al pasar el mouse por encima (no en el centro).
+    if (world.scene.setPointer) world.scene.setPointer(nx, ny)
   })
-  app.addEventListener('pointerleave', () => { mouse = null })
+  app.addEventListener('pointerleave', () => {
+    mouse = null
+    if (world.scene.setPointer) world.scene.setPointer(null, null)
+  })
   // Barra espaciadora: perturba las fases (desincroniza → mira cómo re-sincronizan).
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Space') { e.preventDefault(); perturbPhases(world.swarm, Math.PI) }
@@ -103,7 +117,7 @@ async function start() {
     // Se leen del mundo activo cada frame → tras un cambio, apuntan al nuevo.
     const { swarm, pop, scene, events } = world
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
-    const eco = ecosystem.update(dt)
+    const eco = ecosystem.update(dt) // eco.seasonT lo da el ecosistema (para HUD + follaje)
     lastEco = eco
     hud.update(eco)
     audio.setMood(eco.tension)
@@ -124,9 +138,12 @@ async function start() {
       }
     }
 
+    // Sonidos de exterior gateados por mundo: la célula no truena ni llueve.
+    const ax = world.def.audio || {}
     // Tormenta: relámpagos y truenos cuando llueve (más con lluvia fuerte).
-    // NO cuando hace frío suficiente para nevar (nada de "thundersnow").
-    if (eco.rain > 0.3 && eco.temperature > -3) {
+    // NO cuando hace frío suficiente para nevar (nada de "thundersnow"), ni en
+    // mundos sin lluvia (interior).
+    if (ax.rain !== false && eco.rain > 0.3 && eco.temperature > -3) {
       lightningCooldown -= dt
       if (lightningCooldown <= 0 && Math.random() < 1.1 * dt * eco.rain) {
         lightningCooldown = 2.5 + Math.random() * 5
@@ -145,13 +162,16 @@ async function start() {
       if (Math.random() < 0.25 + eco.activity * 0.75) audio.triggerFlash(fl.y, fl.intensity)
     }
     const env = ambient.update(dt)
-    audio.setWind(Math.max(env.wind, eco.rain * 0.4))
-    // Lluvia: siseo por intensidad + goteo a un ritmo proporcional.
-    audio.setRain(eco.rain)
-    if (eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
-    // Los grillos son de clima cálido: enmudecen con el frío.
-    if (env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
-    if (env.owl) audio.owl()
+    const wind = Math.max(env.wind, eco.rain * 0.4)
+    eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas
+    audio.setWind(wind)
+    // Lluvia: siseo por intensidad + goteo a un ritmo proporcional. En mundos
+    // sin lluvia (célula) se silencia aunque el "clima" del perfil tenga agua.
+    audio.setRain(ax.rain === false ? 0 : eco.rain)
+    if (ax.rain !== false && eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
+    // Los grillos son de clima cálido: enmudecen con el frío y fuera del bosque/laguna.
+    if (ax.insects !== false && env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
+    if (ax.owl !== false && env.owl) audio.owl()
     const predations = scene.update(swarm, dt, eco)
     // Un cazador atrapó a un bicho → evento de conflicto narrado.
     if (predations && predations.length) {
@@ -160,7 +180,8 @@ async function start() {
         const who = pop.visible[p.hunterIdx]
         if (!who) continue
         const ev = { type: 'conflict', agent: who.name, agentIdx: p.hunterIdx, dir: p.dir }
-        const text = narrate({ ...ev, agentType: who.type }, { phase: eco.phase, weather: eco.weather })
+        const text = narrate({ ...ev, agentType: who.type },
+          { phase: eco.phase, weather: eco.weather }, undefined, world.def.lexicon)
         eventLog.push({ ...ev, ...text }, label)
         audio.fauna(who.type, p.dir)
       }
