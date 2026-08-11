@@ -77,6 +77,9 @@ async function start() {
     // Liberar el mundo viejo (y su contexto WebGL) ANTES de construir el nuevo,
     // así nunca hay dos contextos vivos a la vez (evita la pantalla negra).
     if (world) world.scene.dispose()
+    // El throb del drone es global: cada mundo que lo mueva (la neurona) lo hace
+    // por evento; al salir se vuelve al valor por defecto para no arrastrarlo.
+    audio.setThrob(0.2)
     world = buildWorld(id)
     eventLog.clear() // el REGISTRO es por mundo: se vacía al cambiar
     if (selector) selector.setActive(world.def.id)
@@ -123,6 +126,9 @@ async function start() {
   // pop visual del mundo no pasa por acá — solo limita cuánto SUENA.
   const PULSE_TOKENS_MAX = 6
   let pulseTokens = PULSE_TOKENS_MAX
+  // Los spikes de la neurona son MUCHOS (lluvia de clicks): bucket más alto.
+  const SPIKE_TOKENS_MAX = 22
+  let spikeTokens = SPIKE_TOKENS_MAX
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
@@ -186,6 +192,7 @@ async function start() {
     // El bucket se recarga en el tiempo, no por evento: sostiene ~6/s incluso
     // en frames sin pulsos.
     pulseTokens = Math.min(PULSE_TOKENS_MAX, pulseTokens + PULSE_TOKENS_MAX * dt)
+    spikeTokens = Math.min(SPIKE_TOKENS_MAX, spikeTokens + SPIKE_TOKENS_MAX * dt)
     // Eventos grandes del mundo activo: la predación del bosque (manda
     // hunterIdx) o eventos propios de otros mundos (mandan agent/agentType ya
     // resueltos, o solo kind, para lo que no tiene individuo en el censo).
@@ -197,6 +204,13 @@ async function start() {
           if (pulseTokens >= 1) { pulseTokens -= 1; audio.triggerFlash(p.y, 0.5) }
           continue
         }
+        // Spike de la neurona: un click seco, con su propio bucket (más denso).
+        if (p.type === 'spike') {
+          if (spikeTokens >= 1) { spikeTokens -= 1; audio.spike(p.pan || 0, p.bright || 1) }
+          continue
+        }
+        // Ritmo cerebral: mueve el throb del drone a la banda dominante.
+        if (p.type === 'throb') { audio.setThrob(p.hz); continue }
         const idx = p.agentIdx ?? p.hunterIdx
         const who = idx != null ? pop.visible[idx] : null
         const agent = p.agent ?? who?.name

@@ -51,6 +51,14 @@ const SOMA_COL = 0x39456a
 const C_EXC = [0.42, 1.0, 1.0]
 const C_INH = [1.0, 0.42, 0.80]
 const kindCol = (kind) => (kind === 'pyramidal' ? C_EXC : C_INH)
+
+// Banda dominante (Hz) de cada estado de sueño → velocidad del throb del drone.
+// Delta lento en sueño profundo; alfa/gamma rápido despierto (§7.2 del spec).
+const BAND_HZ = {
+  'quiet wake': 9, 'alert wake': 14, 'focused': 20, 'drowsy': 6,
+  'N1': 5, 'N2 spindles': 13, 'N3 slow wave': 2.5, 'N3 deep': 1.2,
+  'N2 return': 13, 'REM': 7, 'REM burst': 8, 'waking': 9,
+}
 // El pulso: núcleo casi blanco con halo amarillo (el color del spike, §5.3).
 const C_SPIKE = [1.0, 0.95, 0.55]
 const C_SPIKE_HOT = [1.0, 1.0, 0.9]
@@ -285,6 +293,7 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   }
 
   let clock = 0
+  let lastThrobHz = null // última banda emitida al drone (para no repetir por frame)
 
   // Escribe un pulso en el buffer aditivo desde `base`: un halo grande y tenue
   // (bloom) + una cabeza caliente casi blanca + una estela que se apaga detrás.
@@ -320,7 +329,12 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     //    los frames en que el flash aún decae.
     if (swarm) {
       for (let i = 0; i < net.neurons.length; i++) {
-        if (swarm.flash[i] > cc.spikes.fireThresh) fire(spikes, net, cc.spikes, i, outs[i])
+        if (swarm.flash[i] > cc.spikes.fireThresh && fire(spikes, net, cc.spikes, i, outs[i])) {
+          // Un click seco por disparo (el registro multiunidad): paneado por la
+          // posición de la neurona, más agudo si es una interneurona (dispara rápido).
+          events.push({ type: 'spike', pan: Math.max(-1, Math.min(1, net.neurons[i].x)),
+            bright: net.neurons[i].kind === 'pyramidal' ? 0.7 : 1.3 })
+        }
       }
     }
     // ── Los pulsos avanzan; las llegadas empujan la fase de la postsináptica
@@ -440,7 +454,13 @@ export function createNeuronScene(container, cfg, agentNames = []) {
       stage.labelEl.style.opacity = '0'
     }
 
-    if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0022
+    if (eco) {
+      scene.fog.density = 0.0009 + eco.fog * 0.0022
+      // El ritmo cerebral del estado actual modula el throb del drone. Se emite
+      // solo cuando cambia la banda (al entrar al mundo y al cambiar de estado).
+      const hz = BAND_HZ[eco.phase] || 6
+      if (hz !== lastThrobHz) { events.push({ type: 'throb', hz }); lastThrobHz = hz }
+    }
     stage.render(step)
     return events
   }
