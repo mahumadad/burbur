@@ -1,10 +1,14 @@
 import * as Tone from 'tone'
 import { flashToFreq } from './scale.js'
+import { createFaunaSamples } from './samples.js'
 
 // Grafo de audio: cama naturalista + drone + voces de latido + capa de mundo.
 // Pensado para colapsar bien a mono; master con limiter (igual que el device).
 export async function createAudio(cfg) {
   const limiter = new Tone.Limiter(cfg.audio.masterLimitDb).toDestination()
+  // Samples reales de fauna (CC). Si el agente tiene sample cargado, suena el
+  // real; si no, cae a las voces sintéticas de abajo.
+  const faunaSamples = createFaunaSamples(limiter)
 
   // ─── Drone psicodélico ambiental (chill) ──────────────────────────────────
   // murmur usa mp3 pre-renderizados por hora; nosotros lo SINTETIZAMOS (más vivo).
@@ -181,6 +185,8 @@ export async function createAudio(cfg) {
 
   const rand = Math.random
   function fauna(type, dir, name = '') {
+    // Primero el sample REAL del animalito; si no hay/no cargó, voz sintética.
+    if (faunaSamples.play(name, PAN[dir] ?? 0)) return
     faunaPan.pan.value = PAN[dir] ?? 0
     const t = Tone.now()
     const n = name.toLowerCase()
