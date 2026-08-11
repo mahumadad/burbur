@@ -2,7 +2,7 @@ import { createScene } from '../render/scene.js'
 import { createCityScene } from '../render/city.js'
 import { createPond } from '../render/pond.js'
 import { createCellScene } from './cell.js'
-import { createStubWorld } from './stub.js'
+import { createFungusScene } from './fungus.js'
 import { FOREST_CENSUS, CITY_CENSUS, POND_CENSUS, CELL_CENSUS, FUNGUS_CENSUS } from '../sim/agents.js'
 import { CELL_LEXICON, FUNGUS_LEXICON } from '../sim/narrator.js'
 import { FOREST_PROFILE, CELL_PROFILE, FUNGUS_PROFILE } from '../sim/ecosystem.js'
@@ -77,18 +77,17 @@ export const WORLDS = [
     audio: { rain: false, insects: false, owl: false },
     build: (container, cfg, names) => createCellScene(container, cfg, names),
   },
-  // Micelio: la red que crece y se come su propio tronco. Parametrizaciones
-  // listas (censo/léxico/perfil); el builder llega en la Ola C — por ahora stub.
-  // El acento verde-musgo es diseño nuestro (no colisiona con los otros cuatro).
+  // Micelio: la red que crece y se come su propio tronco. El acento
+  // verde-musgo es diseño nuestro (no colisiona con los otros cuatro).
   {
-    id: 'fungus', label: 'Log ecosystem', name: 'Micelio', accent: '#9cc47a', ready: false,
+    id: 'fungus', label: 'Log ecosystem', name: 'Micelio', accent: '#9cc47a', ready: true,
     census: FUNGUS_CENSUS, lexicon: FUNGUS_LEXICON, ecosystem: FUNGUS_PROFILE,
     // El "día" es el ciclo de humedad; el "clima", la humedad; la "estación", la
     // clase de descomposición del tronco (la maneja el mundo, no el reloj).
     hud: { time: 'HORA', weather: 'HUMEDAD', season: 'DESCOMP.' },
     // Suelo del bosque, húmedo: llueve y hay bichos, pero sin búho.
     audio: { rain: true, insects: true, owl: false },
-    build: (container, cfg) => createStubWorld(container, cfg, { accent: '#9cc47a', label: 'Micelio' }),
+    build: (container, cfg, names) => createFungusScene(container, cfg, names),
   },
 ]
 

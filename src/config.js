@@ -189,6 +189,15 @@ export const CONFIG = {
     mtBeads: 8,             // cuentas de tubulina α/β visibles por microtúbulo
     height: 3.2,            // altura de la lámina celular sobre el sustrato
   },
+  // Mundo MICELIO: la red que crece y se come su propio tronco.
+  // Ver docs/superpowers/specs/2026-08-11-diseno-mundo-micelio.md
+  fungus: {
+    substrate: { logAngle: 0.6, logHalfLength: 0.72, logRadius: 0.26, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
+    mycelium: { maxNodes: 1400, maxEdges: 1500, maxTips: 90, stepLen: 0.035, tipSpeed: 0.05, turnRate: 2.2, noise: 0.9, tropism: 0.7, autotropism: 0.5, branchRate: 0.5, fuseRadius: 0.02, widthGain: 0.6, flowDecay: 0.4, pruneBelow: 0.12, pruneRate: 0.25 },
+    fauna: 10,              // agentes visibles de fauna del suelo
+    litter: 900,            // puntos de hojarasca
+    logDither: 5200,        // puntos de textura del tronco
+  },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos
     flowerPatches: 95,
