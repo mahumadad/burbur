@@ -10,6 +10,8 @@ import { buildFallenLog } from './engine/deadwood.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
+import { buildKoi, createKoiSchool, swimKoi } from './pond/koi.js'
+import { POND_CENSUS, POND_KOI_NAMES } from '../sim/agents.js'
 import { noise2, fbm } from './noise.js'
 
 // Mundo AGUA (pond). Calca el mundo de agua de murmur.living: ISLAS de arena
@@ -189,6 +191,8 @@ export function createPond(container, cfg, agentNames = []) {
     uTime: { value: 0 },
     // x, z, radio, fuerza — sembrados en la superficie por los elementos que pasan.
     uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    // AGITAR: 0 en reposo; sube al sacudir y decae → oleaje global de toda la laguna.
+    uAgitate: { value: 0 },
   }
   // MAREA: el nivel del agua sube y baja despacio (curTide se recalcula por frame
   // en update); el plano de agua, los troncos y los nenúfares lo siguen, y la
@@ -213,16 +217,23 @@ export function createPond(container, cfg, agentNames = []) {
       transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
       vertexShader: `
         attribute vec3 color;
-        varying vec2 vXZ; varying vec3 vCol;
+        uniform float uTime; uniform float uAgitate;
+        varying vec2 vXZ; varying vec3 vCol; varying float vAg;
         void main() {
           vXZ = position.xz; vCol = color;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          vec3 p = position;
+          // AGITAR: onda radial que sale del centro y recorre la laguna + chapoteo,
+          // desplaza el agua de verdad (decae con uAgitate).
+          float rr = length(p.xz);
+          float swell = sin(rr * 0.14 - uTime * 4.0) * exp(-rr * 0.004);
+          p.y += uAgitate * (1.8 * swell + 0.7 * sin(p.x * 0.08 + uTime * 3.0) * sin(p.z * 0.07 - uTime * 2.6));
+          vAg = uAgitate;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
       fragmentShader: `
-        precision mediump float;
         #define N ${RIPPLES}
         uniform float uTime; uniform vec4 uRipples[N];
-        varying vec2 vXZ; varying vec3 vCol;
+        varying vec2 vXZ; varying vec3 vCol; varying float vAg;
         void main() {
           // Shimmer: reflejos que se deslizan sobre la superficie.
           // Oleaje multi-octava (olas grandes + rizado fino), como la ref de agua.
@@ -230,6 +241,8 @@ export function createPond(container, cfg, agentNames = []) {
                   + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35)
                   + 0.28 * sin(vXZ.x * 0.24 - vXZ.y * 0.19 + uTime * 1.35)
                   + 0.16 * sin(vXZ.x * 0.51 + vXZ.y * 0.44 - uTime * 2.1);
+          // AGITAR: gran cresta radial que barre la laguna.
+          w += vAg * 1.4 * sin(length(vXZ) * 0.12 - uTime * 3.5);
           float glint = smoothstep(0.75, 1.4, w);
           // Cáusticas: red fina que se arrastra sobre el agua.
           float c1 = sin(vXZ.x * 0.33 + uTime * 0.9) * sin(vXZ.y * 0.29 - uTime * 0.75);
@@ -247,9 +260,10 @@ export function createPond(container, cfg, agentNames = []) {
             wake += max(0.0, ring) * env * r.w;
           }
           wake = min(wake, 1.5);
-          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72) + wake * vec3(0.32, 0.60, 0.98);
+          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72) + wake * vec3(0.32, 0.60, 0.98)
+                   + vAg * vec3(0.24, 0.5, 0.92) * (0.5 + 0.7 * glint);
           float lum = dot(vCol, vec3(0.5, 0.6, 0.7));
-          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + caustic * 0.1 + wake * 0.55, 0.0, 0.92);
+          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + caustic * 0.1 + wake * 0.55 + vAg * 0.3, 0.0, 0.96);
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -447,23 +461,42 @@ export function createPond(container, cfg, agentNames = []) {
   const n = cfg.fireflies.count
   const agents = []
   const trailColors = []
+  // Tipo por nombre del censo → decide si el agente es AVE (planea sobre el agua,
+  // se posa, caza) o no. Sin esto los agentes con nombre de pájaro nadaban.
+  const nameType = new Map(POND_CENSUS.map((a) => [a.name, a.type]))
   for (let i = 0; i < n; i++) {
-    const kind = pool[q() * pool.length | 0]
-    const { group, params } = buildSpecies(kind, kit)
-    const baseScale = 0.9 + q() * 0.5
+    // Si al slot le tocó un nombre de KOI (fauna acuática del censo), se dibuja
+    // como koi de verdad —cuerpo con parches + coleteo— en vez de criatura glow.
+    // Los koi son móviles no-voladores → el censo los pone en slots no-aéreos,
+    // así que nunca coinciden con garza (hunter) ni el que cruza el cielo (skyer).
+    const isKoi = POND_KOI_NAMES.has(agentNames[i])
+    let group, params, cage, kind, tail = null, bodyPivot = null
+    if (isKoi) {
+      ({ group, bodyPivot, tail } = buildKoi(q))
+      params = { dive: 0.5, hover: 0.35, rollMul: 0, spinY: 0, effR: 2 }
+      cage = null; kind = 'koi'
+    } else {
+      kind = pool[q() * pool.length | 0]
+      ;({ group, params } = buildSpecies(kind, kit))
+      cage = params.rollMul > 0 ? group.children[0] : null // rodantes: jaula en children[0]
+    }
+    const baseScale = isKoi ? 1.6 + q() * 0.8 : 0.9 + q() * 0.5
     group.scale.setScalar(baseScale)
     scene.add(group)
-    // Las especies "rodantes" envuelven su jaula en group.children[0].
-    const cage = params.rollMul > 0 ? group.children[0] : null
+    // Ave = nombre volador del censo. Planea SOBRE el agua y se posa; no nada.
+    const isBird = nameType.get(agentNames[i]) === 'flying_animal'
     agents.push({
-      group, cage, kind, baseScale, idx: i, homeY: 0.4 + q() * 1.2,
+      group, cage, kind, baseScale, idx: i, homeY: 0.4 + q() * 1.2, isKoi, isBird, tail, bodyPivot,
+      spd: 0.8 + q() * 0.5, phase: q() * 6.2832, wakeT: 0, // koi: coleteo + estela
       dive: params.dive, hover: params.hover, rollMul: params.rollMul,
       spinY: params.spinY, effR: params.effR,
-      // Las 2 primeras son garzas: pican al agua a cazar peces.
-      hunter: i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
-      skyer: i === 4, crossCool: 8 + q() * 16, crossing: 0, crossDur: 1, crossTx: 0, crossTz: 0, crossHi: 0,
+      // Las 2 primeras son garzas: pican al agua a cazar peces (los koi nunca).
+      hunter: !isKoi && i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
+      skyer: !isKoi && i === 4, crossCool: 8 + q() * 16, crossing: 0, crossDur: 1, crossTx: 0, crossTz: 0, crossHi: 0,
+      // Aves NO cazadoras: planean y de a ratos se posan en una piedra.
+      birdT: 3 + q() * 6, perching: false, perchPos: null,
     })
-    trailColors.push(KIND_COLOR[kind])
+    trailColors.push(isKoi ? 0xff5a2a : KIND_COLOR[kind])
   }
   // ─── RANAS: bichitos que se suben a las piedras y de a ratos saltan al agua.
   // Cada una elige un punto ALTO de una isla, se posa un rato, y salta a otra.
@@ -748,6 +781,14 @@ export function createPond(container, cfg, agentNames = []) {
   // Cardúmenes de peces bajo el agua (boids). state.fish expone posiciones.
   const fish = createFishRender(scene, cfg, q)
 
+  // CARDUMEN DE KOI anónimo cerca de la superficie (además de los koi con nombre):
+  // boids propio, bordea las islas. Los koi con nombre salen del censo (arriba).
+  const koiObs = lobes.map((L) => ({ x: L.x, z: L.z, r: Math.max(L.rx, L.rz) * 1.1 + 2 }))
+  const koiSchool = createKoiSchool(scene, 24, q, {
+    radius: mt * 0.82, surfaceY: ht + 0.1, floorY: ht - 6.5, obstacles: koiObs,
+    wake: (x, z, s) => spawnRipple(x, z, s), // estela de agua al nadar en superficie
+  })
+
   // ─── BICHOS (mosquitos) que vuelan sobre el agua ──────────────────────────
   const BUGN = 90
   const bugR = mt * 0.85
@@ -900,6 +941,27 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
+  // Aves NO cazadoras: planean sobre el agua (altura la pone mapPositions) y de a
+  // ratos bajan a posarse en una piedra, como las garzas pero sin pescar.
+  function updateBirds(step) {
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      if (!a.isBird || a.hunter || a.skyer) continue
+      a.birdT -= step
+      if (a.perching) {
+        worldPos[i * 3] += (a.perchPos.x - worldPos[i * 3]) * 0.1
+        worldPos[i * 3 + 2] += (a.perchPos.z - worldPos[i * 3 + 2]) * 0.1
+        worldPos[i * 3 + 1] = a.perchPos.y + Math.sin(clock * 1.3 + a.idx) * 0.08
+        roamers[i].x = worldPos[i * 3] / LR; roamers[i].z = worldPos[i * 3 + 2] / LR
+        roamers[i].vx *= 0.8; roamers[i].vz *= 0.8
+        if (a.birdT <= 0) { a.perching = false; a.birdT = 6 + q() * 8 }
+      } else if (a.birdT <= 0) {
+        if (q() < 0.4) { a.perching = true; a.perchPos = heronPerch(); a.birdT = 5 + q() * 7 }
+        else a.birdT = 4 + q() * 6
+      }
+    }
+  }
+
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
   const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
@@ -925,9 +987,18 @@ export function createPond(container, cfg, agentNames = []) {
     }
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
-      // Física de agua (spec §4.3): unas bucean (dive>0), otras planean (dive<0).
-      let j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
-      if (j < bedY + 0.9) j = bedY + 0.9
+      let j
+      if (a.isBird) {
+        // Aves: planean SOBRE el agua (huntHerons/crossSky bajan a cazar/cruzar).
+        j = ht + 3 + a.homeY * 0.3 + Math.sin(t * 1.1 + a.idx * 2.1) * (0.5 + a.hover * 0.1)
+      } else if (a.isKoi) {
+        // Koi: justo en la superficie, para que se vean (no bajo el agua brillante).
+        j = ht + 0.1 + Math.sin(t * 1.4 + a.idx * 2.1) * 0.12
+      } else {
+        // Fauna acuática/ribera glow: bucea/planea bajo el agua (spec §4.3).
+        j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
+        if (j < bedY + 0.9) j = bedY + 0.9
+      }
       worldPos[i * 3] = r.x * LR; worldPos[i * 3 + 1] = j; worldPos[i * 3 + 2] = r.z * LR
     }
   }
@@ -954,6 +1025,7 @@ export function createPond(container, cfg, agentNames = []) {
   // elemento cruza/roza la superficie (agentes cerca del nivel, peces al tope).
   let rippleHead = 0, rippleTimer = 0, dropTimer = 0
   function spawnRipple(x, z, str) {
+    // FIFO: recicla rápido → las ondas viven poco y quedan CHICAS y naturales.
     waterUniforms.uRipples.value[rippleHead].set(x, z, 0.5, str)
     rippleHead = (rippleHead + 1) % RIPPLES
   }
@@ -976,6 +1048,14 @@ export function createPond(container, cfg, agentNames = []) {
         const sp = Math.hypot(r.vx, r.vz) * LR
         const near = 1 - dy / 2.2
         spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], (0.5 + Math.min(1.2, sp * 0.9)) * near)
+        spawned++
+      }
+      // Los extras glow nadan justo bajo la superficie → también mueven el agua
+      // (las aves ahora planean arriba y no la tocan salvo al picar).
+      for (let t = 0; t < 8 && spawned < 8; t++) {
+        const e = extras[q() * EXTRA | 0], p = e.group.position
+        if (Math.abs(p.y - ht) > 2.4) continue
+        spawnRipple(p.x, p.z, 0.4 + q() * 0.2)
         spawned++
       }
       const f = fish.state.fish
@@ -1002,6 +1082,8 @@ export function createPond(container, cfg, agentNames = []) {
     clock += step
     pointUniforms.uT.value = clock
     waterUniforms.uTime.value = clock
+    // El oleaje de AGITAR decae en ~3s.
+    if (waterUniforms.uAgitate.value > 0) waterUniforms.uAgitate.value = Math.max(0, waterUniforms.uAgitate.value - step * 0.38)
     if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0028
 
     // Marea lenta: dos senos → el nivel sube y baja de forma orgánica (~±0.55).
@@ -1014,15 +1096,26 @@ export function createPond(container, cfg, agentNames = []) {
     fish.update(step, clock)      // mueve los peces primero
     huntHerons(step, predations, eco)  // garzas pican (puede sobreescribir su y)
     crossSky(step)                // un ave cruza el cielo alto de vez en cuando
+    updateBirds(step)             // aves no cazadoras planean y se posan (no nadan)
     updateBugs(step, clock)
     updateFrogs(step)
     updateLogs(step, clock)
     updateLilies()
+    koiSchool.update(step, clock)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
       const y = worldPos[i * 3 + 1]
       a.group.position.set(worldPos[i * 3], y, worldPos[i * 3 + 2])
+      // KOI: mira hacia donde nada, coletea, y deja estela al nadar en superficie.
+      if (a.isKoi) {
+        a.group.rotation.set(0, Math.atan2(-r.vz, r.vx), 0)
+        swimKoi(a, clock)
+        a.group.scale.setScalar(a.baseScale * (1 + (swarm ? swarm.flash[i] : 0) * 0.35))
+        a.wakeT -= step
+        if (a.wakeT <= 0) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 0.4); a.wakeT = 0.5 + q() * 0.5 }
+        continue
+      }
       if (a.spinY) a.group.rotation.y += a.spinY * step
       // Rodado de jaula según la velocidad (lamp/ice/strider).
       if (a.rollMul > 0 && a.cage) {
@@ -1111,6 +1204,15 @@ export function createPond(container, cfg, agentNames = []) {
       r.state = 'move'; r.stateT = 1.2 + Math.random() * 1.5
     }
     fish.scatter(strength * 1.5)
+    koiSchool.scatter(strength)
+    // AGITAR sacude TODA el agua: oleaje global (uAgitate) + un anillo central
+    // fuerte y varios repartidos que barren la laguna.
+    waterUniforms.uAgitate.value = Math.min(1.6, 0.9 + strength * 0.6)
+    spawnRipple(0, 0, 1.5 * strength)
+    for (let kk = 0; kk < 8; kk++) {
+      const a = q() * 6.2832, rr = Math.sqrt(q()) * mt * 0.9
+      spawnRipple(Math.cos(a) * rr, Math.sin(a) * rr, 0.8 + strength * 0.5)
+    }
   }
 
   return {
