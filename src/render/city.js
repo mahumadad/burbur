@@ -83,6 +83,8 @@ export function createCityScene(container, cfg, agentNames = []) {
   // `w` del original: puntos a evitar por el polvo suelto de manzana/calle
   // (P6, pendiente). Lo llenan yn (torres) y, más adelante, Sn/wn.
   const dustAvoid = []
+  // Halos de farola: [x,y,z, r,g,b, size] por panel. Se encienden de noche.
+  const lampGlows = []
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
   // `St(a,b,x)` del original: smoothstep clásico.
@@ -539,24 +541,31 @@ export function createCityScene(container, cfg, agentNames = []) {
       p.box(0.3, postH, 0.3, 0, postH / 2, 0)
       const group = p.finish([0.94, 0.92, 0.88], 'flat')
       const pw = 2.6 + rnd() * 1.6, ph = 1.4 + rnd() * 0.8
+      const gy = ln(x, z)
+      const col1 = pick(LAMP_COLORS)
       const panel = new THREE.Mesh(
         new THREE.BoxGeometry(pw, ph, 0.16, 3, 3, 1),
-        new THREE.MeshBasicMaterial({ color: rgbToHex(pick(LAMP_COLORS)) }),
+        new THREE.MeshBasicMaterial({ color: rgbToHex(col1) }),
       )
       panel.position.set(0, postH - ph * 0.5 - 0.1, 0)
       group.add(panel)
+      // Halo aditivo del panel (se enciende de noche). El panel está en el eje
+      // del poste (x/z locales = 0), así que su posición de mundo es directa.
+      lampGlows.push(x, gy + postH - ph * 0.5 - 0.1, z, col1[0], col1[1], col1[2], 1.4 + rnd() * 0.6)
       if (rnd() < 0.5) {
+        const col2 = pick(LAMP_COLORS)
         const panel2 = new THREE.Mesh(
           new THREE.BoxGeometry(pw * 0.6, ph * 0.65, 0.16, 3, 3, 1),
-          new THREE.MeshBasicMaterial({ color: rgbToHex(pick(LAMP_COLORS)) }),
+          new THREE.MeshBasicMaterial({ color: rgbToHex(col2) }),
         )
         panel2.position.set(0, postH - ph - 0.95, 0)
         panel2.rotation.y = Math.PI / 2
         group.add(panel2)
+        lampGlows.push(x, gy + postH - ph - 0.95, z, col2[0], col2[1], col2[2], 1.0 + rnd() * 0.5)
       }
       on(x, z, grad)
       group.rotation.y = Math.atan2(grad.x, grad.z)
-      group.position.set(x, ln(x, z), z)
+      group.position.set(x, gy, z)
       scene.add(group)
       dustAvoid.push({ x, z, r: 1.35 })
       built++
@@ -1376,6 +1385,47 @@ export function createCityScene(container, cfg, agentNames = []) {
   draw.finalizeLines(scene, floraMat)
   draw.finalizePoints(scene)
 
+  // ─── FAROLES: halo aditivo que se ENCIENDE de noche (uNight 0→1) ──────────
+  const lampUniforms = { uProj: draw.uniforms.uProj, uNight: { value: 0 } }
+  if (lampGlows.length) {
+    const N = lampGlows.length / 7
+    const lp = new Float32Array(N * 3), lc = new Float32Array(N * 3), lsz = new Float32Array(N)
+    for (let i = 0; i < N; i++) {
+      const b = i * 7
+      lp[i * 3] = lampGlows[b]; lp[i * 3 + 1] = lampGlows[b + 1]; lp[i * 3 + 2] = lampGlows[b + 2]
+      lc[i * 3] = lampGlows[b + 3]; lc[i * 3 + 1] = lampGlows[b + 4]; lc[i * 3 + 2] = lampGlows[b + 5]
+      lsz[i] = lampGlows[b + 6]
+    }
+    const lg = new THREE.BufferGeometry()
+    lg.setAttribute('position', new THREE.BufferAttribute(lp, 3))
+    lg.setAttribute('hcol', new THREE.BufferAttribute(lc, 3))
+    lg.setAttribute('hsize', new THREE.BufferAttribute(lsz, 1))
+    const lampMesh = new THREE.Points(lg, new THREE.ShaderMaterial({
+      uniforms: lampUniforms, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+      vertexShader: `
+        attribute vec3 hcol; attribute float hsize; uniform float uProj, uNight;
+        varying vec3 vC;
+        void main() {
+          vC = hcol;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          // El halo crece y brilla con la noche (uNight): de día casi nulo.
+          float sz = hsize * (2.0 + uNight * 8.0);
+          gl_PointSize = clamp(sz * uProj / max(-mv.z, 0.001), 1.0, 128.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        precision mediump float; varying vec3 vC; uniform float uNight;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5; float d2 = dot(uv, uv);
+          if (d2 > 0.25) discard;
+          float a = 1.0 - sqrt(d2) * 2.0; a = a * a;
+          gl_FragColor = vec4(vC, 1.0) * a * (0.15 + uNight * 1.15);
+        }`,
+    }))
+    lampMesh.frustumCulled = false
+    scene.add(lampMesh)
+  }
+
   // ─── NEBLINA aditiva (halo naranja, acento de la ciudad) ─────────────────
   const haze = createHaze(scene, {
     R: R_CITY, G: we, count: rc.hazeCount, color: CITY_HAZE_COLOR, alpha: rc.hazeAlpha,
@@ -1847,6 +1897,24 @@ export function createCityScene(container, cfg, agentNames = []) {
       const sp = Math.hypot(a.vel.x, a.vel.y, a.vel.z)
       if (sp > maxSp) { const f = maxSp / sp; a.vel.x *= f; a.vel.y *= f; a.vel.z *= f }
 
+      // Anti-atasco: un agente de tráfico acorralado entre un edificio y el borde
+      // recibe empujes opuestos (despeje del edificio vs. contención del límite)
+      // que se cancelan → queda casi inmóvil. Si eso persiste en 'move', escapa:
+      // patada hacia el centro + modo offroad (que lo reincorpora a una calle).
+      if (!a.dweller && a.state === 'move') {
+        if (Math.hypot(a.vel.x, a.vel.z) < 1.0) a.stuckT = (a.stuckT || 0) + step
+        else a.stuckT = 0
+        if (a.stuckT > 0.8) {
+          a.stuckT = 0
+          const toC = Math.atan2(-pos.z, -pos.x) + (rnd() - 0.5) * 1.2
+          a.wanderAng = toC
+          a.vel.x += Math.cos(toC) * 9
+          a.vel.z += Math.sin(toC) * 9
+          a.offroad = true
+          a.offT = 2 + rnd() * 3
+        }
+      }
+
       pos.x += a.vel.x * step
       pos.y += a.vel.y * step
       pos.z += a.vel.z * step
@@ -1887,7 +1955,9 @@ export function createCityScene(container, cfg, agentNames = []) {
 
   // ─── CLIMA: lluvia, nieve y nieve acumulada en techos (`capPos`, llenado
   // por `spawnTower` con la cima de cada edificio colocado) ─────────────────
-  const rain = createRain(scene, R_CITY, we)
+  // Lluvia alta y densa: la ciudad tiene edificios altos, así que la columna de
+  // lluvia sube por encima de ellos y llena más pantalla (más gotas que el default).
+  const rain = createRain(scene, R_CITY, we, { height: 105, count: 2600 })
   const snow = createSnow(scene, R_CITY, we, draw.uniforms.uProj)
   const caps = createSnowCaps(scene, capPos, draw.uniforms.uProj)
 
@@ -1898,7 +1968,7 @@ export function createCityScene(container, cfg, agentNames = []) {
   })
 
   const tintC = new THREE.Color()
-  let snowCover = 0, moveScale = 1
+  let snowCover = 0, moveScale = 1, birdCalm = 1
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
@@ -1916,6 +1986,8 @@ export function createCityScene(container, cfg, agentNames = []) {
         (1 - k + k * L[1]) * g,
         (1 - k + k * L[2]) * g,
       )
+      // Faroles: encienden cuando oscurece (gain bajo). uNight 1 = noche cerrada.
+      lampUniforms.uNight.value = 1 - smoothstep(0.34, 0.6, g)
       scene.fog.density = 0.0009 + eco.fog * 0.0028
       haze.uniforms.uColor.value.set(
         CITY_HAZE_COLOR[0] * 0.4 + L[0] * 0.6,
@@ -1940,8 +2012,11 @@ export function createCityScene(container, cfg, agentNames = []) {
       rain.update(step, snowing ? 0 : eco.rain)
       snow.update(step, clock, snowfall)
 
-      // Con lluvia/nieve el tráfico y los peatones se calman.
-      moveScale = snowing ? 0.4 : (1 - eco.rain * 0.45) * (eco.temperature <= 1 ? 0.85 : 1)
+      // Con lluvia la ciudad se aquieta: baja bastante el tráfico/peatones (quedan
+      // pocos moviéndose — alguna rata, algún transeúnte), y las aves casi se
+      // congelan → se posan y se quedan quietas en edificios/árboles.
+      moveScale = snowing ? 0.4 : (1 - eco.rain * 0.6) * (eco.temperature <= 1 ? 0.85 : 1)
+      birdCalm = 1 - eco.rain * 0.85
 
       // Estaciones del sakura: mismo reloj que el resto del mundo (`eco.seasonT`,
       // con el mismo fallback local que usa el bosque) → brote → hoja plena →
@@ -1965,7 +2040,7 @@ export function createCityScene(container, cfg, agentNames = []) {
     }
 
     moveAgents(step * moveScale, clock)
-    updateBirds(step * moveScale, clock)
+    updateBirds(step * moveScale * birdCalm, clock)
 
     for (let i = 0; i < n; i++) {
       const p = agents[i].group.position

@@ -1,11 +1,14 @@
 import * as THREE from 'three'
 
 // ─── LLUVIA: líneas que caen, recicladas al llegar al suelo ───────────────
-export function createRain(scene, R, G) {
-  const RAIN_N = 1400
+// `opts.height` (alto de la columna de lluvia, def 46) y `opts.count` (nº de
+// gotas, def 1400) permiten a mundos con estructuras altas (ciudad) llenar más
+// pantalla. Sin opts, comportamiento idéntico al original (bosque/agua).
+export function createRain(scene, R, G, opts = {}) {
+  const RAIN_N = opts.count || 1400
   const rainPos = new Float32Array(RAIN_N * 6)
   const rainTop = new Float32Array(RAIN_N * 3)
-  const RAIN_H = 46
+  const RAIN_H = opts.height || 46
   for (let i = 0; i < RAIN_N; i++) {
     const a = Math.random() * 6.2832
     const rr = Math.sqrt(Math.random()) * R * 1.1
