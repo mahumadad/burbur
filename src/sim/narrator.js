@@ -195,9 +195,10 @@ export const CELL_LEXICON = {
   }),
   // El conflicto tiene dos caras: la célula caza invasores; a los suyos los
   // aprieta la contracción.
+  // Fraseo sin género: los nombres del censo mezclan masculinos y femeninos.
   conflict: (ctx, ev) => (ev.agentType === 'invader'
-    ? { log: `El lamelipodio se pliega sobre ${ev.agent}. El fagosoma se sella.`, short: `${ev.agent} fagocitada` }
-    : { log: `${cap(ev.agent)} queda atrapada en la contracción y se detiene.`, short: `${ev.agent} se detiene` }),
+    ? { log: `El lamelipodio se pliega; ${ev.agent} queda dentro. El fagosoma se sella.`, short: `fagocitosis · ${ev.agent}` }
+    : { log: `${cap(ev.agent)} se traba en la contracción y se detiene.`, short: `${ev.agent} se detiene` }),
 }
 
 // Acciones por NOMBRE primero (si el léxico las trae), después por tipo.
