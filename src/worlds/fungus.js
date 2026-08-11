@@ -6,6 +6,7 @@ import { createTrails } from '../render/engine/trails.js'
 import { PALETTE } from '../config.js'
 import { createSubstrate, resourceAt, consume, decayClass } from '../sim/decay.js'
 import { createNetwork, updateNetwork, tipPositions } from '../sim/mycelium.js'
+import { createFruiting, updateFruiting } from '../sim/fruiting.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { noise2 } from '../render/noise.js'
 
@@ -506,6 +507,83 @@ export function createFungusScene(container, cfg, agentNames = []) {
     return [sx, sy]
   }
 
+  // ─── FRUCTIFICACIÓN (clímax, spec §7): se gana cazando nitrógeno ──────────
+  const fruiting = createFruiting(cc.fruiting)
+  let nitrogen = 0             // reservas acumuladas de cazar nematodos
+  let lastStage = 'dormant'
+  // Ancla de los cuerpos fructíferos: salen del FLANCO del tronco (no del suelo),
+  // que es como crece Pleurotus. Se fija un punto en el costado por ciclo.
+  const fruitU = halfLen * (rnd() * 1.2 - 0.6)
+  const fruitSide = rnd() < 0.5 ? 1 : -1
+  const fruitMat = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false,
+  })
+  const fruitBuf = createLineBuffer(120, fruitMat)
+  scene.add(fruitBuf.mesh)
+  const spores = createPointCloud(220, draw.pointMaterial)
+  scene.add(spores.mesh)
+  const sporeState = []          // {x,y,z,vy,age,ttl}
+  // Qué slots de la fauna son NEMATODOS (la presa que da nitrógeno).
+  const isNematode = agentNames.map((n) => n === 'nematodo')
+
+  // Densidad de la red por celda gruesa: para saber si un nematodo pasa SOBRE
+  // el micelio (sin recorrer todas las aristas por bicho y frame).
+  function mycelialAt(x, z) {
+    let c = 0
+    for (const t of net.tips) { if (t.alive && Math.abs(t.x - x) < 0.08 && Math.abs(t.z - z) < 0.08) c++ }
+    return c
+  }
+
+  // Dibuja los cuerpos fructíferos: repisas escalonadas que crecen con la etapa
+  // (o astas deformes si `deformed`). Sobre el flanco del tronco.
+  function drawFruit(st) {
+    fruitBuf.begin()
+    if (st.stage === 'dormant') { fruitBuf.commit(); return }
+    const [fx, fz] = uvToWorld(fruitU, fruitSide * logRAt(fruitU) * 0.95)
+    const base = surfaceYUV(fruitU, fruitSide * logRAt(fruitU) * 0.95)
+    const grow = st.stage === 'primordia' ? st.progress * 0.4
+      : st.stage === 'expanding' ? 0.4 + st.progress * 0.6
+      : st.stage === 'senescent' ? 1 - st.progress * 0.5 : 1
+    const shelves = st.deformed ? 3 : 6
+    const col = st.deformed ? [0.5, 0.42, 0.3] : [1.0, 0.9, 0.7]
+    const nx = fruitSide * logPx, nz = fruitSide * logPz
+    for (let s = 0; s < shelves; s++) {
+      const up = (s + 1) / shelves * grow * 7
+      const out = st.deformed ? grow * 5 : (2 + s * 0.6) * grow   // asta larga vs repisa ancha
+      const ex = fx * R + nx * out, ez = fz * R + nz * out
+      fruitBuf.push(fx * R, base + up * 0.4, fz * R, ex, base + up, ez, col, col)
+      if (!st.deformed) { // borde de la repisa
+        const w = out * 0.7
+        fruitBuf.push(ex - logAx * w, base + up, ez - logAz * w, ex + logAx * w, base + up, ez + logAz * w, col, col)
+      }
+    }
+    fruitBuf.commit()
+  }
+
+  function updateSpores(st, step) {
+    // Durante la esporulación cae una bruma blanca desde el sombrero.
+    if (st.stage === 'sporulating' && sporeState.length < 220 && rnd() < 12 * step) {
+      const [fx, fz] = uvToWorld(fruitU, fruitSide * logRAt(fruitU) * 0.95)
+      const base = surfaceYUV(fruitU, fruitSide * logRAt(fruitU) * 0.95) + 6
+      sporeState.push({ x: fx * R + (rnd() - 0.5) * 6, y: base, z: fz * R + (rnd() - 0.5) * 6,
+        vy: -3 - rnd() * 3, age: 0, ttl: 3 + rnd() * 3 })
+    }
+    for (let i = sporeState.length - 1; i >= 0; i--) {
+      const s = sporeState[i]; s.age += step; s.y += s.vy * step; s.x += (rnd() - 0.5) * step * 4
+      if (s.age > s.ttl || s.y < 0) sporeState.splice(i, 1)
+    }
+    for (let i = 0; i < 220; i++) {
+      const s = sporeState[i]
+      if (s) {
+        const f = 1 - s.age / s.ttl
+        spores.pos[i * 3] = s.x; spores.pos[i * 3 + 1] = s.y; spores.pos[i * 3 + 2] = s.z
+        spores.col[i * 3] = 0.9 * f; spores.col[i * 3 + 1] = 0.9 * f; spores.col[i * 3 + 2] = 0.8 * f
+        spores.size[i] = 0.4
+      } else { spores.pos[i * 3 + 1] = -9999 }
+    }
+    spores.commit()
+  }
+
   let clock = 0
 
   function update(swarm, dt, eco) {
@@ -525,7 +603,14 @@ export function createFungusScene(container, cfg, agentNames = []) {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
       moisture,
     }
-    updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
+    const events = []
+    const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
+    // Demarcación: dos colonias se tocan y NO se fusionan → línea negra (spec §5).
+    for (const ev of netEvents) {
+      if (ev.type === 'barrier' && rnd() < 0.03) {
+        events.push({ type: 'conflict', agent: 'Pleurotus', agentType: 'colony', kind: 'demarcation' })
+      }
+    }
 
     // El micelio COME donde tiene puntas: eso agota el sustrato localmente, y
     // el agotamiento es lo que hace que el cordón deje de recibir flujo, se
@@ -534,7 +619,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
     // quedaba congelada al saturar. Es además la premisa del mundo: el terreno
     // es la comida y se acaba.
     for (const t of net.tips) {
-      if (t.alive) consume(sub, t.x, t.z, cc.eatRate * step * growthMul)
+      if (t.alive) {
+        const got = consume(sub, t.x, t.z, cc.eatRate * step * growthMul)
+        nitrogen += got.nitrogen   // los cadáveres del sustrato también dan N
+      }
     }
     drawNetwork()
     drawFront()
@@ -550,8 +638,39 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const sp = Math.hypot(r.vx, r.vz)
       if (sp > 1e-4) faunaAgents[i].group.rotation.y = Math.atan2(r.vx * R, r.vz * R)
       worldPos[i * 3] = x; worldPos[i * 3 + 1] = y; worldPos[i * 3 + 2] = z
+
+      // TRAMPA: un nematodo que pasa sobre el micelio queda atrapado (Pleurotus
+      // es nematófago). Da nitrógeno — la moneda que habilita la fructificación
+      // — y reaparece en otro punto del borde. Es la cadena causal del mundo.
+      if (isNematode[i] && Math.hypot(r.x, r.z) < 0.66 && mycelialAt(r.x, r.z) > 0) {
+        nitrogen += cc.fruiting.trapNitrogen
+        events.push({ type: 'conflict', agent: 'nematodo', agentType: 'soil_fauna', kind: 'trap' })
+        const a = rnd() * Math.PI * 2
+        r.x = Math.cos(a) * 0.8; r.z = Math.sin(a) * 0.8; r.vx = 0; r.vz = 0
+      }
     }
     trails.update(worldPos)
+
+    // ── Fructificación: el clímax. Se gana cazando (nitrógeno), y necesita
+    //    además choque de frío + humedad (spec §7). ──────────────────────────
+    if (eco) {
+      const st = updateFruiting(fruiting, cc.fruiting, step, {
+        nitrogen, temperature: eco.temperature, moisture,
+        co2: clamp01(1 - activity),   // poco recambio de gas cuando la red está calma
+        light: eco.gain,
+      })
+      if (fruiting.nitrogenSpent > 0) { nitrogen -= fruiting.nitrogenSpent; fruiting.nitrogenSpent = 0 }
+      if (st.stage !== lastStage) {
+        if (st.stage === 'primordia') {
+          events.push({ type: 'fruiting', kind: st.deformed ? 'deformed' : 'primordia' })
+        } else if (st.stage === 'sporulating') {
+          events.push({ type: 'fruiting', kind: 'sporulating' })
+        }
+        lastStage = st.stage
+      }
+      drawFruit(st)
+      updateSpores(st, step)
+    }
 
     // Etiqueta: solo al pasar el mouse por encima de un bicho de la fauna.
     let bestI = -1
@@ -576,12 +695,15 @@ export function createFungusScene(container, cfg, agentNames = []) {
     }
 
     // La niebla se espesa con el medio, igual que en los otros mundos.
-    if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0022
+    if (eco) {
+      scene.fog.density = 0.0009 + eco.fog * 0.0022
+      // El slot "estación" del HUD muestra la CLASE DE DESCOMPOSICIÓN (1..5),
+      // que sale del consumo, no del reloj (spec §9).
+      eco.seasonLabel = decayClass(sub) + '/5'
+    }
 
     stage.render(step)
-    // Los eventos narrados grandes (fusión, trampa de nematodo, fructificación,
-    // …) son de la Ola D: por ahora este mundo no reporta nada al log.
-    return []
+    return events
   }
 
   /** Sacude a la fauna del suelo (mismo patrón que los demás mundos). */
