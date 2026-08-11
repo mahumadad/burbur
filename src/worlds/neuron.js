@@ -6,6 +6,7 @@ import { createTrails } from '../render/engine/trails.js'
 import { PALETTE } from '../config.js'
 import { createNetwork, outgoing } from '../sim/netwire.js'
 import { createSpikes, fire, updateSpikes } from '../sim/spikes.js'
+import { createBrain, updateBrain } from '../sim/brainstate.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 
 // MUNDO NEURONA — una microred cortical vista desde arriba. Los somas están
@@ -89,6 +90,9 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   // ─── El cableado (puro, sim/netwire.js) ───────────────────────────────────
   const net = createNetwork(cc.network, rnd)
   const spikes = createSpikes(cc.spikes)
+  const brain = createBrain(cc.brain)
+  let baseOmegas = null      // omegas del swarm sin escalar (se captura al 1er frame)
+  let seizeFlash = 0         // beat del destello de la convulsión
   // Sinapsis salientes por neurona, precomputadas (para lanzar al disparar).
   const outs = net.neurons.map((nrn) => outgoing(net, nrn.i))
 
@@ -294,6 +298,7 @@ export function createNeuronScene(container, cfg, agentNames = []) {
 
   let clock = 0
   let lastThrobHz = null // última banda emitida al drone (para no repetir por frame)
+  let lastSwarm = null   // referencia al swarm (para el shock del botón agitar)
 
   // Escribe un pulso en el buffer aditivo desde `base`: un halo grande y tenue
   // (bloom) + una cabeza caliente casi blanca + una estela que se apaga detrás.
@@ -322,12 +327,47 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     clock += step
     draw.uniforms.uT.value = clock
     glow.uniforms.uT.value = clock
+    lastSwarm = swarm
     const events = []
 
-    // ── Disparo: cuando el swarm cruza el umbral, la neurona larga un pulso por
-    //    cada axón saliente. fire() respeta el refractario, así no re-dispara en
-    //    los frames en que el flash aún decae.
+    // ── Estado cerebral: el eje del mundo (sim/brainstate.js) ─────────────────
+    // Traduce el estado de sueño + el neuromodulador en cómo se comporta la red:
+    // sincronía, ritmo, estados UP/DOWN, husos y la convulsión.
+    let activity = 1, excMul = 1, inhMul = 1
     if (swarm) {
+      if (!baseOmegas) baseOmegas = Float32Array.from(swarm.omegas)
+      const bs = updateBrain(brain, cc.brain, step, {
+        phase: eco ? eco.phase : 'quiet wake',
+        excitatory: eco ? ['noradrenergic', 'caffeine', 'dopaminergic'].includes(eco.weather) : false,
+        calming: eco ? eco.weather === 'gabaergic' : false,
+        tension: eco ? eco.tension : 0.2,
+      }, rnd)
+      activity = bs.firing; excMul = bs.excMul; inhMul = bs.inhMul
+      // Ritmo: reescala las frecuencias propias (lento dormido, rápido despierto).
+      for (let i = 0; i < baseOmegas.length; i++) swarm.omegas[i] = baseOmegas[i] * bs.omegaScale
+      // Sincronía: empuja las fases hacia la media según cuánto falte para el
+      // objetivo. Es el knob que hace latir la red entera en sueño profundo y
+      // que la desboca en la convulsión.
+      const nn = net.neurons.length
+      let sx = 0, sy = 0
+      for (let i = 0; i < nn; i++) { sx += Math.cos(swarm.phases[i]); sy += Math.sin(swarm.phases[i]) }
+      const meanA = Math.atan2(sy, sx), order = Math.hypot(sx, sy) / nn
+      const k = cc.brain.syncPull * Math.max(0, bs.syncTarget - order) * step
+      if (k > 0) for (let i = 0; i < nn; i++) {
+        const dph = Math.atan2(Math.sin(meanA - swarm.phases[i]), Math.cos(meanA - swarm.phases[i]))
+        swarm.phases[i] = (swarm.phases[i] + k * dph + Math.PI * 2) % (Math.PI * 2)
+      }
+      // Destello que barre la red durante la crisis, latiendo a ~3 Hz.
+      if (bs.flash > 0) { seizeFlash += step; if (seizeFlash > 0.33) { seizeFlash = 0; stage.flash(0.4) } }
+      for (const ev of bs.events) {
+        const conflict = ev.kind === 'seizure' || ev.kind === 'postictal'
+        events.push({ type: conflict ? 'conflict' : 'moment', kind: ev.kind })
+      }
+    }
+
+    // ── Disparo: cuando el swarm cruza el umbral, la neurona larga un pulso por
+    //    cada axón saliente. En estado DOWN o postictal (activity 0) la red calla.
+    if (swarm && activity > 0) {
       for (let i = 0; i < net.neurons.length; i++) {
         if (swarm.flash[i] > cc.spikes.fireThresh && fire(spikes, net, cc.spikes, i, outs[i])) {
           // Un click seco por disparo (el registro multiunidad): paneado por la
@@ -343,7 +383,9 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     for (const arr of arrivals) {
       const syn = net.synapses[arr.syn]
       if (swarm) {
-        const bump = syn.sign > 0 ? cc.spikes.exciteBump : -cc.spikes.inhibitBump
+        // El desbalance E/I de la convulsión amplifica la excitación y hunde la
+        // inhibición: cada disparo provoca los siguientes (reclutamiento).
+        const bump = syn.sign > 0 ? cc.spikes.exciteBump * excMul : -cc.spikes.inhibitBump * inhMul
         swarm.phases[syn.post] = (swarm.phases[syn.post] + bump + Math.PI * 2) % (Math.PI * 2)
       }
       // Enciende el terminal (glía/postsináptica) — un destello en la hendidura.
@@ -359,7 +401,9 @@ export function createNeuronScene(container, cfg, agentNames = []) {
       fp.t += fp.speed * step
       if (fp.t >= 1) fp.t -= 1
       const p = axonAt(net.synapses[fp.syn].axon, fp.t)
-      const tw = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(clock * 3 + i * 1.7)) // parpadeo
+      // Parpadeo × gate de actividad: en estado DOWN o postictal el flujo se
+      // apaga casi del todo, y la red se ve callar entera.
+      const tw = (0.6 + 0.4 * (0.5 + 0.5 * Math.sin(clock * 3 + i * 1.7))) * (0.25 + 0.75 * activity)
       // La energía sale con el color de la neurona que la manda (cian/rosa).
       const col = net.synapses[fp.syn].sign > 0 ? C_EXC : C_INH
       flowCloud.pos[i * 3] = p.x * R; flowCloud.pos[i * 3 + 1] = H; flowCloud.pos[i * 3 + 2] = p.z * R
@@ -465,7 +509,20 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     return events
   }
 
+  // El botón AGITAR de este mundo no dispersa: da un SHOCK ENERGÉTICO, como una
+  // terapia — un destello fuerte que RESETEA la red, corta una convulsión si está
+  // en curso, y la deja calmándose (silencio postictal) antes de seguir.
   function scare(strength = 1) {
+    stage.flash(0.85 * strength)                 // el shock
+    brain.mode = 'postictal'                     // reset: la red se calla y se calma
+    brain.timer = 0; brain.risk = 0; brain.down = false
+    // El shock rompe el patrón: desincroniza las fases de golpe. Después, el
+    // estado del sueño vuelve a acomodar la red — el "calme antes de seguir".
+    if (lastSwarm) for (let i = 0; i < lastSwarm.phases.length; i++) {
+      lastSwarm.phases[i] = Math.random() * Math.PI * 2
+      lastSwarm.flash[i] = 0
+    }
+    // Los astrocitos también reaccionan al choque.
     for (const r of gliaRoamers) {
       const m = Math.hypot(r.x, r.z) || 1e-3
       const k = (0.3 + Math.random() * 0.5) * strength

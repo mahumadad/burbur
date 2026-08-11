@@ -93,8 +93,16 @@ async function start() {
   function doShake() {
     if (world && world.scene.scare) world.scene.scare(1)
     audio.rattle()
-    audio.fauna('flying_animal', 'all around', 'crow') // graznido de alarma
-    if (lastEco) eventLog.push({ type: 'shift', log: 'El mundo fue sacudido.', short: 'sacudida' }, clockLabel(lastEco))
+    // En la neurona la sacudida es un SHOCK terapéutico: el traqueteo hace de
+    // choque y no va el graznido de alarma (no pega dentro de un cerebro).
+    const neuron = world && world.def.id === 'neuron'
+    if (!neuron) audio.fauna('flying_animal', 'all around', 'crow') // graznido de alarma
+    if (lastEco) {
+      const ev = neuron
+        ? { type: 'conflict', kind: 'shock', log: 'Un shock recorre la red: se reinicia y se calma.', short: 'shock · reset' }
+        : { type: 'shift', log: 'El mundo fue sacudido.', short: 'sacudida' }
+      eventLog.push(ev, clockLabel(lastEco))
+    }
   }
   const shake = createShake(doShake) // gestos físicos + animación
   // Selector VERTICAL a la derecha (mundos + tarjeta de AGITAR), estilo murmur,
