@@ -435,9 +435,11 @@ export function createCellScene(container, cfg, agentNames = []) {
     kit.setResolution(m.w * m.dpr, m.h * m.dpr)
   })
 
-  // ─── Etiqueta flotante: el organelo más cercano al centro de pantalla ─────
+  // ─── Etiqueta flotante: SOLO al pasar el mouse por encima de un organelo ───
   const _proj = new THREE.Vector3()
   let _lx = 0, _ly = 0
+  let ptrX = null, ptrY = null // posición del mouse en NDC (null = fuera del canvas)
+  function setPointer(x, y) { ptrX = x; ptrY = y }
 
   let clock = 0
   let rounding = 0, roundTarget = 0
@@ -730,13 +732,16 @@ export function createCellScene(container, cfg, agentNames = []) {
     atpCloud.commit()
     trails.update(worldPos)
 
-    // Etiqueta sobre el organelo más cercano al centro de pantalla.
-    let bestI = -1, bestD = 0.16
-    for (let i = 0; i < n; i++) {
-      _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
-      if (_proj.z > 1) continue
-      const d = Math.hypot(_proj.x, _proj.y)
-      if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+    // Etiqueta: SOLO al pasar el mouse por encima de un organelo (no en el centro).
+    let bestI = -1
+    if (ptrX !== null) {
+      let bestD = 0.12 // umbral de "encima" en NDC (organelos chicos y en movimiento)
+      for (let i = 0; i < n; i++) {
+        _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
+        if (_proj.z > 1) continue
+        const d = Math.hypot(_proj.x - ptrX, _proj.y - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+      }
     }
     if (bestI >= 0 && agentNames[bestI]) {
       const { w, h, ox, oy } = stage.metrics
@@ -780,7 +785,7 @@ export function createCellScene(container, cfg, agentNames = []) {
   }
 
   return {
-    update, scare,
+    update, scare, setPointer,
     resize: stage.resize, flash: stage.flash, dispose: stage.dispose,
   }
 }
