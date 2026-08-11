@@ -191,7 +191,15 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const peelN = noise2(u * 2.1 - 40, v * 2.9 + 17)
       let col, size
       if (v < -lr * 0.15 && mossN > 0.62) {
-        col = tint(C_MOSS, (0.6 + rnd() * 0.5) * fade); size = 0.16 + rnd() * 0.2
+        // Musgo: grumoso y con VOLUMEN (ref. imoss) — el parche no es una mancha
+        // plana: cada punto se levanta un poco sobre la corteza y varía de tono,
+        // así se lee como cojín y no como pintura.
+        const lift = rnd() * rnd() * 1.6
+        const tone = 0.55 + rnd() * 0.6
+        draw.pushPoint(x * R, y + lift, z * R,
+          [C_MOSS[0] * tone * fade, C_MOSS[1] * tone * fade, C_MOSS[2] * tone * fade],
+          0.14 + rnd() * 0.22, 0)
+        continue
       } else if (peelN > 0.70) {
         col = tint(C_SAPWOOD, (0.55 + rnd() * 0.4) * fade); size = 0.14 + rnd() * 0.16
       } else if (lichenN > 0.72) {
@@ -244,8 +252,11 @@ export function createFungusScene(container, cfg, agentNames = []) {
         for (let i = 0; i <= seg; i++) {
           const ang = (i / seg) * Math.PI * 2
           // El anillo vive en el plano de la cara (perpendicular al eje): v y ALTURA.
+          // El EJE del tronco está a nivel del suelo (y=0) y el lomo sube hasta
+          // `domeHeight(0)`. Centrar el anillo en la cresta lo dejaba flotando
+          // un radio por encima de la madera, despegado del tronco.
           const v = Math.cos(ang) * rad
-          const yr = domeHeight(0) + Math.sin(ang) * rad * R * LOG_HEIGHT_SCALE
+          const yr = Math.sin(ang) * rad * R * LOG_HEIGHT_SCALE
           const [x, z] = uvToWorld(endU, v)
           if (prev) draw.pushLine(prev[0] * R, prev[1], prev[2] * R, x * R, Math.max(0, yr), z * R,
             tint(col, 0.8 * edgeFade(x, z)), tint(col, 0.8 * edgeFade(x, z)))
