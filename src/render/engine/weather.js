@@ -50,25 +50,35 @@ export function createSnow(scene, R, G, uProjUniform) {
   const SNOW_H = 46
   const snowPos = new Float32Array(SNOW_N * 3)
   const snowPhase = new Float32Array(SNOW_N)
+  // Tamaño por copo: sesgado a chicos (pow(rand,2)) con cola de copos grandes.
+  const snowSize = new Float32Array(SNOW_N)
   for (let i = 0; i < SNOW_N; i++) {
     const a = Math.random() * 6.2832, rr = Math.sqrt(Math.random()) * R * 1.05
     snowPos[i * 3] = Math.cos(a) * rr
     snowPos[i * 3 + 1] = G + Math.random() * SNOW_H
     snowPos[i * 3 + 2] = Math.sin(a) * rr
     snowPhase[i] = Math.random() * 6.2832
+    snowSize[i] = 0.35 + 1.3 * Math.pow(Math.random(), 2)
   }
   const snowGeom = new THREE.BufferGeometry()
   snowGeom.setAttribute('position', new THREE.BufferAttribute(snowPos, 3))
+  snowGeom.setAttribute('aSize', new THREE.BufferAttribute(snowSize, 1))
+  snowGeom.setAttribute('aPhase', new THREE.BufferAttribute(snowPhase, 1))
+  const snowUniforms = { uProj: uProjUniform, uT: { value: 0 } }
   const snowMat = new THREE.ShaderMaterial({
-    uniforms: { uProj: uProjUniform },
+    uniforms: snowUniforms,
     transparent: true, depthWrite: false, blending: THREE.NormalBlending,
-    vertexShader: `uniform float uProj; void main(){
+    vertexShader: `uniform float uProj, uT; attribute float aSize, aPhase;
+      varying float vAlpha;
+      void main(){
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = clamp(0.55 * uProj / max(-mv.z, 0.001), 1.5, 34.0);
+      gl_PointSize = clamp(aSize * uProj / max(-mv.z, 0.001), 1.2, 46.0);
+      // Parpadeo sutil por copo (twinkle).
+      vAlpha = 0.75 + 0.25 * sin(uT * 2.0 + aPhase * 3.0);
       gl_Position = projectionMatrix * mv; }`,
-    fragmentShader: `void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
+    fragmentShader: `varying float vAlpha; void main(){ vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
       if(d > 0.5) discard;
-      gl_FragColor = vec4(1.0, 1.0, 1.0, smoothstep(0.5, 0.15, d)); }`,
+      gl_FragColor = vec4(1.0, 1.0, 1.0, vAlpha * smoothstep(0.5, 0.15, d)); }`,
   })
   const snowMesh = new THREE.Points(snowGeom, snowMat)
   snowMesh.frustumCulled = false
@@ -78,16 +88,23 @@ export function createSnow(scene, R, G, uProjUniform) {
   function update(dt, clockT, intensity) {
     snowMesh.visible = intensity > 0.01
     if (!snowMesh.visible) return
+    snowUniforms.uT.value = clockT
     const active = Math.floor(intensity * SNOW_N)
-    const fall = (7 + 7 * intensity) * dt
     for (let i = 0; i < SNOW_N; i++) {
       if (i >= active) { snowPos[i * 3 + 1] = -9999; continue }
+      const phase = snowPhase[i]
+      // Jitter de velocidad por copo (hash determinístico de su fase) + copos
+      // grandes caen algo más rápido que los chicos (sensación de profundidad).
+      const speedJitter = 0.75 + 0.5 * (0.5 + 0.5 * Math.sin(phase * 7.0))
+      const fall = (7 + 7 * intensity) * dt * speedJitter * (0.85 + 0.25 * snowSize[i])
       let y = snowPos[i * 3 + 1] - fall
       if (y < G - 2) { y = G + SNOW_H; }
       snowPos[i * 3 + 1] = y
-      // Deriva lateral suave (revoloteo).
-      snowPos[i * 3] += Math.sin(clockT * 0.8 + snowPhase[i]) * 6 * dt
-      snowPos[i * 3 + 2] += Math.cos(clockT * 0.6 + snowPhase[i] * 1.3) * 6 * dt
+      // Deriva lateral turbulenta: dos frecuencias distintas por copo, fase propia.
+      snowPos[i * 3] += (Math.sin(clockT * 0.8 + phase) * 4.0
+        + Math.sin(clockT * 2.3 + phase * 1.7) * 1.6) * dt
+      snowPos[i * 3 + 2] += (Math.cos(clockT * 0.6 + phase * 1.3) * 4.0
+        + Math.cos(clockT * 1.9 + phase * 2.1) * 1.6) * dt
     }
     snowGeom.getAttribute('position').needsUpdate = true
   }
