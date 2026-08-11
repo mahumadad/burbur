@@ -196,6 +196,8 @@ export function createCellScene(container, cfg, agentNames = []) {
   const daughters = createDaughters(substrate, {
     R, H, rnd,
     membraneCol: C_MEMBRANE, frontCol: C_FRONT, fillColor: PALETTE.cyan,
+    pointMaterial: draw.pointMaterial,
+    orgColors: [rgb(PALETTE.orange), rgb(PALETTE.pink), rgb(PALETTE.magenta), rgb(PALETTE.cyanSat)],
   })
 
   // ─── ADHESIONES FOCALES: nacen bajo el frente, quedan CLAVADAS al sustrato ─
@@ -1118,7 +1120,12 @@ export function createCellScene(container, cfg, agentNames = []) {
     mitosisDraw.update(mit)
     drawInvaders()
     drawAdhesions(motility.subX, motility.subZ)
-    daughters.update(step, { subX: motility.subX, subZ: motility.subZ })
+    // La madre está centrada en el origen: su radio (mundo) en un ángulo dado
+    // deja que el borde de la hija choque con el suyo.
+    daughters.update(step, {
+      subX: motility.subX, subZ: motility.subZ,
+      motherRadiusAt: (a) => radiusAt(membrane, a) * R,
+    })
     for (let i = 0; i < cc.atp.capacity; i++) {
       const q = atp.quanta[i]
       atpCloud.pos[i * 3] = q.alive ? q.x * R : 0

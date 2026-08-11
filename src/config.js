@@ -128,16 +128,19 @@ export const CONFIG = {
       turnRate: 0.7, bias: 1.2, noise: 0.8,
       maxSpeed: 0.14, protrusionGain: 1.6, atpFloor: 0.3,
     },
-    // Ciclo celular real (spec 2026-08-11-ciclo-y-division-celula.md §4): un
+    // Ciclo celular (spec 2026-08-11-ciclo-y-division-celula.md §4): un
     // macrófago vive casi siempre en G0 y solo entra en ciclo con señal
-    // mitogénica SOSTENIDA (nutrientes o inflamación). Ver sim/cellCycle.js.
+    // mitogénica SOSTENIDA (nutrientes o inflamación) + energía. Es un
+    // acontecimiento OCASIONAL, no un reloj. Ver sim/cellCycle.js. Tiempos
+    // afinados para que se vea "de vez en cuando" (1ra división ~2.6 min de
+    // mediana, intervalo ~1.6 min) con la mitosis bien visible (~20 s).
     cycle: {
-      atpMin: 0.45,            // umbral de energía para entrar en ciclo
+      atpMin: 0.4,             // umbral de energía para entrar en ciclo
       mitogenicMedia: ['nutrient rich', 'inflamed'],  // prolifera con nutrientes o inflamación
-      readinessRate: 0.05,     // ~20 s de señal sostenida para decidirse
-      readinessDecay: 0.12,    // se desarma más rápido de lo que se arma
-      g1: 18, s: 22, g2: 12, m: 16, cyto: 8,   // segundos por etapa
-      refractory: 90,          // no se divide en cadena
+      readinessRate: 0.12,     // ~8 s de señal sostenida para decidirse
+      readinessDecay: 0.12,    // se desarma tan rápido como se arma
+      g1: 10, s: 10, g2: 6, m: 14, cyto: 6,   // s por etapa (M+CYTO=20s visibles)
+      refractory: 40,          // pausa entre divisiones
     },
     // Sustrato: se dibuja como un TILE periódico que se repite y hace wrap, así
     // nunca se acaba por mucho que la célula avance (antes se deslizaba fuera de
