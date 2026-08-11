@@ -12,6 +12,7 @@ import { createPaths, nearestOnPaths } from '../sim/paths.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createBugs, updateBugs, nearestBug } from '../sim/behaviors.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
+import { phenology } from '../sim/phenology.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -1385,7 +1386,6 @@ export function createScene(container, cfg, agentNames = []) {
     }
     return [sx, sy]
   }
-  const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1, rainShelter = 0
   function update(swarm, dt, eco) {
@@ -1484,23 +1484,17 @@ export function createScene(container, cfg, agentNames = []) {
       // Con lluvia los pájaros se refugian: se posan en árboles/rocas y se quedan.
       rainShelter = eco.rain
 
-      // Estaciones: ciclo lento (~210 s = un "año"). Brote → hoja plena → ámbar
-      // + caída → ramas peladas. La lluvia tira algunas hojas y borra flores.
-      // +0.35 → el mundo arranca en VERANO (con hojas) y el ciclo avanza desde ahí.
-      // La estación la maneja el host (para compartirla con el HUD); fallback local.
+      // Estaciones: la curva la calcula src/sim/phenology.js (con tests). Aquí
+      // solo se traduce a uniforms y a tasas de emisión.
+      // +0.35 → el mundo arranca en VERANO. La estación la maneja el host (para
+      // compartirla con el HUD); este es el fallback local.
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
-      const leafAmt = seasonT < 0.5 ? ss01(0, 0.2, seasonT) : 1 - ss01(0.62, 0.8, seasonT)
-      const flowerAmt = ss01(0.02, 0.1, seasonT) * (1 - ss01(0.2, 0.32, seasonT))
+      const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 })
       foliageUniforms.uSeason.value = seasonT
-      foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
-      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
-      const autumn = ss01(0.5, 0.7, seasonT) * (1 - ss01(0.8, 0.92, seasonT))
-      foliageUniforms.uAutumn.value = autumn
-      // Hojas/pétalos que se desprenden: otoño + lluvia + VIENTO (si aún hay hojas).
-      const gust = eco.rain + (eco.wind || 0) * 0.7
-      const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
-      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
-      updateFallingLeaves(step, shedRate, autumn, petalRate)
+      foliageUniforms.uLeaf.value = phen.leaf
+      foliageUniforms.uFlower.value = phen.flower
+      foliageUniforms.uAutumn.value = phen.autumn
+      updateFallingLeaves(step, phen.shed, phen.autumn, phen.petals)
     }
 
     mapPositions(step)

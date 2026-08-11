@@ -12,6 +12,8 @@ import { PALETTE } from '../config.js'
 import { CITY_CENSUS } from '../sim/agents.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
+import { phenology } from '../sim/phenology.js'
+import { SPECIES } from './tree/species.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -2020,25 +2022,17 @@ export function createCityScene(container, cfg, agentNames = []) {
       moveScale = snowing ? 0.4 : (1 - eco.rain * 0.6) * (eco.temperature <= 1 ? 0.85 : 1)
       birdShelter = eco.rain
 
-      // Estaciones del sakura: mismo reloj que el resto del mundo (`eco.seasonT`,
-      // con el mismo fallback local que usa el bosque) → brote → hoja plena →
-      // caída, y una ventana de flor donde el canopy se pone rosado. Mismo
-      // sistema de follaje/pétalos que `scene.js` (ver bloque "SAKURA" arriba).
+      // Estaciones del sakura: la curva la calcula src/sim/phenology.js, con la
+      // curva propia de la especie (ventana de flor más larga que el resto del
+      // bosque). Mismo reloj que el resto del mundo (`eco.seasonT`, con el mismo
+      // fallback local que usa el bosque).
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
-      const leafAmt = seasonT < 0.5 ? smoothstep(0, 0.2, seasonT) : 1 - smoothstep(0.62, 0.8, seasonT)
-      // Ventana de flor MÁS LARGA (primavera extendida) → la sakura se ve rosada
-      // buena parte de la estación, no un instante. Sigue siendo estacional.
-      const flowerAmt = smoothstep(0.0, 0.08, seasonT) * (1 - smoothstep(0.30, 0.44, seasonT))
+      const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.sakura.curve)
       foliageUniforms.uSeason.value = seasonT
-      foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
-      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.55)
-      const autumn = smoothstep(0.5, 0.7, seasonT) * (1 - smoothstep(0.8, 0.92, seasonT))
-      foliageUniforms.uAutumn.value = autumn
-      const gust = eco.rain + (eco.wind || 0) * 0.7
-      const shedRate = leafAmt > 0.05 ? (autumn * 44 + gust * 60 * leafAmt) : 0
-      // Lluvia de pétalos más densa: base más alta + una siembra constante durante la flor.
-      const petalRate = foliageUniforms.uFlower.value * (34 + eco.rain * 55 + (eco.wind || 0) * 46)
-      updateFallingLeaves(step, shedRate, autumn, petalRate)
+      foliageUniforms.uLeaf.value = phen.leaf
+      foliageUniforms.uFlower.value = phen.flower
+      foliageUniforms.uAutumn.value = phen.autumn
+      updateFallingLeaves(step, phen.shed, phen.autumn, phen.petals)
     }
 
     moveAgents(step * moveScale, clock)
