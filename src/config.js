@@ -223,6 +223,21 @@ export const CONFIG = {
     },
     somaR: 0.05,        // radio del soma (normalizado)
     height: 3.0,        // altura de la lámina neural sobre el plano
+    // Propagación del potencial de acción (sim/spikes.js): al disparar una
+    // neurona sale un pulso por cada axón saliente. El mielinizado va más rápido
+    // (conducción saltatoria: salta de nodo en nodo) que el amielínico. Al llegar
+    // al terminal empuja la fase de la postsináptica (+ excita / − inhibe), así
+    // la actividad se PROPAGA visiblemente por la red.
+    spikes: {
+      neurons: 12,
+      myelinatedSpeed: 1.7, unmyelinatedSpeed: 0.42, refractory: 0.16,
+      fireThresh: 0.82,        // umbral de swarm.flash[i] para lanzar el pulso
+      exciteBump: 0.85, inhibitBump: 0.6,   // empujón de fase a la postsináptica
+      cap: 80, trail: 5,       // pool de pulsos en vuelo + puntos de estela
+    },
+    // Flujo CONTINUO de energía por cada axón: el murmullo de fondo que hace que
+    // la red se lea VIVA (no como un diagrama). Los spikes reales corren encima.
+    flow: { perAxon: 11, speed: 0.13, size: 0.95 },
     // Arbor dendrítico: árbol ramificado en el plano, congelado en el build.
     dendrite: { levels: 3, branches: 3, len: 0.16, lenDecay: 0.62, spread: 1.2, jitter: 0.22, spines: 4 },
     neuropil: 3800,     // puntos de fondo (la maraña de procesos que no se dibuja)
