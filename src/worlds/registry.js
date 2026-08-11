@@ -3,9 +3,10 @@ import { createCityScene } from '../render/city.js'
 import { createPond } from '../render/pond.js'
 import { createCellScene } from './cell.js'
 import { createFungusScene } from './fungus.js'
-import { FOREST_CENSUS, CITY_CENSUS, POND_CENSUS, CELL_CENSUS, FUNGUS_CENSUS } from '../sim/agents.js'
-import { CELL_LEXICON, FUNGUS_LEXICON } from '../sim/narrator.js'
-import { FOREST_PROFILE, CELL_PROFILE, FUNGUS_PROFILE } from '../sim/ecosystem.js'
+import { createNeuronScene } from './neuron.js'
+import { FOREST_CENSUS, CITY_CENSUS, POND_CENSUS, CELL_CENSUS, FUNGUS_CENSUS, NEURON_CENSUS } from '../sim/agents.js'
+import { CELL_LEXICON, FUNGUS_LEXICON, NEURON_LEXICON } from '../sim/narrator.js'
+import { FOREST_PROFILE, CELL_PROFILE, FUNGUS_PROFILE, NEURON_PROFILE } from '../sim/ecosystem.js'
 
 // Registro de mundos. Cada mundo es un builder que construye su escena en el
 // container y devuelve la API común { update, resize, flash, dispose }. El host
@@ -88,6 +89,23 @@ export const WORLDS = [
     // Suelo del bosque, húmedo: llueve y hay bichos, pero sin búho.
     audio: { rain: true, insects: true, owl: false },
     build: (container, cfg, names) => createFungusScene(container, cfg, names),
+  },
+  // Neurona: una microred cortical vista desde arriba. Los somas están fijos;
+  // lo que se mueve es la señal. El corazón es el swarm (osciladores tipo
+  // integrate-and-fire). El acento rosa es diseño nuestro. Ver spec §9.1.
+  {
+    id: 'neuron', label: 'Network ecosystem', name: 'Neurona', accent: '#f2a0c8', ready: true,
+    census: NEURON_CENSUS, lexicon: NEURON_LEXICON, ecosystem: NEURON_PROFILE,
+    // El "día" es el ciclo de sueño; el "clima", los neuromoduladores. Sin
+    // estación. (La fila de métrica pasará a mostrar Hz en F4.)
+    hud: { time: 'ESTADO', weather: 'NEUROMODULADOR', season: null },
+    // Interior seco y eléctrico: sin lluvia, grillos ni búhos.
+    audio: { rain: false, insects: false, owl: false },
+    // La clase de cada slot del swarm: 0–9 neuronas piramidales, 10–11
+    // interneuronas, 12–17 astrocitos. Así el censo no le pone nombre de
+    // piramidal a una interneurona (§9.4b).
+    slotClass: (i) => (i < 10 ? 'neuron' : i < 12 ? 'interneuron' : 'glia'),
+    build: (container, cfg, names) => createNeuronScene(container, cfg, names),
   },
 ]
 
