@@ -62,9 +62,13 @@ export function createNetwork(cfg, seeds, rand = Math.random) {
     node: -1, ang: 0, colony: 0, vigor: 1, alive: false, x: 0, z: 0, dist: 0,
   }))
 
-  const net = { nodes, edges, tips }
+  // Origen (inóculo) de cada colonia: de ahí sale el crecimiento RADIAL, que es
+  // lo que da el rosetón de una placa. Sin esto la red era un garabato sin centro.
+  const origins = {}
+  const net = { nodes, edges, tips, origins }
 
   for (const seed of seeds) {
+    origins[seed.colony] = { x: seed.x, z: seed.z }
     const ni = allocFree(nodes)
     if (ni === -1) continue // tope: no debería pasar con un cfg razonable
     nodes[ni].x = seed.x; nodes[ni].z = seed.z; nodes[ni].colony = seed.colony; nodes[ni].alive = true
@@ -132,6 +136,19 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       }
       if (rx !== 0 || rz !== 0) {
         ang = turnToward(ang, Math.atan2(rz, rx), cfg.turnRate * cfg.autotropism * dt)
+      }
+    }
+
+    // CRECIMIENTO RADIAL: la punta se orienta hacia afuera desde el inóculo de
+    // su colonia. Es lo que hace que la colonia avance como un frente circular
+    // —el rosetón de una placa— en vez de enredarse sobre sí misma. Cuanto más
+    // lejos del centro, menos hace falta corregir (el frente ya va derecho).
+    if (cfg.radial && net.origins) {
+      const o = net.origins[tip.colony]
+      if (o) {
+        const outAng = Math.atan2(tip.z - o.z, tip.x - o.x)
+        const d = ((outAng - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI
+        ang += d * Math.min(1, cfg.radial * dt)
       }
     }
 

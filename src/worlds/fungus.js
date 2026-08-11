@@ -303,7 +303,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // field de humedad plena antes del primer frame (~la mitad del presupuesto).
   {
     const warmField = { resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon), moisture: 0.9 }
-    for (let i = 0; i < 700; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
+    // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
+    // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
+    // aparecía todo hecho y no se veía crecer nada.)
+    for (let i = 0; i < 220; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
   }
 
   // Dos registros visuales del micelio (spec §10). La red se dibuja con capacidad
@@ -340,6 +343,15 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const dx = bx - ax, dz = bz - az
       const d = Math.hypot(dx, dz) || 1
       const px = -dz / d, pz = dx / d
+      // BANDAS CONCÉNTRICAS: una colonia real deja anillos de densidad (crece
+      // distinto de día que de noche). El brillo se modula con la distancia al
+      // inóculo, así aparecen los anillos característicos de una placa.
+      const org = net.origins && net.origins[e.colony]
+      let band = 1
+      if (org) {
+        const rr = Math.hypot((a.x + b.x) / 2 - org.x, (a.z + b.z) / 2 - org.z)
+        band = 0.55 + 0.45 * Math.abs(Math.sin(rr * 26))
+      }
       const wobble = Math.sin((e.a * 12.9898 + e.b * 78.233) % 6.2832)
       const arc = wobble * d * 0.18
       const SEG = 3
@@ -355,7 +367,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
       if (e.width >= CORD_W) {
         // CORDÓN (rizomorfo): haz de 3 hifas paralelas curvas, brillante — las
         // "autopistas" que consolidan el territorio ganado.
-        const bright = Math.min(1, 0.7 + e.width * 5)
+        const bright = Math.min(1, 0.7 + e.width * 5) * band
         const off = Math.min(1.6, 0.5 + e.width * 8)
         for (const lat of [-off, 0, off]) {
           for (let s = 0; s < SEG; s++) {
@@ -366,7 +378,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
         }
       } else {
         // MALLA FINA: la trama difusa entre cordones, tenue y también curva.
-        const dim = 0.4 + e.width * 6
+        const dim = (0.4 + e.width * 6) * band
         for (let s = 0; s < SEG; s++) {
           const p0 = curvePt(s, 0), p1 = curvePt(s + 1, 0)
           netBuf.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2],
