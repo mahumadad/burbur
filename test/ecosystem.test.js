@@ -49,4 +49,36 @@ describe('ecosystem', () => {
     }
     expect(midday).toBeGreaterThan(night)
   })
+
+  it('setFijos pina los valores finales cada frame', () => {
+    const eco = createEcosystem(CFG, Math.random)
+    eco.setFijos({ temperature: -7, rain: 1, tension: 0.9, activity: 0.1, fog: 0.5, season: 0.6 })
+    for (let i = 0; i < 300; i++) {
+      const s = eco.update(0.5)
+      expect(s.temperature).toBe(-7)
+      expect(s.rain).toBe(1)
+      expect(s.tension).toBe(0.9)
+      expect(s.activity).toBe(0.1)
+      expect(s.fog).toBe(0.5)
+      expect(s.seasonT).toBe(0.6)
+    }
+  })
+
+  it('setFijos fuerza hora y clima en la fuente (deriva coherente)', () => {
+    const eco = createEcosystem(CFG, () => 0.5)
+    eco.setFijos({ phase: 'midday', weather: 'heavy rain' })
+    const s = eco.update(1)
+    expect(s.phase).toBe('midday')
+    expect(s.weather).toBe('heavy rain')
+    // 'heavy rain' del perfil bosque trae rain=1: la deriva refleja el clima forzado.
+    expect(s.rain).toBe(1)
+  })
+
+  it('setFijos({}) vuelve al reloj normal', () => {
+    const eco = createEcosystem(CFG, () => 0.5)
+    eco.setFijos({ temperature: 99 })
+    expect(eco.update(1).temperature).toBe(99)
+    eco.setFijos({})
+    expect(eco.update(1).temperature).not.toBe(99)
+  })
 })

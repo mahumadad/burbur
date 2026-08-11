@@ -3,6 +3,7 @@ import { CONFIG } from './config.js'
 import { createSwarm, updateSwarm, attract, perturbPhases } from './sim/fireflies.js'
 import { createAmbient } from './sim/ambient.js'
 import { createEcosystem } from './sim/ecosystem.js'
+import { parseFijos } from './sim/urlFijos.js'
 import { createCensus } from './sim/agents.js'
 import { createEventEngine } from './sim/events.js'
 import { narrate } from './sim/narrator.js'
@@ -54,13 +55,14 @@ async function start() {
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
   const ecosystem = createEcosystem(CONFIG.ecosystem)
-  // Depuración: ?season=0.6&wind=1 congela la estación y el viento para poder
-  // revisar las cuatro estaciones sin esperar los 210 s de un año. ?grown (leído
-  // en cada mundo) además nace los árboles adultos: con la estación fija el año
-  // no da la vuelta, así que sin esto se quedarían de plantón y no verías la copa.
-  const qs = new URLSearchParams(location.search)
-  const fijoSeason = qs.has('season') ? parseFloat(qs.get('season')) : null
-  const fijoWind = qs.has('wind') ? parseFloat(qs.get('wind')) : null
+  // Depuración/exhibición: la URL puede FIJAR variables del ecosistema (ver
+  // sim/urlFijos.js y el README). P. ej. ?snow=1, ?rain=1&wind=1, ?weather=heavy
+  // rain, ?season=0.6, ?temperatura=-5. El ecosistema aplica casi todas; el
+  // viento se computa acá, así que lo pinamos abajo en el loop. ?grown (leído en
+  // cada mundo) además nace los árboles adultos: con la estación fija el año no da
+  // la vuelta, así que sin esto se quedarían de plantón y no verías la copa.
+  const fijos = parseFijos(location.search)
+  ecosystem.setFijos(fijos)
   const eventLog = createEventLog('#8fe04a')
   const hud = createHud('#8fe04a', {
     // Tres capas independientes (los sliders del panel).
@@ -212,10 +214,9 @@ async function start() {
     // melódicas de las luciérnagas — sobre el drone sonaban como "pings locos".
     updateSwarm(swarm, CONFIG.fireflies, dt)
     const env = ambient.update(dt)
-    const wind = Math.max(env.wind, eco.rain * 0.4)
+    let wind = Math.max(env.wind, eco.rain * 0.4)
     eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas
-    if (fijoSeason != null) eco.seasonT = fijoSeason
-    if (fijoWind != null) eco.wind = fijoWind
+    if (fijos.wind != null) { eco.wind = fijos.wind; wind = fijos.wind }
     audio.setWind(wind)
     // Lluvia: siseo por intensidad + goteo a un ritmo proporcional. En mundos
     // sin lluvia (célula) se silencia aunque el "clima" del perfil tenga agua.

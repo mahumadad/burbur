@@ -129,8 +129,33 @@ npm run build    # production build → dist/
 npm test         # vitest (the pure sim modules)
 ```
 
-Handy dev flags on the URL: `?season=0.6&wind=1` freezes the season and wind to
-inspect the four seasons; `?grown` starts the trees adult.
+### URL overrides
+
+Any ecosystem variable can be **pinned from the URL** to stage a specific
+scenario without waiting for the world clock to come around. They compose, and
+English or Spanish aliases both work:
+
+| Param (aliases) | Range | Effect |
+|---|---|---|
+| `temperature` (`temp`, `temperatura`) | °C | Air temperature; ≤ −3 makes it snow |
+| `rain` (`lluvia`, `agua`, `water`) | 0–1 | Rain / water intensity |
+| `snow` (`nieve`) | 0–1 | Convenience: sets a below-freezing temperature and snowfall |
+| `wind` (`viento`) | 0+ | Wind strength (sway, drift, gusts) |
+| `fog` (`niebla`) | 0–1 | Fog density |
+| `activity` (`actividad`, `act`) | 0–1 | How much life is out and about |
+| `tension` (`tensión`) | 0–1 | Unease (drives the audio mood) |
+| `season` (`estación`, `seasonT`) | 0–1 | Point in the year (0.35 ≈ summer) |
+| `gain` (`brillo`) | 0+ | Ambient brightness |
+| `weather` (`clima`) | name | Force a weather state of the active world, e.g. `heavy rain` |
+| `phase` (`hora`, `fase`) | name or index | Force a time-of-day / cycle phase, e.g. `midday` |
+
+`weather` and `phase` are forced *at the source*, so everything derived from
+them stays consistent. The numeric knobs pin the final value and win over
+whatever the clock computed. Examples: `?snow=1`, `?rain=1&wind=1`,
+`?weather=heavy%20rain`, `?season=0.6&temperatura=-5`, `?phase=midday`.
+
+`?grown` (read per-world) additionally starts the trees adult — handy with a
+pinned season, since the year no longer turns to grow them.
 
 ## License
 

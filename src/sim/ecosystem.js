@@ -197,12 +197,22 @@ export const FUNGUS_PROFILE = {
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const lerp = (a, b, t) => a + (b - a) * t
 
+// Resuelve la fase pedida por URL (índice numérico o nombre exacto) contra el
+// vocabulario del mundo activo. Devuelve el índice, o -1 si no aplica.
+function resolvePhase(v, phases) {
+  const s = String(v).trim()
+  if (/^\d+$/.test(s)) { const i = +s; return i >= 0 && i < phases.length ? i : -1 }
+  return phases.indexOf(s)
+}
+
 /**
  * @param {{dayLengthSec:number, weatherMinSec:number, weatherMaxSec:number}} cfg
  */
 export function createEcosystem(cfg, rand = Math.random) {
   let profile = FOREST_PROFILE
   let phaseLen = cfg.dayLengthSec / profile.phases.length
+  // Variables fijadas por URL (depuración/exhibición). Vacío = reloj normal.
+  let fijos = {}
   // Arranca en 'dawn chorus': el mundo abre con luz cálida y actividad alta.
   const startPhase = cfg.startPhase ?? 2
   let t = startPhase * phaseLen
@@ -259,8 +269,6 @@ export function createEcosystem(cfg, rand = Math.random) {
       phaseIndex = idx
       state.changedTime = true
     }
-    const phaseT = (t % phaseLen) / phaseLen
-
     // Cambio de clima
     weatherLeft -= dt
     if (weatherLeft <= 0) {
@@ -272,36 +280,59 @@ export function createEcosystem(cfg, rand = Math.random) {
       weatherLeft = cfg.weatherMinSec + rand() * (cfg.weatherMaxSec - cfg.weatherMinSec)
     }
 
+    // Fase/clima EFECTIVOS: por defecto los del reloj, pero la URL puede fijarlos
+    // en la FUENTE, para que todo lo derivado (temperatura, actividad, lluvia…)
+    // salga coherente en vez de quedar solo la etiqueta cambiada.
+    let effIdx = phaseIndex
+    let effPhaseT = (t % phaseLen) / phaseLen
+    let effWeather = weather
+    if (fijos.phase != null) {
+      const fi = resolvePhase(fijos.phase, profile.phases)
+      if (fi >= 0) { effIdx = fi; effPhaseT = 0 }
+    }
+    if (fijos.weather != null && profile.weatherData[fijos.weather]) effWeather = fijos.weather
+
     // Interpolación suave entre la fase actual y la siguiente
-    const a = profile.phaseData[phaseIndex]
-    const b = profile.phaseData[(phaseIndex + 1) % profile.phaseData.length]
-    const w = profile.weatherData[weather]
+    const a = profile.phaseData[effIdx]
+    const b = profile.phaseData[(effIdx + 1) % profile.phaseData.length]
+    const w = profile.weatherData[effWeather]
 
     // Estación: avanza su reloj y da la base térmica (solo perfiles con seasonTemp).
     seasonClock += dt
     state.seasonT = (seasonClock / seasonLen + 0.35) % 1
+    if (fijos.season != null) state.seasonT = fijos.season
     // El viento gira lento: una vuelta completa cada ~7 minutos. Es lo que hace
     // que las hojas que caen se vayan todas para el mismo lado.
     state.windDir = (t * 0.015) % (Math.PI * 2)
     const st = profile.seasonTemp
     const seasonBase = st ? st.mid + st.amp * Math.cos(2 * Math.PI * (state.seasonT - st.peak)) : 0
 
-    state.phaseIndex = phaseIndex
-    state.phase = profile.phases[phaseIndex]
-    state.phaseT = phaseT
-    state.weather = weather
+    state.phaseIndex = effIdx
+    state.phase = profile.phases[effIdx]
+    state.phaseT = effPhaseT
+    state.weather = effWeather
     // Temperatura = base de estación + delta de hora + delta de clima.
-    state.temperature = Math.round(seasonBase + lerp(a.temp, b.temp, phaseT) + w.temp)
-    state.activity = clamp01(lerp(a.act, b.act, phaseT) * w.act)
+    state.temperature = Math.round(seasonBase + lerp(a.temp, b.temp, effPhaseT) + w.temp)
+    state.activity = clamp01(lerp(a.act, b.act, effPhaseT) * w.act)
     state.tension = clamp01(w.tension + (1 - state.activity) * 0.25)
     state.rain = w.rain
     state.fog = w.fog
-    state.gain = lerp(a.gain, b.gain, phaseT)
+    state.gain = lerp(a.gain, b.gain, effPhaseT)
     for (let i = 0; i < 3; i++) {
-      state.light[i] = lerp(a.light[i], b.light[i], phaseT)
+      state.light[i] = lerp(a.light[i], b.light[i], effPhaseT)
     }
+    // Pines numéricos de la URL: fijan el valor FINAL (ganan a lo calculado).
+    if (fijos.temperature != null) state.temperature = fijos.temperature
+    if (fijos.activity != null) state.activity = fijos.activity
+    if (fijos.tension != null) state.tension = fijos.tension
+    if (fijos.rain != null) state.rain = fijos.rain
+    if (fijos.fog != null) state.fog = fijos.fog
+    if (fijos.gain != null) state.gain = fijos.gain
     return state
   }
 
-  return { update, state, setProfile }
+  // Fija variables por URL (ver sim/urlFijos.js). Persiste entre cambios de mundo.
+  function setFijos(next) { fijos = next || {} }
+
+  return { update, state, setProfile, setFijos }
 }
