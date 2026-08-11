@@ -6,16 +6,23 @@ import { createFaunaSamples } from './samples.js'
 // Pensado para colapsar bien a mono; master con limiter (igual que el device).
 export async function createAudio(cfg) {
   const limiter = new Tone.Limiter(cfg.audio.masterLimitDb).toDestination()
+  // ── Tres capas de mezcla, con su propio fader (los sliders del HUD) ────────
+  //   FONDO    = el drone ambiental.
+  //   MUNDO    = el clima: truenos, viento (cama de ruido) y lluvia.
+  //   ACTIVIDAD = la vida: fauna (síntesis + samples), grillos, búho, latidos.
+  const busDrone = new Tone.Gain(1).connect(limiter)
+  const busWeather = new Tone.Gain(1).connect(limiter)
+  const busActivity = new Tone.Gain(1).connect(limiter)
   // Samples reales de fauna (CC). Si el agente tiene sample cargado, suena el
-  // real; si no, cae a las voces sintéticas de abajo.
-  const faunaSamples = createFaunaSamples(limiter)
+  // real; si no, cae a las voces sintéticas de abajo. Van a la capa ACTIVIDAD.
+  const faunaSamples = createFaunaSamples(busActivity)
 
   // ─── Drone psicodélico ambiental (chill) ──────────────────────────────────
   // murmur usa mp3 pre-renderizados por hora; nosotros lo SINTETIZAMOS (más vivo).
   // Cadena: voces graves detuned → filtro con LFO lento (respira) → autopan lento
   //         → reverb largo + delay con feedback → limiter.
-  const droneReverb = new Tone.Reverb({ decay: 20, wet: 0.78 }).connect(limiter)
-  const droneDelay = new Tone.FeedbackDelay({ delayTime: 0.75, feedback: 0.48, wet: 0.32 }).connect(limiter)
+  const droneReverb = new Tone.Reverb({ decay: 20, wet: 0.78 }).connect(busDrone)
+  const droneDelay = new Tone.FeedbackDelay({ delayTime: 0.75, feedback: 0.48, wet: 0.32 }).connect(busDrone)
   const droneAutoPan = new Tone.AutoPanner({ frequency: 0.03, depth: 0.55 }).start()
   droneAutoPan.connect(droneReverb); droneAutoPan.connect(droneDelay)
   const droneFilter = new Tone.Filter(360, 'lowpass').connect(droneAutoPan)
@@ -52,13 +59,13 @@ export async function createAudio(cfg) {
   }, 30000) // deriva glacial: pad flotante, más hipnótico
 
   // Cama: ruido rosado → filtro (modulado por viento).
-  const bedGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.bed)).connect(limiter)
+  const bedGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.bed)).connect(busWeather)
   const bedFilter = new Tone.Filter(500, 'lowpass').connect(bedGain)
   const noise = new Tone.Noise('pink').start()
   noise.connect(bedFilter)
 
   // Voces de latido: PolySynth suave + reverb compartido.
-  const flashReverb = new Tone.Reverb({ decay: 5, wet: 0.5 }).connect(limiter)
+  const flashReverb = new Tone.Reverb({ decay: 5, wet: 0.5 }).connect(busActivity)
   const flashGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.flash)).connect(flashReverb)
   const synth = new Tone.PolySynth(Tone.Synth, {
     oscillator: { type: 'triangle' },
@@ -68,7 +75,7 @@ export async function createAudio(cfg) {
   synth.connect(flashGain)
 
   // Grillos: ráfaga corta de ruido pasa-banda, paneada al azar.
-  const cricketPan = new Tone.Panner(0).connect(bedGain)
+  const cricketPan = new Tone.Panner(0).connect(busActivity)
   const cricketFilter = new Tone.Filter(4200, 'bandpass').connect(cricketPan)
   cricketFilter.Q.value = 8
   const cricketEnv = new Tone.AmplitudeEnvelope({ attack: 0.005, decay: 0.05, sustain: 0, release: 0.03 }).connect(cricketFilter)
@@ -79,7 +86,7 @@ export async function createAudio(cfg) {
   const owlSynth = new Tone.Synth({
     oscillator: { type: 'sine' },
     envelope: { attack: 0.08, decay: 0.2, sustain: 0.3, release: 0.5 },
-  }).connect(droneReverb)
+  }).connect(flashReverb) // búho → capa ACTIVIDAD (con reverb), no al drone
   owlSynth.volume.value = -16
 
   const boundsY = cfg.fireflies.bounds.y
@@ -195,7 +202,7 @@ export async function createAudio(cfg) {
   // Un potencial de acción sonificado es literalmente esto: un click seco y
   // brevísimo, sin reverb. Muchos juntos suenan a lluvia / palomitas de maíz —
   // el registro multiunidad real. Paneado por la posición de la neurona.
-  const spikeGain = new Tone.Gain(0.30).connect(limiter)
+  const spikeGain = new Tone.Gain(0.30).connect(busActivity)
   const spikePan = new Tone.Panner(0).connect(spikeGain)
   const spikeBP = new Tone.Filter(2800, 'bandpass').connect(spikePan); spikeBP.Q.value = 1.1
   const spikeEnv = new Tone.AmplitudeEnvelope({ attack: 0.0004, decay: 0.008, sustain: 0, release: 0.004 }).connect(spikeBP)
@@ -257,7 +264,7 @@ export async function createAudio(cfg) {
   }
 
   // ─── Trueno: sub-retumbo + ruido filtrado + chasquido, potente ────────────
-  const thunderOut = new Tone.Gain(1.0).connect(limiter)
+  const thunderOut = new Tone.Gain(1.0).connect(busWeather)
   const thunderGain = new Tone.Gain(0).connect(thunderOut)
   const thunderFilter = new Tone.Filter(180, 'lowpass').connect(thunderGain)
   const thunderNoise = new Tone.Noise('brown').start(); thunderNoise.connect(thunderFilter)
@@ -284,7 +291,7 @@ export async function createAudio(cfg) {
   }
 
   // ─── Lluvia: siseo de banda ancha + goteo individual ──────────────────────
-  const rainOut = new Tone.Gain(0).connect(limiter)
+  const rainOut = new Tone.Gain(0).connect(busWeather)
   const rainHP = new Tone.Filter(900, 'highpass').connect(rainOut)
   const rainNoise = new Tone.Noise('white').start(); rainNoise.connect(rainHP)
   function setRain(i) {
@@ -293,7 +300,7 @@ export async function createAudio(cfg) {
     rainHP.frequency.rampTo(700 + g * 1500, 0.4)
   }
   // Gota: tic corto y agudo, paneado.
-  const dripPan = new Tone.Panner(0).connect(limiter)
+  const dripPan = new Tone.Panner(0).connect(busWeather)
   const dripFilter = new Tone.Filter(3000, 'bandpass').connect(dripPan); dripFilter.Q.value = 3
   const dripEnv = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: 0.02, sustain: 0, release: 0.01 }).connect(dripFilter)
   const dripNoise = new Tone.Noise('white').start(); dripNoise.connect(dripEnv)
@@ -305,7 +312,7 @@ export async function createAudio(cfg) {
 
   // Traqueteo del "shake": tren de clicks triangulares (800–2500 Hz) que decae
   // en ~800 ms. Igual espíritu que el click-track del shake de murmur.
-  const rattleOut = new Tone.Gain(0.5).connect(limiter)
+  const rattleOut = new Tone.Gain(0.5).connect(busActivity)
   function rattle(ms = 800) {
     const start = Tone.now()
     let t = 0
@@ -325,9 +332,11 @@ export async function createAudio(cfg) {
     }
   }
 
-  function setFlashVol(db) { flashGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
-  function setDroneVol(db) { droneGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
-  function setBedVol(db) { bedGain.gain.rampTo(Tone.dbToGain(db), 0.1) }
+  // Faders de las 3 capas (los sliders del HUD). El balance interno de cada
+  // capa lo fijan droneGain/bedGain/flashGain; estos buses son el volumen grupal.
+  function setDroneVol(db) { busDrone.gain.rampTo(Tone.dbToGain(db), 0.15) }      // FONDO
+  function setWeatherVol(db) { busWeather.gain.rampTo(Tone.dbToGain(db), 0.15) }  // MUNDO (clima)
+  function setActivityVol(db) { busActivity.gain.rampTo(Tone.dbToGain(db), 0.15) } // ACTIVIDAD (fauna)
   // El drone "respira" más rápido y se pone más resonante con la tensión del mundo.
   function setMood(tension) {
     const t = Math.max(0, Math.min(1, tension || 0))
@@ -337,7 +346,7 @@ export async function createAudio(cfg) {
 
   return {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
-    setRain, drip, setFlashVol, setDroneVol, setBedVol, setMood, rattle,
+    setRain, drip, setDroneVol, setWeatherVol, setActivityVol, setMood, rattle,
     spike, setThrob,
   }
 }

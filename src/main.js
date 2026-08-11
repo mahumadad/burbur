@@ -63,9 +63,10 @@ async function start() {
   const fijoWind = qs.has('wind') ? parseFloat(qs.get('wind')) : null
   const eventLog = createEventLog('#8fe04a')
   const hud = createHud('#8fe04a', {
-    // MUSIC = latidos + drone; WORLD = cama atmosférica.
-    onMusic: (db) => { audio.setFlashVol(db); audio.setDroneVol(db - 4) },
-    onWorld: (db) => audio.setBedVol(db - 8),
+    // Tres capas independientes (los sliders del panel).
+    onDrone: (db) => audio.setDroneVol(db),        // FONDO: el drone ambiental
+    onWorld: (db) => audio.setWeatherVol(db),      // MUNDO: truenos, viento, lluvia
+    onActivity: (db) => audio.setActivityVol(db),  // ACTIVIDAD: la fauna y los eventos
   })
 
   // ── Registro de mundos: el mundo activo se construye/reemplaza en caliente ──

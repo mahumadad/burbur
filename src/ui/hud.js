@@ -51,8 +51,9 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
     <div class="row"><span>TENSIÓN</span><span data-f="tenv">—</span></div>
     <div class="bar warn"><i data-f="tenbar" style="width:0%"></i></div>
     <div class="sep"></div>
-    <div class="row"><span>MÚSICA</span><input type="range" data-f="music" min="0" max="100" value="100"></div>
-    <div class="row"><span>MUNDO</span><input type="range" data-f="world" min="0" max="100" value="100"></div>`
+    <div class="row"><span>FONDO</span><input type="range" data-f="drone" min="0" max="100" value="100"></div>
+    <div class="row"><span>MUNDO</span><input type="range" data-f="world" min="0" max="100" value="100"></div>
+    <div class="row"><span>ACTIVIDAD</span><input type="range" data-f="activity" min="0" max="100" value="100"></div>`
   document.body.appendChild(el)
 
   // Minimizar: tap en el título colapsa/expande. En pantallas chicas (mobile)
@@ -82,8 +83,9 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
 
   // 0–100 % → dB (−40 dB = silencio práctico)
   const pctToDb = (v) => (v <= 0 ? -60 : -40 + (v / 100) * 40)
-  f.music.addEventListener('input', () => hooks.onMusic && hooks.onMusic(pctToDb(+f.music.value)))
+  f.drone.addEventListener('input', () => hooks.onDrone && hooks.onDrone(pctToDb(+f.drone.value)))
   f.world.addEventListener('input', () => hooks.onWorld && hooks.onWorld(pctToDb(+f.world.value)))
+  f.activity.addEventListener('input', () => hooks.onActivity && hooks.onActivity(pctToDb(+f.activity.value)))
 
   let lastPhase = null, lastWeather = null
   function update(s) {
