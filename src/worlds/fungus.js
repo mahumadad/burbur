@@ -191,15 +191,20 @@ export function createFungusScene(container, cfg, agentNames = []) {
       // — el rasgo más característico de un tronco en descomposición.
       const peelN = noise2(u * 2.1 - 40, v * 2.9 + 17)
       let col, size
-      if (v < -lr * 0.15 && mossN > 0.62) {
-        // Musgo: grumoso y con VOLUMEN (ref. imoss) — el parche no es una mancha
-        // plana: cada punto se levanta un poco sobre la corteza y varía de tono,
-        // así se lee como cojín y no como pintura.
-        const lift = rnd() * rnd() * 1.6
-        const tone = 0.55 + rnd() * 0.6
-        draw.pushPoint(x * R, y + lift, z * R,
-          [C_MOSS[0] * tone * fade, C_MOSS[1] * tone * fade, C_MOSS[2] * tone * fade],
-          0.14 + rnd() * 0.22, 0)
+      // El musgo cubre casi todo el lomo (un tronco caído en sombra húmeda), más
+      // tupido en el flanco -v; la corteza y la tierra asoman donde ralea.
+      const mossThresh = v < -lr * 0.1 ? 0.42 : 0.58
+      if (mossN > mossThresh) {
+        // MUSGO como PELUSA: matitas verticales cortas y densas — un tallo verde
+        // oscuro en la base que aclara hacia la punta, con leve inclinación. Es
+        // lo que lo hace ver afelpado (ref. tronco lush) en vez de pintado plano.
+        const h = (0.7 + rnd() * rnd() * 2.6) * (0.6 + mossN * 0.7)
+        const tone = 0.6 + rnd() * 0.7
+        const lean = (rnd() - 0.5) * 0.9
+        const base = [C_MOSS[0] * 0.45 * fade, C_MOSS[1] * 0.45 * fade, C_MOSS[2] * 0.45 * fade]
+        const tip = [C_MOSS[0] * tone * fade, C_MOSS[1] * 1.3 * tone * fade, C_MOSS[2] * tone * fade]
+        draw.pushLine(x * R, y, z * R, x * R + lean, y + h, z * R + lean, base, tip)
+        draw.pushPoint(x * R + lean, y + h, z * R + lean, tip, 0.16 + rnd() * 0.22, 0)
         continue
       } else if (peelN > 0.70) {
         col = tint(C_SAPWOOD, (0.55 + rnd() * 0.4) * fade); size = 0.14 + rnd() * 0.16
@@ -347,7 +352,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const a = net.nodes[e.a], b = net.nodes[e.b]
       const base = C_COLONY[e.colony] || C_COLONY[0]
       const ax = a.x * R, az = a.z * R, bx = b.x * R, bz = b.z * R
-      const ya = surfaceY(a.x, a.z) + 0.35, yb = surfaceY(b.x, b.z) + 0.35
+      const ya = surfaceY(a.x, a.z) + 1.3, yb = surfaceY(b.x, b.z) + 1.3
       const fa = edgeFade(a.x, a.z), fb = edgeFade(b.x, b.z)
       // Las hifas CURVAN: una cuerda recta nodo-a-nodo delata la geometría del
       // grafo. Cada arista se dibuja como una polilínea con una comba lateral
@@ -421,7 +426,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
         Math.sin(radAng) * 0.7 + Math.sin(t.ang) * 0.3,
         Math.cos(radAng) * 0.7 + Math.cos(t.ang) * 0.3)
       const fade = edgeFade(t.x, t.z)
-      const x0 = t.x * R, z0 = t.z * R, y0 = surfaceY(t.x, t.z) + 0.5
+      const x0 = t.x * R, z0 = t.z * R, y0 = surfaceY(t.x, t.z) + 1.5
       for (let k = 0; k < FAN; k++) {
         const spread = (k / (FAN - 1) - 0.5) * 1.3   // abanico estrecho, no 360°
         const a = baseAng + spread + (rnd() - 0.5) * 0.25
