@@ -42,12 +42,15 @@ const C_NEUROPIL = [0.16, 0.20, 0.38]
 // Astrocito: ámbar APAGADO. Son soporte de fondo (§3.1), no protagonistas — con
 // el bond pleno robaban la escena a los pulsos, que son el sujeto del mundo.
 const GLIA_COL = 0x5a3d18
-// Jaula del soma: azul-blanco tenue. En blanco pleno leía como "diagrama"; así
-// queda como contorno fantasma del cuerpo celular y el núcleo/halo mandan.
-const SOMA_COL = 0x7d92c8
-// El flujo de energía es cian-blanco brillante: tiene que DESTACAR sobre la
-// estructura tenue, no confundirse con las dendritas.
-const C_FLOW = [0.55, 1.0, 1.0]
+// Jaula del soma: contorno MUY tenue. Antes leía como "diagrama"; ahora es un
+// fantasma del cuerpo celular y mandan el núcleo, el halo y las dendritas.
+const SOMA_COL = 0x39456a
+// Color por TIPO: la excitatoria (glutamato) fluye en CIAN; la inhibitoria
+// (GABA) en ROSA. Tiñe las dendritas, el halo del soma y la energía que sale por
+// su axón — así un vistazo dice quién excita y quién inhibe.
+const C_EXC = [0.42, 1.0, 1.0]
+const C_INH = [1.0, 0.42, 0.80]
+const kindCol = (kind) => (kind === 'pyramidal' ? C_EXC : C_INH)
 // El pulso: núcleo casi blanco con halo amarillo (el color del spike, §5.3).
 const C_SPIKE = [1.0, 0.95, 0.55]
 const C_SPIKE_HOT = [1.0, 1.0, 0.9]
@@ -114,26 +117,31 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   }
 
   // ─── DENDRITAS: árbol ramificado desde cada soma ───────────────────────────
+  // Dendritas EN EL COLOR DE SU NEURONA (cian excitatoria / rosa inhibitoria):
+  // así cada cuerpo celular luce su penacho de procesos, del mismo color que la
+  // energía que maneja — es lo que lo hace leer como neurona y no como nodo.
   const d = cc.dendrite
-  function growDendrite(x, z, ang, len, level) {
+  function growDendrite(x, z, ang, len, level, col) {
     if (level <= 0) return
     for (let b = 0; b < d.branches; b++) {
       const a = ang + (b - (d.branches - 1) / 2) * (d.spread / d.branches) + (rnd() - 0.5) * d.jitter
       const ex = x + Math.cos(a) * len, ez = z + Math.sin(a) * len
-      const c = tint(C_DEND, 0.09 + 0.07 * level)
-      draw.pushLine(x * R, H, z * R, ex * R, H, ez * R, c, tint(C_DEND, 0.05))
+      // Más brillante cerca del soma (nivel alto), se apaga hacia las puntas.
+      const c = tint(col, 0.16 + 0.14 * level)
+      draw.pushLine(x * R, H, z * R, ex * R, H, ez * R, c, tint(col, 0.08))
       for (let s = 0; s < d.spines; s++) {
         const t = (s + 1) / (d.spines + 1)
-        draw.pushPoint((x + (ex - x) * t) * R, H, (z + (ez - z) * t) * R, tint(C_DEND, 0.16), 0.18, 0)
+        draw.pushPoint((x + (ex - x) * t) * R, H, (z + (ez - z) * t) * R, tint(col, 0.30), 0.20, 0)
       }
-      growDendrite(ex, ez, a, len * d.lenDecay, level - 1)
+      growDendrite(ex, ez, a, len * d.lenDecay, level - 1, col)
     }
   }
-  const NR = 4
+  const NR = 5 // dendritas primarias por soma (un penacho más tupido)
   for (const nrn of net.neurons) {
+    const col = kindCol(nrn.kind)
     for (let k = 0; k < NR; k++) {
       const a = (k / NR) * Math.PI * 2 + rnd() * 0.6
-      growDendrite(nrn.x, nrn.z, a, d.len, d.levels)
+      growDendrite(nrn.x, nrn.z, a, d.len, d.levels, col)
     }
   }
 
@@ -338,10 +346,12 @@ export function createNeuronScene(container, cfg, agentNames = []) {
       if (fp.t >= 1) fp.t -= 1
       const p = axonAt(net.synapses[fp.syn].axon, fp.t)
       const tw = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(clock * 3 + i * 1.7)) // parpadeo
+      // La energía sale con el color de la neurona que la manda (cian/rosa).
+      const col = net.synapses[fp.syn].sign > 0 ? C_EXC : C_INH
       flowCloud.pos[i * 3] = p.x * R; flowCloud.pos[i * 3 + 1] = H; flowCloud.pos[i * 3 + 2] = p.z * R
-      flowCloud.col[i * 3] = C_FLOW[0] * tw
-      flowCloud.col[i * 3 + 1] = C_FLOW[1] * tw
-      flowCloud.col[i * 3 + 2] = C_FLOW[2] * tw
+      flowCloud.col[i * 3] = col[0] * tw
+      flowCloud.col[i * 3 + 1] = col[1] * tw
+      flowCloud.col[i * 3 + 2] = col[2] * tw
       flowCloud.size[i] = cc.flow.size
     }
     flowCloud.commit()
@@ -358,10 +368,14 @@ export function createNeuronScene(container, cfg, agentNames = []) {
         // El núcleo se ENCIENDE al disparar: de magenta apagado a casi blanco.
         const g = 0.5 + flash * 0.5
         a.nucMat.color.setRGB(1.0 * g, (0.12 + flash * 0.8) * g, (0.56 + flash * 0.3) * g)
-        // Halo del cuerpo celular: glow suave que crece con el disparo.
+        // Halo del cuerpo celular EN SU COLOR (cian/rosa): glow suave que crece
+        // con el disparo hasta casi blanco.
         const gb = 0.30 + flash * 1.0
+        const hc = kindCol(a.kind)
         somaGlow.pos[i * 3] = a.x * R; somaGlow.pos[i * 3 + 1] = H; somaGlow.pos[i * 3 + 2] = a.z * R
-        somaGlow.col[i * 3] = 0.45 * gb; somaGlow.col[i * 3 + 1] = 0.85 * gb; somaGlow.col[i * 3 + 2] = 0.95 * gb
+        somaGlow.col[i * 3] = (hc[0] + (1 - hc[0]) * flash) * gb
+        somaGlow.col[i * 3 + 1] = (hc[1] + (1 - hc[1]) * flash) * gb
+        somaGlow.col[i * 3 + 2] = (hc[2] + (1 - hc[2]) * flash) * gb
         somaGlow.size[i] = 5.5 + flash * 4
       } else {
         const r = gliaRoamers[a.roamer]
