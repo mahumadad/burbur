@@ -120,15 +120,24 @@ export const POND_CENSUS = [
  * Construye el censo del mundo y asigna identidad a los agentes VISIBLES.
  * Devuelve { census, visible } donde `visible[i]` = { name, type, idx, memory, state }.
  */
-export function createCensus(source, visibleCount, rand = Math.random) {
+export function createCensus(source, visibleCount, rand = Math.random, isAerial = null) {
   const census = source.map((a) => ({ ...a, memory: [], state: 'move' }))
   // A cada agente visible se le da una identidad del censo (para la etiqueta al
   // pasar el mouse y para las interacciones). Se prefieren tipos que "se mueven":
   // el bosque los marca con el tipo `static_object`, los demás mundos con `static`.
   const movers = census.filter((a) => !(a.static ?? a.type === 'static_object'))
+  // La LOCOMOCIÓN manda: si el mundo declara qué slots son AÉREOS (los que se
+  // posan alto o cruzan el cielo) y tiene aves, esos slots solo reciben aves
+  // (`flying_animal`) y el resto, animales de tierra o personas. Así ningún zorro
+  // termina volando. Sin `isAerial` —o sin aves, p. ej. la célula— todos salen
+  // del mismo conjunto de móviles (comportamiento base, intacto).
+  const fliers = movers.filter((a) => a.type === 'flying_animal')
+  const walkers = movers.filter((a) => a.type !== 'flying_animal')
+  const split = isAerial && fliers.length > 0 && walkers.length > 0
   const visible = []
   for (let i = 0; i < visibleCount; i++) {
-    const src = movers[(rand() * movers.length) | 0]
+    const pool = split ? (isAerial(i) ? fliers : walkers) : movers
+    const src = pool[(rand() * pool.length) | 0]
     visible.push({ name: src.name, type: src.type, idx: i, memory: [], state: 'move' })
   }
   return { census, visible }
