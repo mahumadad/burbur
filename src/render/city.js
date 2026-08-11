@@ -1005,10 +1005,10 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   function addSakuraBlossom(p) {
     const c = SAKURA_COL[(rnd() * SAKURA_COL.length) | 0]
-    const x = p.x + (rnd() - 0.5) * 1.4, y = p.y + (rnd() - 0.5) * 1.4, z = p.z + (rnd() - 0.5) * 1.4
+    const x = p.x + (rnd() - 0.5) * 1.8, y = p.y + (rnd() - 0.5) * 1.8, z = p.z + (rnd() - 0.5) * 1.8
     folPos.push(x, y, z); folCol.push(c[0], c[1], c[2])
     folFall.push(c[0], c[1], c[2]); folRot.push(0)
-    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(1)
+    folSize.push(0.8 + rnd() * 1.0); folPhase.push(rnd()); folKind.push(1)
     folBirth.push(0.02 + rnd() * 0.12)
     petalAnchors.push(x, y, z, c[0], c[1], c[2])
   }
@@ -1065,15 +1065,24 @@ export function createCityScene(container, cfg, agentNames = []) {
     const rEnd = tip ? 0.03 : radius * (0.52 + rnd() * 0.16)
     sakuraTube(spine, radius, rEnd, radius > 0.8 ? 9 : radius > 0.35 ? 7 : 5, seed)
     if (tip) {
-      // Sakura: pocas hojas verdes, canopy DENSO de flores rosadas.
-      const leafN = 2 + ((rnd() * 3) | 0)
+      // Sakura FRONDOSA: bastantes hojas verdes + canopy MUY DENSO de flores rosadas,
+      // repartidas por toda la espina de la ramita (no solo la punta) → volumen.
+      const leafN = 7 + ((rnd() * 8) | 0)   // 7..14
       for (let k = 0; k < leafN; k++) addSakuraLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
-      const nb = 8 + ((rnd() * 10) | 0)
+      const nb = 16 + ((rnd() * 14) | 0)    // 16..29
       for (let k = 0; k < nb; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
       return
     }
-    const kids = depth === 0 ? 2 + ((rnd() * 2) | 0)
-      : (rnd() < 0.7 ? 1 : 2) + (rnd() < 0.25 ? 1 : 0)
+    // Ramas gruesas también llevan follaje (relleno de copa interior), no solo las puntas.
+    if (depth >= 2) {
+      const midB = 3 + ((rnd() * 5) | 0)
+      for (let k = 0; k < midB; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
+      const midL = 2 + ((rnd() * 3) | 0)
+      for (let k = 0; k < midL; k++) addSakuraLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+    }
+    // Copa más ramificada → silueta más rica y frondosa.
+    const kids = depth === 0 ? 3 + ((rnd() * 2) | 0)
+      : (rnd() < 0.55 ? 2 : 3) + (rnd() < 0.35 ? 1 : 0)
     const up = new THREE.Vector3()
     for (let i = 0; i < kids; i++) {
       const v = d.clone()
@@ -1097,7 +1106,7 @@ export function createCityScene(container, cfg, agentNames = []) {
   // de la vegetación de la ciudad (`kn`).
   const sakuraTrees = []
   {
-    const want = 1 + ((rnd() * 3) | 0) // 1..3
+    const want = 2 + ((rnd() * 2) | 0) // 2..3 (más presencia)
     for (let guard = 0; sakuraTrees.length < want && guard < 200 && blocks.length; guard++) {
       const block = En()
       const tx = block.cx + (rnd() * 2 - 1) * Math.max(0, block.hx - 9)
@@ -1105,11 +1114,14 @@ export function createCityScene(container, cfg, agentNames = []) {
       if (nn(block, tx, tz) > -6) continue
       if (un(tx, tz, 9)) continue
       if (sakuraTrees.some((s) => Math.hypot(tx - s.x, tz - s.z) < 16)) continue
-      const treeLen = 9 + rnd() * 6
+      // Altura proporcionada: un sakura urbano, más bajo que los edificios.
+      // La frondosidad viene de la densidad de copa (hojas/flores), no del tamaño.
+      const treeLen = 6.5 + rnd() * 3   // ~6.5..9.5
       const gy = ln(tx, tz)
+      // maxDepth 4 → copa densa y ramificada, pero con ramas cortas → árbol compacto.
       sakuraBranch(new THREE.Vector3(tx, gy - 0.6, tz),
         new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
-        treeLen, 0.9 + rnd() * 0.55, 0, 3, rnd() * 97)
+        treeLen, 0.85 + rnd() * 0.45, 0, 4, rnd() * 97)
       // Copa como posado (mismo formato que las cimas de edificio, línea ~444:
       // normalizado por R_CITY, `h` = altura absoluta sobre `we`) + nieve.
       poiPerch.push({ x: tx / R_CITY, z: tz / R_CITY, h: (gy + treeLen * 0.55) - we })
@@ -1208,7 +1220,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
       folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
   }
-  const FALL_N = 220
+  const FALL_N = 480   // pool más grande → lluvia de pétalos más densa
   const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
   const fallCol = new Float32Array(FALL_N * 3)
   const fallVy = new Float32Array(FALL_N)
@@ -1937,15 +1949,18 @@ export function createCityScene(container, cfg, agentNames = []) {
       // sistema de follaje/pétalos que `scene.js` (ver bloque "SAKURA" arriba).
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const leafAmt = seasonT < 0.5 ? smoothstep(0, 0.2, seasonT) : 1 - smoothstep(0.62, 0.8, seasonT)
-      const flowerAmt = smoothstep(0.02, 0.1, seasonT) * (1 - smoothstep(0.2, 0.32, seasonT))
+      // Ventana de flor MÁS LARGA (primavera extendida) → la sakura se ve rosada
+      // buena parte de la estación, no un instante. Sigue siendo estacional.
+      const flowerAmt = smoothstep(0.0, 0.08, seasonT) * (1 - smoothstep(0.30, 0.44, seasonT))
       foliageUniforms.uSeason.value = seasonT
       foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
-      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
+      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.55)
       const autumn = smoothstep(0.5, 0.7, seasonT) * (1 - smoothstep(0.8, 0.92, seasonT))
       foliageUniforms.uAutumn.value = autumn
       const gust = eco.rain + (eco.wind || 0) * 0.7
-      const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
-      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
+      const shedRate = leafAmt > 0.05 ? (autumn * 44 + gust * 60 * leafAmt) : 0
+      // Lluvia de pétalos más densa: base más alta + una siembra constante durante la flor.
+      const petalRate = foliageUniforms.uFlower.value * (34 + eco.rain * 55 + (eco.wind || 0) * 46)
       updateFallingLeaves(step, shedRate, autumn, petalRate)
     }
 
