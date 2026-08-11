@@ -163,9 +163,76 @@ export function createFungusScene(container, cfg, agentNames = []) {
   /** Altura de apoyo en (x,z): sobre el tronco sigue su domo; fuera, el suelo.
    * Pasa por (u,v) del eje CURVO y usa `surfaceYUV` — la MISMA superficie que
    * dibuja la corteza. Si no, la red se apoyaría en un tronco que ya no existe. */
-  function surfaceY(x, z) {
+  function surfaceY(x, z, side = 1) {
     const [u, v] = worldToUV(x, z)
-    return surfaceYUV(u, v)
+    return surfaceYUV(u, v, side)
+  }
+  /** Altura por la que CAMINA la red sobre el tronco — no es la superficie
+   * geométrica, es la superficie DESPLEGADA: la que recorre una hifa que baja
+   * pegada a la corteza desde el lomo hasta la tierra.
+   *
+   * La diferencia importa. El tronco es un cilindro hundido: en planta, su
+   * borde es el ECUADOR, y ahí la superficie real está a ~15 unidades de altura
+   * mientras que un milímetro más afuera ya es suelo. Con la superficie cruda
+   * ese acantilado hace que la hifa que cruza el canto se dibuje como una recta
+   * cayendo por el aire — el micelio "se caía del árbol". Desplegando la sección
+   * (el radio en planta se reparte sobre el ARCO del tubo, del lomo al punto
+   * donde toca tierra) la altura baja de forma continua hasta 0 justo en el
+   * borde, y el mismo trazo se lee bordeando el flanco. */
+  function drapeYUV(u, v, side) {
+    if (u > halfLen) return 0
+    const uc = Math.max(-halfLen, u)
+    const rad = Math.hypot(u - uc, v)
+    const lr = logRAt(uc)
+    if (rad >= lr) return 0                       // tierra
+    const A = lr * (1 - sink) * R * LOG_HEIGHT_SCALE + centerY(u)  // eje sobre el suelo
+    const RR = lr * R * LOG_HEIGHT_SCALE
+    const t = rad / lr
+    // Ángulo, medido desde el lomo (o desde la panza), al que el tubo toca el
+    // suelo. Si el tronco está entero sobre la tierra, el arco da la vuelta.
+    const acosClamped = (k) => Math.acos(k < -1 ? -1 : k > 1 ? 1 : k)
+    if (side < 0) {
+      // Panza: arranca en el punto más bajo del tubo y sube hasta tocar tierra.
+      return Math.max(0, A - RR * Math.cos(t * acosClamped(A / RR)))
+    }
+    return Math.max(0, A + RR * Math.cos(t * acosClamped(-A / RR)))
+  }
+
+  // ─── MAPA DE ALTURAS (LUT). Evaluar el drape muchas veces por arista exige
+  // `worldToUV`, que es una búsqueda numérica (≈57 distancias por llamada) y no
+  // se puede pagar por muestra. Se precalcula una grilla —una capa para el LOMO
+  // y otra para la PANZA— y se muestrea bilineal.
+  const HN = 192, HSPAN = 1.08
+  const hTop = new Float32Array(HN * HN)
+  const hBot = new Float32Array(HN * HN)
+  for (let j = 0; j < HN; j++) {
+    const z = -HSPAN + (2 * HSPAN) * (j / (HN - 1))
+    for (let i = 0; i < HN; i++) {
+      const x = -HSPAN + (2 * HSPAN) * (i / (HN - 1))
+      const [u, v] = worldToUV(x, z)
+      hTop[j * HN + i] = drapeYUV(u, v, 1)
+      hBot[j * HN + i] = drapeYUV(u, v, -1)
+    }
+  }
+  function sampleH(x, z, side) {
+    const g = side < 0 ? hBot : hTop
+    const fx = ((x + HSPAN) / (2 * HSPAN)) * (HN - 1)
+    const fz = ((z + HSPAN) / (2 * HSPAN)) * (HN - 1)
+    if (!(fx >= 0 && fz >= 0 && fx <= HN - 1 && fz <= HN - 1)) return 0
+    const i0 = Math.floor(fx), j0 = Math.floor(fz)
+    const i1 = Math.min(HN - 1, i0 + 1), j1 = Math.min(HN - 1, j0 + 1)
+    const tx = fx - i0, tz = fz - j0
+    const a = g[j0 * HN + i0], b = g[j0 * HN + i1]
+    const c = g[j1 * HN + i0], d = g[j1 * HN + i1]
+    return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz
+  }
+  /** Altura a la que se dibuja un nodo o punta de la red: pegada a la cara del
+   * tronco que le toca (lomo o panza) y nunca bajo tierra. Donde la panza está
+   * enterrada la altura de apoyo es 0 y la hifa queda a ras del suelo — que es
+   * exactamente donde está: comiéndose el tronco por abajo, contra la tierra. */
+  function netY(x, z, side) {
+    const s = sampleH(x, z, side || 1)
+    return s <= 0.01 ? 0.9 : Math.max(0.4, s + 1.3 * (side || 1))
   }
   function edgeFade(x, z) {
     const rr = Math.hypot(x, z)
@@ -200,25 +267,34 @@ export function createFungusScene(container, cfg, agentNames = []) {
     // rugoso leve de corteza, no montañas.
     return (noise2(u * 2.3 + 5, v * 4.1) - 0.5) * logR * 0.09 * R * LOG_HEIGHT_SCALE
   }
-  // Altura de la SUPERFICIE SUPERIOR del tronco en (u, v). El tronco es un
-  // cilindro COMPLETO apoyado en el suelo: su eje está a la altura del radio
-  // (`axisY`), así el fondo toca y=0 y arriba llega a 2·radio. Esto es la mitad
-  // de arriba (donde va el musgo y la red); el cuerpo redondo lo dibuja el tubo.
-  function surfaceYUV(u, v) {
+  // Altura de apoyo sobre el tronco en (u, v) para el lado `side`: +1 = LOMO
+  // (mitad de arriba), -1 = PANZA (mitad de abajo). El tronco es un cilindro
+  // completo hundido en el suelo, así que la panza solo asoma donde el arco lo
+  // despega de la tierra; donde está enterrada, lo que hay es suelo.
+  //
+  // FUERA de la huella del tronco devuelve SUELO. Antes devolvía la altura del
+  // EJE para cualquier punto fuera del radio, así que todo el terreno alrededor
+  // quedaba levantado ~15 unidades siguiendo el arco: la red entera flotaba en
+  // el aire con la forma del eje del tronco.
+  function surfaceYUV(u, v, side = 1) {
     if (u > halfLen) return 0            // más allá de la cara CORTADA es suelo
     const uc = Math.max(-halfLen, u)
     const overEnd = u - uc               // solo la punta quebrada se redondea
     const rad = Math.hypot(overEnd, v)
     const lr = logRAt(uc)
-    const rr = Math.min(rad, lr)
+    if (rad >= lr) return 0              // fuera de la huella: suelo
     const axisY = lr * (1 - sink) * R * LOG_HEIGHT_SCALE   // hundido en el suelo
-    const half = Math.sqrt(Math.max(0, lr * lr - rr * rr)) * R * LOG_HEIGHT_SCALE
-    // Nunca bajo tierra: sobre la punta hundida lo que hay es suelo, y lo que se
-    // apoye ahí (red, musgo, bichos) tiene que quedar a ras y no flotando.
-    return Math.max(0, axisY + centerY(u) + half + (rad < lr ? bump(u, v) : 0))
+    const half = Math.sqrt(lr * lr - rad * rad) * R * LOG_HEIGHT_SCALE
+    return Math.max(0, axisY + centerY(u) + side * (half + bump(u, v)))
   }
   function uvToWorld(u, v) {
     return [centerX(u) + perpX(u) * v, centerZ(u) + perpZ(u) * v]
+  }
+  /** ¿(x,z) cae sobre el tronco? Es lo que le dice a la red dónde termina la
+   * madera y empieza la tierra. */
+  function onLogXZ(x, z) {
+    const [u, v] = worldToUV(x, z)
+    return insideLog(u, v)
   }
 
   // ─── CORTEZA DE PLACAS. La corteza de un tronco viejo no son surcos
@@ -405,7 +481,9 @@ export function createFungusScene(container, cfg, agentNames = []) {
   }
 
   // ─── PUNTA CORTADA (+u): el disco de anillos, orlado por la corteza dentada
-  // que sobresale del corte. ─────────────────────────────────────────────────
+  // que sobresale del corte. `cutFace` queda a mano porque la cara también se
+  // coloniza: es madera fresca expuesta, lo primero que se come el hongo. ────
+  const cutFace = {}
   {
     const uEnd = halfLen
     const [cx, cy, cz] = logAxis(uEnd)
@@ -416,6 +494,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const nn = Math.hypot(nx, ny, nz) || 1
     nx /= nn; ny /= nn; nz /= nn
     const rimR = (th) => logTubeR(uEnd) * barkAt(uEnd, th, BARK_AROUND, BARK_ALONG).k
+    Object.assign(cutFace, { c: [cx, cy, cz], p, q, n: [nx, ny, nz], rimR })
     pushRingDisc({
       cx: cx + nx * 0.3, cy: cy + ny * 0.3, cz: cz + nz * 0.3,
       dirP: p, dirQ: q, nrm: [nx, ny, nz],
@@ -685,11 +764,16 @@ export function createFungusScene(container, cfg, agentNames = []) {
   draw.finalizePoints(scene)
 
   // ─── LA RED (dinámica): sim/mycelium.js, el corazón del mundo (spec §3) ───
-  // Dos colonias, arrancando en puntos separados sobre el tronco — Pleurotus
-  // (colonia 0) y Trametes (colonia 1). Armillaria queda para una ola futura.
-  const seedT = halfLen * 0.5, seedV = logR * 0.5
-  const seed0 = { x: logAx * -seedT + logPx * seedV, z: logAz * -seedT + logPz * seedV, colony: 0 }
-  const seed1 = { x: logAx * seedT + logPx * -seedV, z: logAz * seedT + logPz * -seedV, colony: 1 }
+  // Las dos colonias —Pleurotus (0) y Trametes (1)— prenden JUNTAS, en un mismo
+  // parche chico sobre el lomo, y desde ahí se comen el tronco. Antes arrancaban
+  // en puntas opuestas y el mundo abría con el tronco ya repartido; así se ve el
+  // avance y el encuentro. Las semillas van por `uvToWorld` (el eje CURVO): con
+  // el eje recto caían fuera del tronco en las puntas.
+  const patchU = -0.14
+  const [s0x, s0z] = uvToWorld(patchU - 0.05, logR * 0.30)
+  const [s1x, s1z] = uvToWorld(patchU + 0.05, -logR * 0.30)
+  const seed0 = { x: s0x, z: s0z, colony: 0 }
+  const seed1 = { x: s1x, z: s1z, colony: 1 }
   const net = createNetwork(cc.mycelium, [seed0, seed1], rnd)
   // El centro de cada colonia (su punto de inoculación): la dirección RADIAL
   // hacia afuera desde ahí es la que da el rosetón plumoso de una placa real.
@@ -698,7 +782,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // solas que tardarían un minuto en leerse. Se corre la simulación real con un
   // field de humedad plena antes del primer frame (~la mitad del presupuesto).
   {
-    const warmField = { resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon), moisture: 0.9 }
+    const warmField = {
+      resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
+      moisture: 0.9, onLog: onLogXZ,
+    }
     // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
     // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
     // aparecía todo hecho y no se veía crecer nada.)
@@ -722,8 +809,9 @@ export function createFungusScene(container, cfg, agentNames = []) {
     vertexColors: true, transparent: true, opacity: 0.85,
     blending: THREE.AdditiveBlending, depthWrite: false,
   })
-  // Cada arista se dibuja curva (3 segmentos) y, si es cordón, ×3 hifas.
-  const netBuf = createLineBuffer(cc.mycelium.maxEdges * 9, netMat)
+  // Cada arista se dibuja curva (6 segmentos, para poder bordear el flanco del
+  // tronco sin cortar por el aire) y, si es cordón, ×3 hifas paralelas.
+  const netBuf = createLineBuffer(cc.mycelium.maxEdges * 10, netMat)
   scene.add(netBuf.mesh)
   // El frente plumoso también aditivo: el borde algodonoso se ve porque muchas
   // hifas finas se suman, no porque cada una sea brillante.
@@ -745,7 +833,6 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const a = net.nodes[e.a], b = net.nodes[e.b]
       const base = C_COLONY[e.colony] || C_COLONY[0]
       const ax = a.x * R, az = a.z * R, bx = b.x * R, bz = b.z * R
-      const ya = surfaceY(a.x, a.z) + 1.3, yb = surfaceY(b.x, b.z) + 1.3
       const fa = edgeFade(a.x, a.z), fb = edgeFade(b.x, b.z)
       // Las hifas CURVAN: una cuerda recta nodo-a-nodo delata la geometría del
       // grafo. Cada arista se dibuja como una polilínea con una comba lateral
@@ -765,15 +852,22 @@ export function createFungusScene(container, cfg, agentNames = []) {
       }
       const wobble = Math.sin((e.a * 12.9898 + e.b * 78.233) % 6.2832)
       const arc = wobble * d * 0.18
-      const SEG = 3
+      // La hifa NO CUELGA en el aire: la altura de cada muestra sale del mapa de
+      // alturas, así el trazo BORDEA la geometría — baja por el flanco del
+      // tronco hasta la tierra y sigue por el suelo. Antes se interpolaba entre
+      // las alturas de los dos nodos y una arista que cruzaba el canto se
+      // dibujaba como una recta por el aire, como si el micelio se cayera.
+      // Cuando la arista cambia de lado (una punta que envolvió el canto), el
+      // lado se da vuelta a mitad de camino: en el canto las dos caras valen lo
+      // mismo, así que el trazo pasa por el ecuador sin saltar.
+      const sideA = a.side || 1, sideB = b.side || 1
+      const SEG = 6
       const curvePt = (s, lateral) => {
         const t = s / SEG
         const bend = Math.sin(t * Math.PI) * arc
-        return [
-          ax + dx * t + px * (bend + lateral),
-          ya + (yb - ya) * t,
-          az + dz * t + pz * (bend + lateral),
-        ]
+        const wx = ax + dx * t + px * (bend + lateral)
+        const wz = az + dz * t + pz * (bend + lateral)
+        return [wx, netY(wx / R, wz / R, t < 0.5 ? sideA : sideB), wz]
       }
       if (e.width >= CORD_W) {
         // CORDÓN (rizomorfo): haz de 3 hifas paralelas curvas, brillante — las
@@ -819,14 +913,17 @@ export function createFungusScene(container, cfg, agentNames = []) {
         Math.sin(radAng) * 0.7 + Math.sin(t.ang) * 0.3,
         Math.cos(radAng) * 0.7 + Math.cos(t.ang) * 0.3)
       const fade = edgeFade(t.x, t.z)
-      const surf = surfaceY(t.x, t.z)
-      const x0 = t.x * R, z0 = t.z * R, y0 = surf + 1.5
+      const surf = surfaceY(t.x, t.z, t.side)
+      const y0 = netY(t.x, t.z, t.side) + 0.2
+      const x0 = t.x * R, z0 = t.z * R
       // PENETRACIÓN: si la punta está sobre el tronco, una hifa se hunde en la
       // madera — el hongo empieza a COMER el tronco por dentro, no solo por
-      // encima. Se apaga hacia abajo (queda dentro de la corteza).
+      // encima. Se apaga hacia adentro (queda dentro de la corteza). Desde la
+      // panza se hunde hacia ARRIBA: la madera está del otro lado.
       const [uu, vv] = worldToUV(t.x, t.z)
-      if (Math.abs(vv) < logRAt(Math.max(-halfLen, Math.min(halfLen, uu))) * 0.9) {
-        frontBuf.push(x0, surf, z0, x0 + (rnd() - 0.5) * 2, Math.max(0, surf - 8 - rnd() * 10), z0 + (rnd() - 0.5) * 2,
+      if (surf > 0 && Math.abs(vv) < logRAt(Math.max(-halfLen, Math.min(halfLen, uu))) * 0.9) {
+        const into = (8 + rnd() * 10) * (t.side || 1)
+        frontBuf.push(x0, surf, z0, x0 + (rnd() - 0.5) * 2, Math.max(0, surf - into), z0 + (rnd() - 0.5) * 2,
           tint(base, fade * 0.5), tint(base, fade * 0.06))
       }
       for (let k = 0; k < FAN; k++) {
@@ -848,6 +945,80 @@ export function createFungusScene(container, cfg, agentNames = []) {
     frontBuf.commit()
   }
 
+  // ─── LA CARA CORTADA SE COME. El disco de anillos es madera fresca expuesta:
+  // es lo primero que coloniza el hongo, y lo hace RADIALMENTE desde el centro
+  // hacia la corteza, siguiendo la veta. En planta (x,z) la cara es una línea
+  // —no tiene área— así que la red 2D no puede vivir ahí: se dibuja como capa
+  // propia, y lo que la dispara es que la red haya LLEGADO de verdad al corte.
+  const FACE_RAYS = 130
+  const faceBuf = createLineBuffer(FACE_RAYS * 9, frontMat)
+  scene.add(faceBuf.mesh)
+  // Centro del corte en coordenadas normalizadas, para medir qué tan cerca está
+  // la red sin tener que invertir el eje curvo por nodo.
+  const [faceNx, faceNz] = uvToWorld(halfLen, 0)
+  let faceProgress = 0
+  let faceColony = 0
+
+  function updateFace(dt) {
+    // ¿Cuánta red llegó al corte? Se mira en planta: los nodos alrededor del eje
+    // a la altura de la cara. Barato y suficiente para disparar el avance.
+    let near = 0, byColony = [0, 0]
+    for (const n of net.nodes) {
+      if (!n.alive) continue
+      if (Math.hypot(n.x - faceNx, n.z - faceNz) > 0.12) continue
+      near++
+      byColony[n.colony] = (byColony[n.colony] || 0) + 1
+    }
+    if (near > 0) faceColony = byColony[1] > byColony[0] ? 1 : 0
+    const target = clamp01(near / 45)
+    // Se come de a poco y no retrocede de golpe: la madera comida no vuelve.
+    faceProgress += (target - faceProgress) * Math.min(1, dt * (target > faceProgress ? 0.25 : 0.05))
+  }
+
+  function drawFace() {
+    faceBuf.begin()
+    if (!cutFace.c || faceProgress < 0.02) { faceBuf.commit(); return }
+    const [cx, cy, cz] = cutFace.c
+    const p = cutFace.p, q = cutFace.q, n = cutFace.n
+    const base = C_COLONY[faceColony] || C_COLONY[0]
+    // Un pelo por delante de la cara, para no pelearse en Z con el disco.
+    const ox = cx + n[0] * 0.8, oy = cy + n[1] * 0.8, oz = cz + n[2] * 0.8
+    const at = (th, r) => [ox + p[0] * Math.sin(th) * r + q[0] * Math.cos(th) * r,
+      oy + p[1] * Math.sin(th) * r + q[1] * Math.cos(th) * r,
+      oz + p[2] * Math.sin(th) * r + q[2] * Math.cos(th) * r]
+    for (let i = 0; i < FACE_RAYS; i++) {
+      // Todo derivado del índice, nunca de rnd(): si no, el radio temblaría
+      // entero en cada frame.
+      const th0 = (i / FACE_RAYS) * Math.PI * 2 + noise2(i * 0.37, 3.1) * 0.55
+      const rim = cutFace.rimR(th0)
+      // Cada rayo avanza a su propio ritmo: el frente sobre la cara es irregular.
+      const reach = rim * faceProgress * (0.5 + 0.8 * noise2(i * 0.91, 7.3))
+      // NINGÚN rayo arranca en el centro exacto: si convergen todos, el disco se
+      // lee como un sol dibujado y no como un hongo comiéndose la madera.
+      const r0 = rim * (0.05 + 0.22 * noise2(i * 1.7, 19.3))
+      const SEGF = 6
+      // Serpentea sobre la veta, con dos escalas de ondulación.
+      const bend = (t) => (noise2(i * 0.53, t * 3 + 11) - 0.5) * 1.2 * t
+        + (noise2(i * 2.1, t * 9 + 4) - 0.5) * 0.4
+      let prev = null
+      for (let s = 0; s <= SEGF; s++) {
+        const t = s / SEGF
+        const pt = at(th0 + bend(t), r0 + (reach - r0) * t)
+        if (prev) {
+          const f0 = 0.5 * (1 - 0.5 * (t - 1 / SEGF)), f1 = 0.5 * (1 - 0.5 * t)
+          faceBuf.push(prev[0], prev[1], prev[2], pt[0], pt[1], pt[2], tint(base, f0), tint(base, f1))
+        }
+        prev = pt
+      }
+      // Bifurcación dicotómica en la punta: el borde algodonoso del frente.
+      for (const sgn of [-1, 1]) {
+        const tip = at(th0 + bend(1) + sgn * (0.18 + 0.2 * noise2(i * 3.3, sgn)), reach * 1.2)
+        faceBuf.push(prev[0], prev[1], prev[2], tip[0], tip[1], tip[2], tint(base, 0.22), tint(base, 0))
+      }
+    }
+    faceBuf.commit()
+  }
+
   function drawTips() {
     const tp = tipPositions(net)
     for (let i = 0; i < cc.mycelium.maxTips; i++) {
@@ -862,7 +1033,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
         ]
         const fade = edgeFade(t.x, t.z)
         tipsCloud.pos[i * 3] = t.x * R
-        tipsCloud.pos[i * 3 + 1] = surfaceY(t.x, t.z) + 0.6
+        tipsCloud.pos[i * 3 + 1] = netY(t.x, t.z, t.side) - 0.7 * (t.side || 1)
         tipsCloud.pos[i * 3 + 2] = t.z * R
         tipsCloud.col[i * 3] = glow[0] * fade
         tipsCloud.col[i * 3 + 1] = glow[1] * fade
@@ -1008,7 +1179,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
 
     const field = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture,
+      moisture, onLog: onLogXZ,
     }
     const events = []
     const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
@@ -1033,6 +1204,8 @@ export function createFungusScene(container, cfg, agentNames = []) {
     }
     drawNetwork()
     drawFront()
+    updateFace(step)
+    drawFace()
     drawTips()
 
     // ─── Fauna del suelo: deambula libre, contenida en el disco ───────────
@@ -1041,12 +1214,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const r = roamers[i]
       const x = r.x * R, z = r.z * R
       // La fauna del SUELO camina en el SUELO (nivel de la hojarasca), no sobre
-      // el tronco curvo — antes usaba surfaceY (la altura del tronco arqueado) y
-      // los bichos caminaban EN EL AIRE. Solo trepan si están de verdad ENCIMA
-      // del tronco; si no, quedan a ras del suelo (algunos bajo el arco).
-      const [uu, vv] = worldToUV(r.x, r.z)
-      const onLog = Math.abs(vv) < logRAt(Math.max(-halfLen, Math.min(halfLen, uu)))
-      const y = (onLog ? surfaceYUV(uu, vv) : 0) + 1.3
+      // el tronco curvo — antes usaba la altura del eje aun lejos del tronco y
+      // los bichos caminaban EN EL AIRE. `surfaceY` ya devuelve suelo fuera de
+      // la huella, así que solo trepan si están de verdad encima del tronco.
+      const y = surfaceY(r.x, r.z) + 1.3
       faunaAgents[i].group.position.set(x, y, z)
       const sp = Math.hypot(r.vx, r.vz)
       if (sp > 1e-4) faunaAgents[i].group.rotation.y = Math.atan2(r.vx * R, r.vz * R)

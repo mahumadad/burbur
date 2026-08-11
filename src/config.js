@@ -237,12 +237,28 @@ export const CONFIG = {
     // (crecimiento radial, no garabato). `tipSpeed` bajo + poco pre-crecido =
     // la colonia se toma el tronco DE A POCO, que es lo que se quiere ver.
     // Denso: muchas puntas y ramificación alta, pasos cortos.
+    // Denso de verdad: el mat algodonoso de la referencia son MILES de hifas
+    // finas, no un puñado de trazos. Los topes altos los banca la grilla
+    // espacial de sim/mycelium.js (sin ella la vecindad era O(puntas × nodos)).
     mycelium: {
-      maxNodes: 2600, maxEdges: 2800, maxTips: 260,
+      maxNodes: 12000, maxEdges: 15000, maxTips: 700,
       stepLen: 0.020, tipSpeed: 0.038, turnRate: 1.6, noise: 0.55,
-      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.6,
-      fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.035, flowDecay: 0.35,
-      pruneBelow: 0.1, pruneRate: 0.5, bound: 0.62,
+      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.8,
+      fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.10, flowDecay: 0.35,
+      // `bound` acotado: con el tope lejos las puntas se amontonaban contra él y
+      // el abanico se leía como un ANILLO despegado del tronco en vez de una
+      // mancha que se abre desde la madera.
+      pruneBelow: 0.1, pruneRate: 1.0, bound: 0.66,
+      // Brote lateral: la red saca frentes nuevos del costado de hifas ya
+      // hechas. Sin esto, en cuanto todas las puntas se fusionan la colonia se
+      // queda sin frentes y el mundo se congela para siempre.
+      lateralRate: 40,
+      // Al llegar al canto del tronco, esta fracción de las puntas dobla y sigue
+      // comiendo por la PANZA en vez de salir a la tierra.
+      wrapChance: 0.45,
+      // En TIERRA el micelio crece distinto: más rápido, mucho más ramificado y
+      // más radial — el abanico algodonoso que se abre alrededor del tronco.
+      soil: { speed: 1.4, branch: 1.3, radial: 1.1, noise: 1.3 },
     },
     // Cuánto esfuerzo de forrajeo aplica cada punta por segundo. Es lo que
     // agota el sustrato y, por lo tanto, lo que hace que la red se remodele.
