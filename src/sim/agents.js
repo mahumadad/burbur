@@ -116,6 +116,38 @@ export const POND_CENSUS = [
   { name: 'el observador de aves', type: 'human' },
 ]
 
+/** Censo de la ciudad: fauna urbana chilena + actores humanos, en español
+ * (coherente con el bosque y el estanque). Móviles sin artículo; estáticos
+ * con artículo. */
+export const CITY_CENSUS = [
+  // flying_animal — aves urbanas
+  { name: 'paloma', type: 'flying_animal' },
+  { name: 'tórtola', type: 'flying_animal' },
+  { name: 'zorzal', type: 'flying_animal', dawn: true },
+  { name: 'chincol', type: 'flying_animal' },
+  { name: 'gorrión', type: 'flying_animal' },
+  { name: 'tiuque', type: 'flying_animal' },
+  { name: 'jote', type: 'flying_animal' },
+  { name: 'golondrina', type: 'flying_animal' },
+  // walking_animal — de la calle y los sitios eriazos
+  { name: 'quiltro', type: 'walking_animal' },
+  { name: 'gato callejero', type: 'walking_animal', night: true },
+  { name: 'laucha', type: 'walking_animal', night: true },
+  { name: 'rata', type: 'walking_animal', night: true },
+  { name: 'zarigüeya', type: 'walking_animal', night: true },
+  // static_object — el paisaje: no deambula pero suena
+  { name: 'el semáforo', type: 'static_object' },
+  { name: 'el paradero', type: 'static_object' },
+  { name: 'la fuente', type: 'static_object' },
+  { name: 'el letrero de neón', type: 'static_object' },
+  // human
+  { name: 'transeúnte', type: 'human' },
+  { name: 'vendedor ambulante', type: 'human' },
+  { name: 'ciclista', type: 'human' },
+  { name: 'guardia', type: 'human' },
+  { name: 'músico callejero', type: 'human' },
+]
+
 /**
  * Construye el censo del mundo y asigna identidad a los agentes VISIBLES.
  * Devuelve { census, visible } donde `visible[i]` = { name, type, idx, memory, state }.
