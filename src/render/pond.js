@@ -10,6 +10,8 @@ import { buildFallenLog } from './engine/deadwood.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
+import { buildKoi, createKoiSchool, swimKoi } from './pond/koi.js'
+import { POND_CENSUS, POND_KOI_NAMES } from '../sim/agents.js'
 import { noise2, fbm } from './noise.js'
 
 // Mundo AGUA (pond). Calca el mundo de agua de murmur.living: ISLAS de arena
@@ -447,23 +449,42 @@ export function createPond(container, cfg, agentNames = []) {
   const n = cfg.fireflies.count
   const agents = []
   const trailColors = []
+  // Tipo por nombre del censo → decide si el agente es AVE (planea sobre el agua,
+  // se posa, caza) o no. Sin esto los agentes con nombre de pájaro nadaban.
+  const nameType = new Map(POND_CENSUS.map((a) => [a.name, a.type]))
   for (let i = 0; i < n; i++) {
-    const kind = pool[q() * pool.length | 0]
-    const { group, params } = buildSpecies(kind, kit)
-    const baseScale = 0.9 + q() * 0.5
+    // Si al slot le tocó un nombre de KOI (fauna acuática del censo), se dibuja
+    // como koi de verdad —cuerpo con parches + coleteo— en vez de criatura glow.
+    // Los koi son móviles no-voladores → el censo los pone en slots no-aéreos,
+    // así que nunca coinciden con garza (hunter) ni el que cruza el cielo (skyer).
+    const isKoi = POND_KOI_NAMES.has(agentNames[i])
+    let group, params, cage, kind, tail = null, bodyPivot = null
+    if (isKoi) {
+      ({ group, bodyPivot, tail } = buildKoi(q))
+      params = { dive: 0.5, hover: 0.35, rollMul: 0, spinY: 0, effR: 2 }
+      cage = null; kind = 'koi'
+    } else {
+      kind = pool[q() * pool.length | 0]
+      ;({ group, params } = buildSpecies(kind, kit))
+      cage = params.rollMul > 0 ? group.children[0] : null // rodantes: jaula en children[0]
+    }
+    const baseScale = isKoi ? 1.6 + q() * 0.8 : 0.9 + q() * 0.5
     group.scale.setScalar(baseScale)
     scene.add(group)
-    // Las especies "rodantes" envuelven su jaula en group.children[0].
-    const cage = params.rollMul > 0 ? group.children[0] : null
+    // Ave = nombre volador del censo. Planea SOBRE el agua y se posa; no nada.
+    const isBird = nameType.get(agentNames[i]) === 'flying_animal'
     agents.push({
-      group, cage, kind, baseScale, idx: i, homeY: 0.4 + q() * 1.2,
+      group, cage, kind, baseScale, idx: i, homeY: 0.4 + q() * 1.2, isKoi, isBird, tail, bodyPivot,
+      spd: 0.8 + q() * 0.5, phase: q() * 6.2832, wakeT: 0, // koi: coleteo + estela
       dive: params.dive, hover: params.hover, rollMul: params.rollMul,
       spinY: params.spinY, effR: params.effR,
-      // Las 2 primeras son garzas: pican al agua a cazar peces.
-      hunter: i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
-      skyer: i === 4, crossCool: 8 + q() * 16, crossing: 0, crossDur: 1, crossTx: 0, crossTz: 0, crossHi: 0,
+      // Las 2 primeras son garzas: pican al agua a cazar peces (los koi nunca).
+      hunter: !isKoi && i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
+      skyer: !isKoi && i === 4, crossCool: 8 + q() * 16, crossing: 0, crossDur: 1, crossTx: 0, crossTz: 0, crossHi: 0,
+      // Aves NO cazadoras: planean y de a ratos se posan en una piedra.
+      birdT: 3 + q() * 6, perching: false, perchPos: null,
     })
-    trailColors.push(KIND_COLOR[kind])
+    trailColors.push(isKoi ? 0xff5a2a : KIND_COLOR[kind])
   }
   // ─── RANAS: bichitos que se suben a las piedras y de a ratos saltan al agua.
   // Cada una elige un punto ALTO de una isla, se posa un rato, y salta a otra.
@@ -748,6 +769,14 @@ export function createPond(container, cfg, agentNames = []) {
   // Cardúmenes de peces bajo el agua (boids). state.fish expone posiciones.
   const fish = createFishRender(scene, cfg, q)
 
+  // CARDUMEN DE KOI anónimo cerca de la superficie (además de los koi con nombre):
+  // boids propio, bordea las islas. Los koi con nombre salen del censo (arriba).
+  const koiObs = lobes.map((L) => ({ x: L.x, z: L.z, r: Math.max(L.rx, L.rz) * 1.1 + 2 }))
+  const koiSchool = createKoiSchool(scene, 24, q, {
+    radius: mt * 0.82, surfaceY: ht + 0.1, floorY: ht - 6.5, obstacles: koiObs,
+    wake: (x, z, s) => spawnRipple(x, z, s), // estela de agua al nadar en superficie
+  })
+
   // ─── BICHOS (mosquitos) que vuelan sobre el agua ──────────────────────────
   const BUGN = 90
   const bugR = mt * 0.85
@@ -900,6 +929,27 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
+  // Aves NO cazadoras: planean sobre el agua (altura la pone mapPositions) y de a
+  // ratos bajan a posarse en una piedra, como las garzas pero sin pescar.
+  function updateBirds(step) {
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      if (!a.isBird || a.hunter || a.skyer) continue
+      a.birdT -= step
+      if (a.perching) {
+        worldPos[i * 3] += (a.perchPos.x - worldPos[i * 3]) * 0.1
+        worldPos[i * 3 + 2] += (a.perchPos.z - worldPos[i * 3 + 2]) * 0.1
+        worldPos[i * 3 + 1] = a.perchPos.y + Math.sin(clock * 1.3 + a.idx) * 0.08
+        roamers[i].x = worldPos[i * 3] / LR; roamers[i].z = worldPos[i * 3 + 2] / LR
+        roamers[i].vx *= 0.8; roamers[i].vz *= 0.8
+        if (a.birdT <= 0) { a.perching = false; a.birdT = 6 + q() * 8 }
+      } else if (a.birdT <= 0) {
+        if (q() < 0.4) { a.perching = true; a.perchPos = heronPerch(); a.birdT = 5 + q() * 7 }
+        else a.birdT = 4 + q() * 6
+      }
+    }
+  }
+
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
   const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
@@ -925,9 +975,18 @@ export function createPond(container, cfg, agentNames = []) {
     }
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
-      // Física de agua (spec §4.3): unas bucean (dive>0), otras planean (dive<0).
-      let j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
-      if (j < bedY + 0.9) j = bedY + 0.9
+      let j
+      if (a.isBird) {
+        // Aves: planean SOBRE el agua (huntHerons/crossSky bajan a cazar/cruzar).
+        j = ht + 3 + a.homeY * 0.3 + Math.sin(t * 1.1 + a.idx * 2.1) * (0.5 + a.hover * 0.1)
+      } else if (a.isKoi) {
+        // Koi: justo en la superficie, para que se vean (no bajo el agua brillante).
+        j = ht + 0.1 + Math.sin(t * 1.4 + a.idx * 2.1) * 0.12
+      } else {
+        // Fauna acuática/ribera glow: bucea/planea bajo el agua (spec §4.3).
+        j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
+        if (j < bedY + 0.9) j = bedY + 0.9
+      }
       worldPos[i * 3] = r.x * LR; worldPos[i * 3 + 1] = j; worldPos[i * 3 + 2] = r.z * LR
     }
   }
@@ -1014,15 +1073,26 @@ export function createPond(container, cfg, agentNames = []) {
     fish.update(step, clock)      // mueve los peces primero
     huntHerons(step, predations, eco)  // garzas pican (puede sobreescribir su y)
     crossSky(step)                // un ave cruza el cielo alto de vez en cuando
+    updateBirds(step)             // aves no cazadoras planean y se posan (no nadan)
     updateBugs(step, clock)
     updateFrogs(step)
     updateLogs(step, clock)
     updateLilies()
+    koiSchool.update(step, clock)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
       const y = worldPos[i * 3 + 1]
       a.group.position.set(worldPos[i * 3], y, worldPos[i * 3 + 2])
+      // KOI: mira hacia donde nada, coletea, y deja estela al nadar en superficie.
+      if (a.isKoi) {
+        a.group.rotation.set(0, Math.atan2(-r.vz, r.vx), 0)
+        swimKoi(a, clock)
+        a.group.scale.setScalar(a.baseScale * (1 + (swarm ? swarm.flash[i] : 0) * 0.35))
+        a.wakeT -= step
+        if (a.wakeT <= 0) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 0.4); a.wakeT = 0.22 + q() * 0.2 }
+        continue
+      }
       if (a.spinY) a.group.rotation.y += a.spinY * step
       // Rodado de jaula según la velocidad (lamp/ice/strider).
       if (a.rollMul > 0 && a.cage) {

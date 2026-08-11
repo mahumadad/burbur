@@ -146,6 +146,11 @@ export const POND_CENSUS = [
   { name: 'huillín', type: 'walking_animal', night: true },
   { name: 'rana chilena', type: 'walking_animal' },
   { name: 'culebra de cola larga', type: 'walking_animal' },
+  // aquatic_fauna — koi bajo la superficie (createCensus los trata como móviles
+  // no-voladores → caen en los slots no-aéreos, y el pond los dibuja como koi).
+  { name: 'koi kohaku', type: 'aquatic_fauna' },
+  { name: 'koi ogon', type: 'aquatic_fauna' },
+  { name: 'carpa koi', type: 'aquatic_fauna' },
   // static_object — el paisaje: no deambula pero suena
   { name: 'el juncal', type: 'static_object' },
   { name: 'el agua quieta', type: 'static_object' },
@@ -156,6 +161,11 @@ export const POND_CENSUS = [
   { name: 'la kayakista', type: 'human' },
   { name: 'el observador de aves', type: 'human' },
 ]
+
+/** Nombres del censo del pond que se dibujan como KOI (no como criatura glow). */
+export const POND_KOI_NAMES = new Set(
+  POND_CENSUS.filter((a) => a.type === 'aquatic_fauna').map((a) => a.name),
+)
 
 /** Censo de la ciudad: fauna urbana chilena + actores humanos, en español
  * (coherente con el bosque y el estanque). Móviles sin artículo; estáticos
