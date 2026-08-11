@@ -203,7 +203,9 @@ export const CONFIG = {
     // Tronco BAJO y grueso tirado en el suelo (referencia alikim), apenas
     // curvado: `logArch` chico = leve guata arriba (un huequito, no un portal);
     // `logBury` chico = las puntas se hunden un poco. `logCurve` suave.
-    substrate: { logAngle: 0.6, logCurve: 0.35, logArch: 0.1, logBury: 0.06, logHalfLength: 0.52, logRadius: 0.2, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
+    // logSink: fracción del radio que queda ENTERRADA (el tronco se hunde en el
+    // suelo, no apoyado encima). logBury: cuánto más se hunden las puntas rotas.
+    substrate: { logAngle: 0.6, logCurve: 0.35, logArch: 0.07, logBury: 0.16, logSink: 0.4, logHalfLength: 0.52, logRadius: 0.2, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
     // Ajustado al look de placa de cultivo (referencia del usuario): más puntas
     // = borde más plumoso; más ramificación + autotropismo = rosetón radial que
     // se esparce parejo; más widthGain = rizomorfos (cordones) marcados.

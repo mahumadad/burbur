@@ -118,6 +118,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
   const baseA = cc.substrate.logAngle
   const archAmp = cc.substrate.logArch || 0
   const buryAmp = cc.substrate.logBury || 0
+  const sink = cc.substrate.logSink || 0   // fracción del radio enterrada
   function centerX(u) { return k ? (Math.sin(baseA + k * u) - Math.sin(baseA)) / k : logAx * u }
   function centerZ(u) { return k ? (Math.cos(baseA) - Math.cos(baseA + k * u)) / k : logAz * u }
   /** Arco vertical del eje: el CENTRO se eleva (guata hacia arriba) y las dos
@@ -201,7 +202,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const rad = Math.hypot(overEnd, v)
     const lr = logRAt(uc)
     const rr = Math.min(rad, lr)
-    const axisY = lr * R * LOG_HEIGHT_SCALE
+    const axisY = lr * (1 - sink) * R * LOG_HEIGHT_SCALE   // hundido en el suelo
     const half = Math.sqrt(Math.max(0, lr * lr - rr * rr)) * R * LOG_HEIGHT_SCALE
     return axisY + centerY(u) + half + (rad < lr ? bump(u, v) : 0)
   }
@@ -221,9 +222,9 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const pos = [], col = [], idx = []
     // Paletas de corteza para variar el TONO (no solo el brillo): gris, pardo
     // rojizo, pardo oscuro — como una corteza real, no un marrón plano.
-    const BARK_A = [0.30, 0.22, 0.15]   // pardo claro (crestas)
-    const BARK_B = [0.16, 0.10, 0.06]   // pardo oscuro
-    const BARK_C = [0.20, 0.19, 0.17]   // gris (líquenes/edad)
+    const BARK_A = [0.34, 0.25, 0.17]   // pardo claro (crestas)
+    const BARK_B = [0.11, 0.07, 0.045]  // pardo MUY oscuro (surcos)
+    const BARK_C = [0.19, 0.18, 0.16]   // gris (líquenes/edad)
     for (let i = 0; i <= NU; i++) {
       const u = u0 + (u1 - u0) * (i / NU)
       const uc = Math.max(-halfLen, Math.min(halfLen, u))
@@ -232,7 +233,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const worldR = logRAt(uc) * cap * R
       const cx = centerX(u) * R, cz = centerZ(u) * R
       const px = perpX(u), pz = perpZ(u)
-      const axisY = logRAt(uc) * R * LOG_HEIGHT_SCALE
+      const axisY = logRAt(uc) * (1 - sink) * R * LOG_HEIGHT_SCALE  // hundido
       const f = edgeFade(centerX(u), centerZ(u))
       const cy = centerY(u)
       for (let a = 0; a <= NA; a++) {
@@ -245,24 +246,26 @@ export function createFungusScene(container, cfg, agentNames = []) {
         const plate = Math.pow(Math.abs(Math.sin(th * 6.5 + wander + u * 2)), 0.7) // 0 surco, 1 cresta
         const knots = noise2(u * 3, th * 1.2)                     // bultos/nudos anchos
         const micro = noise2(u * 34 + a, th * 9)                   // grano fino
-        const rough = 1 + 0.22 * plate - 0.14 * (1 - plate) + 0.10 * (knots - 0.5) + 0.05 * (micro - 0.5) * 2
-        const rr = worldR * Math.max(0.5, rough)
+        // Surcos MÁS profundos → más variación de normal → más sombra (Lambert).
+        const rough = 1 + 0.30 * plate - 0.24 * (1 - plate) + 0.12 * (knots - 0.5) + 0.06 * (micro - 0.5) * 2
+        const rr = worldR * Math.max(0.45, rough)
         const x = cx + px * rr * st
         const z = cz + pz * rr * st
         const y = axisY + cy + rr * ct                            // puede hundirse bajo el suelo (puntas)
         pos.push(x, y, z)
-        // COLOR: mezcla de tres tonos por ruido (gris/rojizo/oscuro), surcos
-        // hundidos MUY oscuros, crestas iluminadas; arriba algo más claro.
-        const mixAB = plate                                       // cresta→A, surco→B
-        const grey = Math.max(0, (noise2(u * 1.1 - 15, th * 0.9) - 0.55) * 3) // parches grises
+        // COLOR = ALBEDO oscuro (la LUZ Lambert genera el volumen; nada de brillo
+        // horneado). Mezcla de tres tonos por ruido + AO: los surcos van más
+        // oscuros aunque les pegue la luz.
+        const mixAB = plate
+        const grey = Math.max(0, (noise2(u * 1.1 - 15, th * 0.9) - 0.55) * 3)
         let br = BARK_A[0] * mixAB + BARK_B[0] * (1 - mixAB)
         let bg = BARK_A[1] * mixAB + BARK_B[1] * (1 - mixAB)
         let bb = BARK_A[2] * mixAB + BARK_B[2] * (1 - mixAB)
         br = br * (1 - grey) + BARK_C[0] * grey
         bg = bg * (1 - grey) + BARK_C[1] * grey
         bb = bb * (1 - grey) + BARK_C[2] * grey
-        const light = (0.35 + 0.85 * plate) * (0.75 + 0.35 * micro) * (0.55 + 0.5 * Math.max(0, ct)) * f
-        col.push(br * light * 2.6, bg * light * 2.6, bb * light * 2.6)
+        const ao = (0.35 + 0.65 * plate) * (0.8 + 0.2 * micro)    // surcos ocluidos
+        col.push(br * ao, bg * ao, bb * ao)
       }
     }
     const ring = NA + 1
@@ -278,7 +281,46 @@ export function createFungusScene(container, cfg, agentNames = []) {
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
     geo.setIndex(idx)
     geo.computeVertexNormals()
-    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })))
+    // Lambert (NO basic): la referencia consigue la textura con LUZ sobre la
+    // geometría rugosa. El resto del mundo es unlit (points/lines/basic) y no
+    // ve las luces; solo el tronco las aprovecha para tener sombras reales en
+    // los surcos y en la cara inferior.
+    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })))
+    const sun = new THREE.DirectionalLight(0xfff2e2, 1.5)
+    sun.position.set(0.4, 1, 0.25)
+    scene.add(sun)
+    scene.add(new THREE.AmbientLight(0x3a3a44, 1.0))
+  }
+
+  // ─── PUNTAS ROTAS: donde el tronco entra en la tierra no está cortado limpio
+  // sino QUEBRADO, con astillas de madera clara (albura) apuntando afuera y
+  // hacia arriba, irregulares — un tronco partido, no serruchado. ────────────
+  {
+    const C_SPLINTER = [0.72, 0.62, 0.42]
+    for (const endSign of [-1, 1]) {
+      const endU = endSign * (halfLen + logR * 0.15)
+      const lr = logRAt(Math.max(-halfLen, Math.min(halfLen, endU)))
+      const [ex, ez] = uvToWorld(endU, 0)
+      const baseY = logRAt(Math.max(-halfLen, Math.min(halfLen, endU))) * (1 - sink) * R + centerY(endU)
+      const tang = endSign > 0 ? baseA + k * halfLen : baseA - k * halfLen
+      const N = 26
+      for (let s = 0; s < N; s++) {
+        // Punto de arranque en la cara del quiebre (círculo de la sección).
+        const th = rnd() * Math.PI * 2
+        const rad = lr * R * (0.2 + rnd() * 0.85)
+        const bx = ex * R + perpX(endU) * rad * Math.sin(th)
+        const bz = ez * R + perpZ(endU) * rad * Math.sin(th)
+        const by = Math.max(0, baseY + rad * Math.cos(th))
+        // La astilla sale a lo largo del eje (hacia afuera) + arriba, irregular.
+        const len = (3 + rnd() * rnd() * 14)
+        const tx = bx + Math.cos(tang) * endSign * len + (rnd() - 0.5) * 4
+        const tz = bz + Math.sin(tang) * endSign * len + (rnd() - 0.5) * 4
+        const ty = by + (rnd() - 0.3) * 8
+        const fade = edgeFade(bx / R, bz / R)
+        draw.pushLine(bx, by, bz, tx, ty, tz,
+          tint(C_SPLINTER, 0.9 * fade), tint(C_SPLINTER, 0.3 * fade))
+      }
+    }
   }
 
   // ─── TRONCO (textura): la superficie sólida de arriba le da masa; esto le
