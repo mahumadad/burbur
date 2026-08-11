@@ -185,76 +185,76 @@ export function createFungusScene(container, cfg, agentNames = []) {
     // rugoso leve de corteza, no montañas.
     return (noise2(u * 2.3 + 5, v * 4.1) - 0.5) * logR * 0.09 * R * LOG_HEIGHT_SCALE
   }
-  // Altura de la superficie del tronco en coords (u = a lo largo del eje,
-  // v = perpendicular). El domo semicircular por el radio LOCAL + relieve.
+  // Altura de la SUPERFICIE SUPERIOR del tronco en (u, v). El tronco es un
+  // cilindro COMPLETO apoyado en el suelo: su eje está a la altura del radio
+  // (`axisY`), así el fondo toca y=0 y arriba llega a 2·radio. Esto es la mitad
+  // de arriba (donde va el musgo y la red); el cuerpo redondo lo dibuja el tubo.
   function surfaceYUV(u, v) {
     const uc = Math.max(-halfLen, Math.min(halfLen, u))
-    const overEnd = u - uc                 // >0 más allá de la punta redondeada
+    const overEnd = u - uc
     const rad = Math.hypot(overEnd, v)
     const lr = logRAt(uc)
     const rr = Math.min(rad, lr)
-    const h = Math.sqrt(Math.max(0, lr * lr - rr * rr)) * R * LOG_HEIGHT_SCALE
-    return h + (rad < lr ? bump(u, v) : 0)
+    const axisY = lr * R * LOG_HEIGHT_SCALE
+    const half = Math.sqrt(Math.max(0, lr * lr - rr * rr)) * R * LOG_HEIGHT_SCALE
+    return axisY + half + (rad < lr ? bump(u, v) : 0)
   }
   function uvToWorld(u, v) {
     return [centerX(u) + perpX(u) * v, centerZ(u) + perpZ(u) * v]
   }
 
-  // ─── TRONCO: CUERPO SÓLIDO. Antes era solo dither de puntos, así que se veía
-  // el negro entre los puntos y el tronco no tenía masa. Una malla triangulada
-  // que sigue el domo le da SOLIDEZ (como la referencia: un montículo macizo);
-  // el dither de corteza y la pelusa de musgo van encima. Rejilla en (u,v),
-  // triángulos solo donde las 4 esquinas caen dentro del tronco. ────────────
+  // ─── TRONCO: CUERPO SÓLIDO como TUBO (cilindro completo) alrededor del eje
+  // curvo, apoyado en el suelo. Antes era un domo (media caña) con una "falda"
+  // que colgaba como sábana bajo tierra — feo en perspectiva baja. Ahora el
+  // tronco es redondo por TODOS lados: mirándolo desde abajo se ve su panza
+  // curva, no una lámina. La corteza rugosa (ruido en radio + color) va en toda
+  // la vuelta; el musgo y la red se apoyan en la mitad de arriba. ────────────
   {
-    const NU = 120, NV = 44
+    const NU = 130, NA = 40           // segmentos a lo largo × alrededor
     const u0 = -halfLen - logR, u1 = halfLen + logR
-    const pos = [], col = []
-    const idx = []
-    const cols = NV + 1
-    let vc = 0
-    // Rejilla COMPLETA (sin descartar celdas): fuera del radio del tronco la
-    // superficie no se corta — baja como FALDA por debajo del suelo, oculta por
-    // la hojarasca. Así el tronco cierra contra el suelo y no queda hueco.
+    const pos = [], col = [], idx = []
     for (let i = 0; i <= NU; i++) {
       const u = u0 + (u1 - u0) * (i / NU)
       const uc = Math.max(-halfLen, Math.min(halfLen, u))
-      const lr = logRAt(uc)
       const over = Math.max(0, Math.abs(u) - halfLen)
-      for (let j = 0; j <= NV; j++) {
-        const v = (-1 + 2 * (j / NV)) * logR * 1.35
-        const rad = Math.hypot(over, v)
-        const [x, z] = uvToWorld(u, v)
-        let y
-        if (rad <= lr) {
-          y = Math.sqrt(Math.max(0, lr * lr - rad * rad)) * R * LOG_HEIGHT_SCALE + bump(u, v)
-        } else {
-          y = -(rad - lr) * R * 0.9        // falda: baja bajo el suelo
-        }
-        pos.push(x * R, y, z * R)
-        // CORTEZA texturada (inspirada en corteza real, no plana): RELIEVES
-        // claros y GRIETAS oscuras (dos escalas de ruido) + moteado de intemperie
-        // verdosa. Nada de pardo uniforme.
-        const f = edgeFade(x, z)
-        const ridge = noise2(u * 3.1 - 2, v * 3.4 + 7)        // relieves anchos
-        const crack = noise2(u * 9 + 1, v * 11)               // grietas finas
-        const grain = 0.5 + 0.5 * Math.sin(u * 22 + noise2(u, v * 3) * 4) // fibra a lo largo
-        let shade = (0.35 + 0.75 * ridge) * (0.55 + 0.5 * crack) * (0.8 + 0.25 * grain) * f
-        if (rad > lr) shade *= 0.4                            // la falda, oscura
-        // Marrón de corteza OSCURO y sólido (referencia: ~0.15,0.1,0.05 con
-        // ruido), no un naranja saturado. El sombreado por vértice le da el
-        // volumen ya que el mundo es unlit.
-        let cr = (0.14 + 0.26 * shade), cg = (0.09 + 0.17 * shade), cb = (0.05 + 0.09 * shade)
-        cr *= f; cg *= f; cb *= f
-        const weather = noise2(u * 1.4 + 40, v * 1.4 - 8)     // manchas de intemperie
-        if (weather > 0.72 && rad <= lr) { cr *= 0.85; cg *= 1.15; cb *= 0.95 }
+      // Radio local: ahusado + cierre redondeado en las puntas (cap→0).
+      const cap = Math.sqrt(Math.max(0, 1 - (over / logR) * (over / logR)))
+      const worldR = logRAt(uc) * cap * R
+      const cx = centerX(u) * R, cz = centerZ(u) * R
+      const px = perpX(u), pz = perpZ(u)
+      const axisY = logRAt(uc) * R * LOG_HEIGHT_SCALE
+      const f = edgeFade(centerX(u), centerZ(u))
+      for (let a = 0; a <= NA; a++) {
+        const th = (a % NA) / NA * Math.PI * 2
+        const st = Math.sin(th), ct = Math.cos(th) // th=0 arriba, th=π abajo
+        // Rugosidad de corteza: el radio se perturba con dos escalas de ruido
+        // → superficie irregular, con relieves y surcos, no un cilindro liso.
+        const rough = 1 + 0.06 * (noise2(u * 7 + a * 0.6, th * 2) - 0.5) * 2
+          + 0.03 * (noise2(u * 22, th * 5) - 0.5) * 2
+        const rr = worldR * rough
+        const x = cx + px * rr * st
+        const z = cz + pz * rr * st
+        const y = Math.max(0, axisY + rr * ct)   // no baja del suelo
+        pos.push(x, y, z)
+        // Corteza: marrón oscuro sólido con grietas/relieve por ruido; la parte
+        // de arriba (ct>0) un poco más clara para fingir la luz (mundo unlit).
+        const ridge = noise2(u * 3.1 - 2, th * 1.6 + 7)
+        const crack = noise2(u * 9 + 1, th * 3.3)
+        const grain = 0.5 + 0.5 * Math.sin(u * 26 + noise2(u, th) * 5)
+        const topLight = 0.55 + 0.45 * Math.max(0, ct)
+        const shade = (0.4 + 0.7 * ridge) * (0.55 + 0.5 * crack) * (0.85 + 0.2 * grain) * topLight * f
+        let cr = 0.13 + 0.25 * shade, cg = 0.085 + 0.15 * shade, cb = 0.05 + 0.08 * shade
+        const weather = noise2(u * 1.4 + 40, th * 1.2)
+        if (weather > 0.74 && ct > 0) { cr *= 0.85; cg *= 1.15; cb *= 0.95 } // verdín arriba
         col.push(cr, cg, cb)
       }
     }
+    const ring = NA + 1
     for (let i = 0; i < NU; i++) {
-      for (let j = 0; j < NV; j++) {
-        const a = i * cols + j, b = (i + 1) * cols + j
-        const c = i * cols + j + 1, d = (i + 1) * cols + j + 1
-        idx.push(a, b, c, b, d, c)
+      for (let a = 0; a < NA; a++) {
+        const p0 = i * ring + a, p1 = (i + 1) * ring + a
+        const p2 = i * ring + a + 1, p3 = (i + 1) * ring + a + 1
+        idx.push(p0, p1, p2, p1, p3, p2)
       }
     }
     const geo = new THREE.BufferGeometry()
@@ -262,9 +262,6 @@ export function createFungusScene(container, cfg, agentNames = []) {
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
     geo.setIndex(idx)
     geo.computeVertexNormals()
-    // DoubleSide: la malla es una cáscara abierta (solo el domo, sin fondo). Con
-    // FrontSide, el lado lejano se descartaba y se VEÍA A TRAVÉS del tronco (se
-    // leía transparente). Con DoubleSide el tronco es opaco desde cualquier ángulo.
     scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })))
   }
 
@@ -309,7 +306,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
         const nvv = Math.max(-1, Math.min(1, v / lr))          // normal transversal
         const nup = Math.sqrt(Math.max(0, 1 - nvv * nvv))       // componente hacia arriba
         // Dirección de la hojita = normal de la sección + inclinación aleatoria.
-        const nx = logPx * nvv, nz = logPz * nvv                // componente lateral (mundo)
+        const nx = perpX(u) * nvv, nz = perpZ(u) * nvv          // lateral, siguiendo el eje curvo
         const len = (1.0 + rnd() * rnd() * 2.4) * (0.6 + mossN * 0.7)
         const jx = (rnd() - 0.5) * 0.7, jz = (rnd() - 0.5) * 0.7
         const dx = (nx + jx) * len, dy = (nup + 0.2) * len, dz = (nz + jz) * len
@@ -353,38 +350,9 @@ export function createFungusScene(container, cfg, agentNames = []) {
       }
     }
   }
-  {
-    // (c) Anillos de crecimiento en los DOS extremos cortados: círculos
-    // concéntricos (duramen → albura → corteza) en el disco de la cara cortada,
-    // que en la vista 3/4 se leen como los anillos de un tronco.
-    const barkStart = logR * (1 - cc.substrate.barkFrac)
-    const sapStart = logR * (1 - cc.substrate.barkFrac - cc.substrate.sapwoodFrac)
-    const ringColor = (rad) => rad >= barkStart ? C_BARK : rad >= sapStart ? C_SAPWOOD : C_HEARTWOOD
-    for (const endU of [-halfLen, halfLen]) {
-      const seg = 30
-      // Los anillos siguen el radio LOCAL del extremo (el tronco se ahúsa): si
-      // usan el radio nominal salen como halos flotando fuera de la madera.
-      const endR = logRAt(endU)
-      const k = endR / logR
-      for (const rad of [endR * 0.94, barkStart * k, ((sapStart + barkStart) / 2) * k, sapStart * k, sapStart * 0.6 * k, sapStart * 0.3 * k]) {
-        const col = ringColor(rad + 1e-4)
-        let prev = null
-        for (let i = 0; i <= seg; i++) {
-          const ang = (i / seg) * Math.PI * 2
-          // El anillo vive en el plano de la cara (perpendicular al eje): v y ALTURA.
-          // El EJE del tronco está a nivel del suelo (y=0) y el lomo sube hasta
-          // `domeHeight(0)`. Centrar el anillo en la cresta lo dejaba flotando
-          // un radio por encima de la madera, despegado del tronco.
-          const v = Math.cos(ang) * rad
-          const yr = Math.sin(ang) * rad * R * LOG_HEIGHT_SCALE
-          const [x, z] = uvToWorld(endU, v)
-          if (prev) draw.pushLine(prev[0] * R, prev[1], prev[2] * R, x * R, Math.max(0, yr), z * R,
-            tint(col, 0.8 * edgeFade(x, z)), tint(col, 0.8 * edgeFade(x, z)))
-          prev = [x, Math.max(0, yr), z]
-        }
-      }
-    }
-  }
+  // (Los anillos de "extremo cortado" se quitaron: el tronco ahora es un tubo
+  // de puntas REDONDEADAS, no una viga con caras cortadas — un anillo plano
+  // flotaría despegado de la punta curva.)
 
   // ─── HOJARASCA: dither disperso fuera del tronco (layer === 'litter') ─────
   {
