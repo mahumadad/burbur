@@ -51,6 +51,9 @@ export const WORLDS = [
   {
     id: 'cell', label: 'Cell ecosystem', name: 'Célula', accent: '#c9a6ff', ready: true,
     census: CELL_CENSUS, lexicon: CELL_LEXICON, ecosystem: CELL_PROFILE,
+    // La célula no tiene estación: su "hora" es el ciclo celular y su "clima" el
+    // medio. La temperatura sí importa (≈37°C, sube en mitosis).
+    hud: { time: 'CICLO', weather: 'MEDIO', season: null },
     // Interior húmedo: sin lluvia, grillos ni búhos. Solo el drone y la vida
     // celular (bloops de los organelos + la onda de calcio del propio mundo).
     audio: { rain: false, insects: false, owl: false },
