@@ -361,12 +361,63 @@ deforme), esporas, degradación visible del tronco y **caída del tronco nuevo**
 
 ---
 
-## 16. Preguntas abiertas
+## 16. Decisiones tomadas (2026-08-11)
 
-1. **¿Un tercer competidor de podredumbre parda?** Daría el agrietado en cubos (visualmente
-   inconfundible) y un triángulo estratégico en vez de un duelo. Cuesta poco; suma bastante.
-2. **¿*Panellus stipticus* como personaje menor?** Es de los que **brillan en la oscuridad** (el
-   *foxfire*), y le daría al mundo algo que mirar de noche. Ojo: *Pleurotus ostreatus* **no** es
-   luminiscente, así que ese papel necesita otro actor.
-3. **¿La micorriza (raíz viva) entra en la v1 o después?** Es un ingreso constante que suaviza la
-   economía; puede quedar para una segunda capa.
+Cerradas con el usuario. Ya no son opciones.
+
+1. **Tercer competidor de podredumbre parda (*Laetiporus sulphureus*): SÍ, pero en CAPA 2.**
+   La v1 sale con el duelo *Pleurotus* vs *Trametes*, balanceado y andando; el tercero entra
+   después. Cuando entre, aporta lo que ninguna podredumbre blanca puede: la madera **agrietada en
+   cubos**, la marca más inconfundible que un hongo deja en el terreno, más repisas naranja.
+   *Razón de dejarlo para después:* tres estrategias compitiendo antes de que funcione la primera
+   enturbian el balance.
+2. **Bioluminiscencia: SÍ, en los CORDONES, desde la v1.**
+   El *foxfire* clásico son los rizomorfos de *Armillaria*: **brilla la red, no el hongo**. Como
+   acá la red es la protagonista, la noche deja de ser el momento muerto y pasa a ser el estado más
+   bonito del mundo — se apaga el tronco y queda el grafo latiendo.
+   *Implicación:* hace falta una especie luminiscente compartiendo el tronco, porque ni *Pleurotus*
+   ni *Trametes* brillan. Entra como colonizador menor, no como tercera colonia en guerra.
+3. **Micorriza: CAPA 2.**
+   *Corrección biológica al §2 de este mismo doc:* los hongos de madera son **saprótrofos y NO
+   forman micorrizas** — eso lo hacen otras especies (*Amanita*, *Boletus*, *Lactarius*). O sea que
+   la raíz viva no es un detalle del mapa: **necesita su propio organismo**. Además, un tercer
+   ingreso aflojaría la tensión de cazar nitrógeno, que es lo que sostiene el clímax. Queda fuera
+   de la v1.
+
+---
+
+## 17. Estado y continuidad
+
+Para que esto sobreviva a una compactación de contexto.
+
+### Mundo CÉLULA — TERMINADO
+
+Las 10 mejoras del spec `2026-08-11-mejoras-mundo-celula.md` están **completas y verdes (141
+tests)**. Reparto final:
+
+| Ola | Entregó |
+|---|---|
+| A | `sim/mitosis.js`, `sim/motors.js`, `sim/traffic.js` (puros, TDD) |
+| B | Canal de eventos del mundo (`main.js` resuelve agente en dos pasos) + lazo del ATP cerrado (pop visual + `type:'pulse'` → `audio.triggerFlash`, con token bucket) |
+| C | Tráfico direccional, motores caminando los rieles, mitosis con cromosomas/huso/surco (`worlds/cell/mitosis.js`) |
+| D | Fagocitosis, fusión mitocondrial, medio visible y tejido (`worlds/cell/{phagocytosis,mitoFusion,medium}.js`) |
+
+**Base del mundo célula ya está en `origin/main`** (merge `e4edacd`). **Las 4 olas de mejoras NO
+están mergeadas todavía**: viven en esta rama, completas y verificadas, esperando OK para merge.
+
+### Mundo MICELIO — próximo paso
+
+Este doc es el spec. Arrancar por la **Ola A** del §15: los tres módulos puros en paralelo
+(`mycelium.js`, `decay.js`, `fruiting.js`), que es el reparto que ya funcionó dos veces.
+
+### Cosas que hay que recordar del entorno
+
+- Tests: `npx vitest run --exclude '**/.claude/**'` — **sin el flag cuenta los worktrees** y da un
+  número inflado.
+- **El navegador de este entorno no navega**: no se puede verificar visualmente. Se verifica con
+  `npm run build` + smoke-runs en Node, y se le pide al usuario que mire en `npm run dev`.
+- Repo renombrado a **`burbur`** (`github.com/mahumadad/burbur`). Push con cuenta personal
+  (`gh auth switch --user mahumadad`) y restaurar a la de trabajo después. **Nada va a remoto sin
+  OK explícito.**
+- Hay varias sesiones trabajando en paralelo (bosque, ciudad, agua). `main` avanza solo: **rebasar
+  antes de mergear**, siempre.
