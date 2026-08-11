@@ -3,7 +3,7 @@
 // del acumulador de cajas y sus tres estilos de acabado (lichen/flat/shaded).
 import { describe, it, expect } from 'vitest'
 import * as THREE from 'three'
-import { createBoxBuilder, rgbToHex } from '../src/render/boxbuilder.js'
+import { createBoxBuilder, rgbToHex, shadeGeometry } from '../src/render/boxbuilder.js'
 
 describe('rgbToHex (puerto fiel de vn)', () => {
   it('convierte triples RGB [0,1] a hex 0xRRGGBB', () => {
@@ -70,6 +70,23 @@ describe('createBoxBuilder (puerto fiel de gn)', () => {
     const c1 = g1.children[1].geometry.attributes.position.count
     const c2 = g2.children[1].geometry.attributes.position.count
     expect(c1).toBe(c2)
+  })
+})
+
+describe('shadeGeometry (extracción exportada de _n, usada por Tn en city.js)', () => {
+  it('pinta color por vértice sobre una geometría THREE cruda (no producida por el box builder)', () => {
+    const geo = new THREE.CylinderGeometry(0.7, 0.85, 1.9, 9, 3)
+    const out = shadeGeometry(geo, [0.72, 0.74, 0.79], 5)
+    expect(out).toBe(geo) // muta y devuelve la misma geometría, igual que _n
+    expect(geo.attributes.color).toBeDefined()
+    expect(geo.attributes.color.count).toBe(geo.attributes.position.count)
+    // Los colores resultantes nunca superan el tinte de entrada (min(1, tint*h)).
+    const col = geo.attributes.color
+    for (let i = 0; i < col.count; i++) {
+      expect(col.getX(i)).toBeLessThanOrEqual(0.72 + 1e-9)
+      expect(col.getY(i)).toBeLessThanOrEqual(0.74 + 1e-9)
+      expect(col.getZ(i)).toBeLessThanOrEqual(0.79 + 1e-9)
+    }
   })
 })
 
