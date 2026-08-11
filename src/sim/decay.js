@@ -31,6 +31,16 @@ const NITROGEN_LITTER = 0.02
 const HARDNESS_LITTER = 0.1 // fácil de forrajear
 
 const LITTER_BAND = 0.3 // ancho de la hojarasca más allá del radio del tronco
+// Suelo forrajeable: más allá de la hojarasca el terreno tiene materia orgánica
+// DIFUSA (poca, pero la hay). Sin esto el carbono caía a cero al salir del
+// tronco y el frente que avanzaba por la tierra no recibía flujo, se atrofiaba
+// y se podaba enseguida — la colonia se plantaba en un radio fijo. Con este piso
+// el micelio FORRAJEA hacia afuera, agota lo que pisa y abandona el interior
+// exhausto: un frente que sigue expandiéndose, como una colonia real.
+const CARBON_SOIL = 0.10
+const NITROGEN_SOIL = 0.008
+const HARDNESS_SOIL = 0.05
+const SOIL_REACH = 1.25 // hasta dónde llega el suelo forrajeable (norm.)
 const CARCASS_RADIUS = 0.05 // radio chico: el nitrógeno es puntual y decisivo
 const CARCASS_NITROGEN = 3.0 // muy por encima de lo que da la madera
 const HARDNESS_RESISTANCE = 0.7 // cuánto castiga la dureza al rendimiento de `consume`
@@ -59,6 +69,11 @@ function layerAt(cfg, x, z) {
 
   if (radial <= R + LITTER_BAND) {
     return { layer: 'litter', hardness: HARDNESS_LITTER, carbon: CARBON_LITTER * (cfg.litterDensity ?? 1), nitrogen: NITROGEN_LITTER }
+  }
+  // El suelo se mide desde el ORIGEN (no desde el eje del tronco): es el disco
+  // del mundo, no una banda paralela al tronco.
+  if (Math.hypot(x, z) <= SOIL_REACH) {
+    return { layer: 'soil', hardness: HARDNESS_SOIL, carbon: CARBON_SOIL, nitrogen: NITROGEN_SOIL }
   }
   return { layer: 'none', hardness: 0, carbon: 0, nitrogen: 0 }
 }

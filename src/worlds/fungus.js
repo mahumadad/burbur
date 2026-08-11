@@ -63,8 +63,11 @@ const FAUNA_COLORS = [PALETTE.yellow, PALETTE.orange, PALETTE.bond]
 const LOG_HEIGHT_SCALE = 1.0
 // Caída a negro en los bordes del disco (coords normalizadas [-1,1]), como
 // los otros mundos: se apaga entre estos dos radios normalizados.
-const EDGE_FADE_START = 0.86
-const EDGE_FADE_END = 1.08
+// El micelio forrajea hasta ~1.2 (ver decay.js SOIL_REACH y mycelium.bound), así
+// que el desvanecido del borde se empuja afuera: si no, todo el crecimiento
+// nuevo cerca del borde del cuadro caía en negro y no se veía expandirse.
+const EDGE_FADE_START = 1.05
+const EDGE_FADE_END = 1.30
 // Cuánto más allá del tronco se busca hojarasca (rejection sampling): más
 // ancho que la banda real de decay.js para no dejar huecos por el rechazo.
 const LITTER_SEARCH_PAD = 0.4

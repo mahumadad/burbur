@@ -305,10 +305,11 @@ export const CONFIG = {
       // tierra, vía `soil.radial`.
       tropism: 0.55, autotropism: 1.3, radial: 0.7, branchRate: 1.8,
       fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.10, flowDecay: 0.35,
-      // `bound` acotado: con el tope lejos las puntas se amontonaban contra él y
-      // el abanico se leía como un ANILLO despegado del tronco en vez de una
-      // mancha que se abre desde la madera.
-      pruneBelow: 0.1, pruneRate: 1.0, bound: 0.66,
+      // `bound` amplio: la colonia forrajea hacia AFUERA y sigue expandiéndose
+      // hasta llenar el disco (el suelo forrajeable de decay.js llega a 1.25).
+      // Con un tope chico se plantaba en un radio fijo; ahora el frente avanza,
+      // agota lo que pisa y abandona el interior, como una colonia real.
+      pruneBelow: 0.1, pruneRate: 1.0, bound: 1.18,
       // Brote lateral: la red saca frentes nuevos del costado de hifas ya
       // hechas. Sin esto, en cuanto todas las puntas se fusionan la colonia se
       // queda sin frentes y el mundo se congela para siempre.
