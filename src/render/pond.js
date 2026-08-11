@@ -635,12 +635,12 @@ export function createPond(container, cfg, agentNames = []) {
     const top = lobeTop(px, pz)
     return { x: px, z: pz, y: (top > -Infinity ? top : ht) + 1.2 }
   }
-  function huntHerons(step, predations) {
+  function huntHerons(step, predations, eco) {
     const F = fish.state.fish
     // Refugio con lluvia (paridad con ciudad/bosque vía sim/perch.js): a más
     // lluvia, las garzas prefieren quedarse posadas y casi no salen a pescar.
-    // Con rain=0 todo queda idéntico al comportamiento seco.
-    const shelter = eco.rain || 0
+    // Con rain=0 (o sin eco) todo queda idéntico al comportamiento seco.
+    const shelter = (eco && eco.rain) || 0
     for (let i = 0; i < n; i++) {
       const a = agents[i]
       if (!a.hunter) continue
@@ -832,7 +832,7 @@ export function createPond(container, cfg, agentNames = []) {
     const predations = []
     mapPositions(step, clock)
     fish.update(step, clock)      // mueve los peces primero
-    huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
+    huntHerons(step, predations, eco)  // garzas pican (puede sobreescribir su y)
     crossSky(step)                // un ave cruza el cielo alto de vez en cuando
     updateBugs(step, clock)
     updateFrogs(step)
