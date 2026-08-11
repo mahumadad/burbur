@@ -16,6 +16,13 @@ export const WORLDS = [
   {
     id: 'land', label: 'Plot ecosystem', accent: '#b6d184', ready: true,
     census: FOREST_CENSUS, ecosystem: FOREST_PROFILE,
+    // Índices que la escena manda al aire (perchers + sky). SOLO pueden ser aves.
+    // Los cazadores (0..hunters) NO: acechan a ras de suelo. Coincide con
+    // createPerchers, cuyo startIndex es el nº de cazadores.
+    aerial: (i, cfg) => {
+      const start = Math.min(cfg.bugs.hunters, cfg.fireflies.count)
+      return i >= start && i < start + cfg.behaviors.perchers + cfg.behaviors.sky
+    },
     build: (container, cfg, names) => createScene(container, cfg, names),
   },
   {
