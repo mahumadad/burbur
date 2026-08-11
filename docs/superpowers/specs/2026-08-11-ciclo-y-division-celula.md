@@ -174,8 +174,12 @@ Al evento `divide`:
 
 1. **Nace una hija.** Módulo nuevo `src/worlds/cell/daughter.js`, pool fijo de 3.
    - Contorno congelado (armónicos fijos, como las vecinas de `tissue.js`), radio ~0.7 del de la madre.
-   - Nace **pegada a la madre**, desplazada perpendicular al eje del huso (la célula se parte por
-     el ecuador: la hija sale de costado).
+   - Nace **pegada a la madre, en un polo**: desplazada **a lo largo del eje del huso**.
+     *(Corrección: este spec decía originalmente "perpendicular al eje del huso" y estaba mal —
+     el surco estrangula el ECUADOR, que es lo perpendicular, y por eso las dos mitades se separan
+     SOBRE el eje del huso, cada una con el juego de cromosomas que viajó a su polo. Lo detectó el
+     agente implementador, que además implementó lo escrito y marcó la discrepancia en vez de
+     taparla.)*
    - Va en el **grupo `substrate`**, con la misma matemática que las adhesiones: guarda su posición
      de nacimiento y el offset del sustrato de ese instante. Así, **cuando la madre siga reptando,
      la hija se queda atrás y se aleja sola** — sin animarla.
