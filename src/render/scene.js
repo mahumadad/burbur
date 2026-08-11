@@ -5,6 +5,7 @@ import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
 import { createAgentKit, updateAgentMotion } from './engine/agents3d.js'
 import { createDraw } from './engine/points.js'
 import { createTrails } from './engine/trails.js'
+import { lichenRosette, mossClump, LICHEN_ORANGE, LICHEN_PALE } from './engine/crust.js'
 import { PALETTE } from '../config.js'
 import { noise2, fbm } from './noise.js'
 import { createPaths, nearestOnPaths } from '../sim/paths.js'
@@ -842,30 +843,33 @@ export function createScene(container, cfg, agentNames = []) {
     poiPerch.push({ x: cx / R, z: cz / R, h: hh })
     rockDomes.push({ x: cx, z: cz, r: Math.max(radX, radZ), h: hh })
 
-    // Liquen anaranjado: lo que cubre la roca. Solo en caras que miran arriba.
-    const lichenN = spec.mono ? 1100 : 420
-    for (let k = 0, guard = 0; k < lichenN && guard++ < lichenN * 9; ) {
+    // Liquen: ROSETAS planas (naranja Xanthoria / gris-verde Parmelia) en
+    // colonias, no un punteado uniforme. Solo en caras que miran arriba.
+    const rosettes = spec.mono ? 34 : 14
+    for (let k = 0, guard = 0; k < rosettes && guard++ < rosettes * 12; ) {
       const d = (rnd() * pos.count) | 0
       const ny = nrm.getY(d)
       if (ny < 0.12) continue
       const fx = pos.getX(d), fy = pos.getY(d), fz = pos.getZ(d)
-      if (fbm(fx * 0.5 + seed * 1.7, fz * 0.5 + fy * 0.4, 2) < 0.5) continue
-      if (rnd() > 0.42 + ny * 0.4) continue
-      const A = 0.96 + rnd() * 0.09
-      pushPoint(cx + fx, baseY + fy + 0.1, cz + fz,
-        [1, 0.827 * A, 0.071], 0.12 + rnd() * 0.17, 0)
+      if (fbm(fx * 0.35 + seed * 1.7, fz * 0.35 + fy * 0.3, 2) < 0.5) continue
+      lichenRosette(pushPoint, cx + fx, baseY + fy, cz + fz, {
+        radius: 0.5 + rnd() * 1.4,
+        color: rnd() < 0.6 ? LICHEN_ORANGE : LICHEN_PALE,
+        size: 0.1 + rnd() * 0.07,
+      })
       k++
     }
 
-    // Musgo verde: apenas unas manchas, no una capa.
-    const mossMax = spec.mono ? 60 : 24
-    for (let d = 0, k = 0; d < pos.count && k < mossMax; d += 3) {
-      if (nrm.getY(d) <= 0.15) continue
+    // Musgo: CÚMULOS abultados donde la roca junta humedad (no una capa plana).
+    const clumps = spec.mono ? 10 : 4
+    for (let k = 0, guard = 0; k < clumps && guard++ < clumps * 14; ) {
+      const d = (rnd() * pos.count) | 0
+      if (nrm.getY(d) <= 0.42) continue
       const fx = pos.getX(d), fy = pos.getY(d), fz = pos.getZ(d)
-      if (fbm(fx * 0.4 + seed * 2.3 + 9, fz * 0.4 + fy * 0.5, 2) <= 0.66) continue
-      if (rnd() >= 0.5) continue
-      pushPoint(cx + fx, baseY + fy + 0.08, cz + fz,
-        [0.3, 0.46, 0.3], 0.2 + rnd() * 0.22, 0)
+      if (fbm(fx * 0.3 + seed * 2.3 + 9, fz * 0.3 + fy * 0.4, 2) <= 0.55) continue
+      mossClump(pushPoint, cx + fx, baseY + fy, cz + fz, {
+        radius: 0.7 + rnd() * 1.6, height: 0.3 + rnd() * 0.5, density: 0.7 + rnd() * 0.6,
+      })
       k++
     }
 
