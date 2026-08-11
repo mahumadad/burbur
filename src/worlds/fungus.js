@@ -790,7 +790,13 @@ export function createFungusScene(container, cfg, agentNames = []) {
     for (let i = 0; i < cc.fauna; i++) {
       const r = roamers[i]
       const x = r.x * R, z = r.z * R
-      const y = surfaceY(r.x, r.z) + 1.3
+      // La fauna del SUELO camina en el SUELO (nivel de la hojarasca), no sobre
+      // el tronco curvo — antes usaba surfaceY (la altura del tronco arqueado) y
+      // los bichos caminaban EN EL AIRE. Solo trepan si están de verdad ENCIMA
+      // del tronco; si no, quedan a ras del suelo (algunos bajo el arco).
+      const [uu, vv] = worldToUV(r.x, r.z)
+      const onLog = Math.abs(vv) < logRAt(Math.max(-halfLen, Math.min(halfLen, uu)))
+      const y = (onLog ? surfaceYUV(uu, vv) : 0) + 1.3
       faunaAgents[i].group.position.set(x, y, z)
       const sp = Math.hypot(r.vx, r.vz)
       if (sp > 1e-4) faunaAgents[i].group.rotation.y = Math.atan2(r.vx * R, r.vz * R)
