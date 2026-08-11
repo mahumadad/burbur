@@ -507,6 +507,52 @@ export function createPond(container, cfg, agentNames = []) {
     frogCloud.commit()
   }
 
+  // ─── PÁJARO ALTO: de vez en cuando cruza el cielo bien arriba, aleteando ──
+  const skyBird = { active: false, wait: 8 + q() * 18, t: 0, dur: 1, sx: 0, sz: 0, ex: 0, ez: 0, y: 0 }
+  const birdGroup = new THREE.Group()
+  {
+    // Silueta gris fría; cada ala = hombro→codo→punta (2 segmentos, forma de V).
+    const wingMat = new THREE.LineBasicMaterial({ color: 0x9aa0ac, transparent: true, opacity: 0.85, fog: false })
+    function wing(side) {
+      const g = new THREE.Group()
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0), new THREE.Vector3(side * 2.2, 0.2, -0.4),
+        new THREE.Vector3(side * 2.2, 0.2, -0.4), new THREE.Vector3(side * 4.2, -0.1, -1.4),
+      ])
+      g.add(new THREE.LineSegments(geo, wingMat))
+      return g
+    }
+    birdGroup.__wl = wing(-1); birdGroup.__wr = wing(1)
+    birdGroup.add(birdGroup.__wl); birdGroup.add(birdGroup.__wr)
+    birdGroup.scale.setScalar(1.6); birdGroup.visible = false
+    scene.add(birdGroup)
+  }
+  function updateSkyBird(step, t) {
+    if (!skyBird.active) {
+      skyBird.wait -= step
+      if (skyBird.wait > 0) return
+      // Entra por un borde y sale por el opuesto, bien alto.
+      const a = q() * 6.2832, R2 = mt * 1.9
+      skyBird.sx = Math.cos(a) * R2; skyBird.sz = Math.sin(a) * R2
+      skyBird.ex = -skyBird.sx + (q() - 0.5) * mt; skyBird.ez = -skyBird.sz + (q() - 0.5) * mt
+      skyBird.y = ht + 26 + q() * 16
+      skyBird.dur = 7 + q() * 5; skyBird.t = 0
+      skyBird.active = true; birdGroup.visible = true
+      return
+    }
+    skyBird.t += step / skyBird.dur
+    if (skyBird.t >= 1) { skyBird.active = false; birdGroup.visible = false; skyBird.wait = 18 + q() * 40; return }
+    const k = skyBird.t
+    birdGroup.position.set(
+      skyBird.sx + (skyBird.ex - skyBird.sx) * k,
+      skyBird.y + Math.sin(t * 0.8) * 1.5,
+      skyBird.sz + (skyBird.ez - skyBird.sz) * k,
+    )
+    birdGroup.rotation.y = Math.atan2(skyBird.ex - skyBird.sx, skyBird.ez - skyBird.sz)
+    const flap = Math.sin(t * 9) * 0.6
+    birdGroup.__wl.rotation.z = flap; birdGroup.__wr.rotation.z = -flap
+  }
+
   // ─── TRONCO(S) DE ÁRBOL flotando en el agua ───────────────────────────────
   const floatLogs = []
   for (let li = 0; li < 1 + (q() < 0.5 ? 1 : 0); li++) {
@@ -777,6 +823,7 @@ export function createPond(container, cfg, agentNames = []) {
     updateBugs(step, clock)
     updateFrogs(step)
     updateLogs(step, clock)
+    updateSkyBird(step, clock)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
