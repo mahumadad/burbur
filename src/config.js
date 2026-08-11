@@ -238,6 +238,15 @@ export const CONFIG = {
     // Flujo CONTINUO de energía por cada axón: el murmullo de fondo que hace que
     // la red se lea VIVA (no como un diagrama). Los spikes reales corren encima.
     flow: { perAxon: 15, speed: 0.13, size: 0.95 },
+    // Estado cerebral (sim/brainstate.js): el eje del mundo. Traduce el estado de
+    // sueño y el neuromodulador en sincronía, ritmo, estados UP/DOWN, husos y la
+    // convulsión. `syncPull` es la fuerza con que la red se acerca a su sincronía
+    // objetivo cada frame. Tiempos en segundos.
+    brain: {
+      riskRate: 0.10, seizeExc: 2.6, seizeInh: 0.2, seizeDur: 9, postictalDur: 5,
+      downMin: 0.7, downMax: 1.6, downDur: 0.4, spindleGap: 2.6, spindleDur: 1.0,
+      syncPull: 1.6,
+    },
     // Arbor dendrítico: árbol ramificado en el plano, congelado en el build.
     dendrite: { levels: 3, branches: 3, len: 0.16, lenDecay: 0.62, spread: 1.2, jitter: 0.22, spines: 4 },
     neuropil: 3800,     // puntos de fondo (la maraña de procesos que no se dibuja)
