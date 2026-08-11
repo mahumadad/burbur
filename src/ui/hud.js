@@ -89,7 +89,9 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
   function update(s) {
     if (s.phase !== lastPhase) { f.time.textContent = phaseES(s.phase); lastPhase = s.phase }
     if (s.weather !== lastWeather) { f.weather.textContent = weatherES(s.weather); lastWeather = s.weather }
-    if (showSeason) f.season.textContent = seasonES(s.seasonT)
+    // Un mundo puede fijar su propio valor de "estación" (la célula/micelio no
+    // tienen estaciones: el micelio muestra la clase de descomposición).
+    if (showSeason) f.season.textContent = s.seasonLabel || seasonES(s.seasonT)
     f.temp.textContent = s.temperature + '°C'
     f.actv.textContent = Math.round(s.activity * 100) + '%'
     f.tenv.textContent = s.tension.toFixed(2)
