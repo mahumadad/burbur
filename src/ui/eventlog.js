@@ -1,4 +1,5 @@
-// EVENTS LOG (derecha) + píldora "ahora sonando" (arriba). Estética técnica.
+// EVENTS LOG (derecha) + píldora "ahora sonando" (abajo a la derecha, para no
+// perderse arriba en mobile). Estética técnica.
 
 const CSS = `
 .evlog {
@@ -23,8 +24,8 @@ const CSS = `
 .evlog .row.shift .tx { color: var(--accent, #8fe04a); }
 
 .pill {
-  position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 20;
-  display: flex; align-items: center; gap: 9px; max-width: 46vw;
+  position: fixed; bottom: 14px; right: 14px; z-index: 20;
+  display: flex; align-items: center; gap: 9px; max-width: min(46vw, 320px);
   padding: 7px 15px; border-radius: 999px;
   background: rgba(6, 10, 8, 0.62); backdrop-filter: blur(6px);
   border: 1px solid rgba(255, 255, 255, 0.10);
