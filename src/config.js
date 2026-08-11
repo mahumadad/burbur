@@ -146,6 +146,15 @@ export const CONFIG = {
       growRate: 0.045, shrinkRate: 0.26, catastrophe: 0.12, rescue: 0.4,
     },
     atp: { capacity: 26, speed: 0.42, arrive: 0.02, gainPerQuantum: 0.09, drain: 0.32 },
+    // Tráfico direccional (M3): kinesina lleva lo secretor (vesículas) hacia
+    // afuera, dineína lo digestivo (lisosomas/endosomas) hacia el centro.
+    traffic: { bias: 0.06, innerR: 0.12, outerR: 0.66 },
+    // Motores caminando por los rieles (M5): puntos que recorren los
+    // microtúbulos en ambos sentidos.
+    motors: { count: 40, speed: 0.13, detachChance: 0.12, cargoChance: 0.5 },
+    // Fusión y fisión mitocondrial (M9): la red se fusiona si dos quedan
+    // cerca un rato, y se separa pasado un tiempo — igual que in vivo.
+    mito: { fuseRadius: 0.07, fuseDelay: 0.6, fusedMin: 8, fusedMax: 20 },
     invaders: {
       // cullRadius ajustado: con margen ancho el pool se satura y dejan de
       // llegar invasores nuevos. Que se vayan pronto mantiene la rotación.

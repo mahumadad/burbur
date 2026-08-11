@@ -513,23 +513,40 @@ export function createPond(container, cfg, agentNames = []) {
   for (let li = 0; li < 1 + (q() < 0.5 ? 1 : 0); li++) {
     // Mismo tronco caído orgánico del bosque (tubo ahusado + ramas), flotando.
     const g = buildFallenLog({ length: 13 + q() * 9, radius: 1.5 + q() * 0.9 })
-    const a = q() * 6.2832, rr = 4 + q() * (mt * 0.5)
-    g.position.set(Math.cos(a) * rr, ht + 0.35, Math.sin(a) * rr)
+    // Aparece sobre AGUA ABIERTA (no dentro de una isla).
+    let lx = 0, lz = 0
+    for (let tryn = 0; tryn < 20; tryn++) {
+      const a = q() * 6.2832, rr = 10 + q() * (mt * 0.55)
+      lx = Math.cos(a) * rr; lz = Math.sin(a) * rr
+      let inside = false
+      for (const L2 of lobes) { const dx = lx - L2.x, dz = lz - L2.z, rad = Math.max(L2.rx, L2.rz) * 1.15 + 4; if (dx * dx + dz * dz < rad * rad) { inside = true; break } }
+      if (!inside) break
+    }
+    g.position.set(lx, ht, lz) // tronco al ras del agua
     g.rotation.y = q() * 6.2832
     scene.add(g)
-    floatLogs.push({ g, drift: q() * 6.2832, spin: (q() - 0.5) * 0.06, phase: q() * 6.2832 })
+    floatLogs.push({ g, drift: q() * 6.2832, spin: (q() - 0.5) * 0.04, phase: q() * 6.2832 })
   }
   function updateLogs(step, t) {
     for (const L of floatLogs) {
-      // Deriva lenta + cabeceo + giro suave; se mantiene dentro de la laguna.
+      // Deriva lenta PLANA (sin cabeceo que lo incline); giro suave en Y.
       const sp = 0.6
-      L.g.position.x += Math.cos(L.drift) * sp * step
-      L.g.position.z += Math.sin(L.drift) * sp * step
-      const rr = Math.hypot(L.g.position.x, L.g.position.z)
-      if (rr > mt * 0.85) L.drift += Math.PI + (q() - 0.5)
-      L.g.position.y = ht + 0.35 + Math.sin(t * 0.9 + L.phase) * 0.12
+      const nx = L.g.position.x + Math.cos(L.drift) * sp * step
+      const nz = L.g.position.z + Math.sin(L.drift) * sp * step
+      // Rebota si tocaría una isla (no la atraviesa) o el borde de la laguna.
+      let blocked = Math.hypot(nx, nz) > mt * 0.88
+      if (!blocked) {
+        for (const L2 of lobes) {
+          const dx = nx - L2.x, dz = nz - L2.z
+          const rad = Math.max(L2.rx, L2.rz) * 1.15 + 4
+          if (dx * dx + dz * dz < rad * rad) { blocked = true; break }
+        }
+      }
+      if (blocked) L.drift += Math.PI + (q() - 0.5) * 0.6
+      else { L.g.position.x = nx; L.g.position.z = nz }
+      L.g.position.y = ht + Math.sin(t * 0.9 + L.phase) * 0.1   // flota al ras
       L.g.rotation.y += L.spin * step
-      L.g.rotation.x = Math.sin(t * 0.7 + L.phase) * 0.05
+      L.g.rotation.x = 0; L.g.rotation.z = 0                     // siempre plano
     }
   }
 
@@ -700,12 +717,14 @@ export function createPond(container, cfg, agentNames = []) {
   const roamers = createRoamers(cfg.wander, n, q)
   const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
   const LR = mt * 1.05
+  // Obstáculos: las islas. Los agentes las bordean (no las atraviesan).
+  const islandObs = lobes.map((L) => ({ x: L.x / LR, z: L.z / LR, r: (Math.max(L.rx, L.rz) * 1.06) / LR }))
   const worldPos = new Float32Array(n * 3)
   let simTime = 0
   function mapPositions(dt, t) {
     simTime += dt
-    updateRoamers(roamers, cfg.wander, dt, q, simTime, null, null, null)
-    updateRoamers(extraRoamers, cfg.wander, dt, q, simTime + 31.7, null, null, null)
+    updateRoamers(roamers, cfg.wander, dt, q, simTime, null, null, islandObs)
+    updateRoamers(extraRoamers, cfg.wander, dt, q, simTime + 31.7, null, null, islandObs)
     for (let i = 0; i < EXTRA; i++) {
       const a = extras[i], r = extraRoamers[i]
       let j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)

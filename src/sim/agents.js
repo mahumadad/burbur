@@ -175,11 +175,37 @@ export function createCensus(source, visibleCount, rand = Math.random, isAerial 
   return { census, visible }
 }
 
-/** Peso de un agente según la hora: nocturnos de noche, cantores al alba, etc. */
-export function timeWeight(agent, phase) {
+// ─── COMPORTAMIENTO GENERAL (tendencias de actividad por hora y clima) ──────
+// Aves GRANDES o de agua: vuelan aunque llueva. Las chicas se refugian con
+// lluvia (regla: "los pájaros, a menos que sean grandes, no vuelan mucho en
+// lluvia"). Por nombre para no tener que marcar cada entrada del censo.
+const LARGE_FLIERS = new Set([
+  'jote', 'tucúquere', 'lechuza',                        // rapaces / carroñeros
+  'garza cuca', 'garza grande', 'cisne de cuello negro', // zancudas / cisne
+  'yeco', 'hualas', 'tagua', 'pidén',                    // aves de agua
+  'pato jergón', 'pato colorado',                        // patos
+])
+// Crepusculares: más activos al AMANECER y al ATARDECER (regla del usuario).
+// Los nocturnos ya se rigen por `night`; acá van los que no son de noche plena.
+const CREPUSCULAR = new Set(['degú', 'liebre'])
+
+/**
+ * Peso de actividad de un agente según hora y clima. Rige el comportamiento
+ * general: cuándo aparece/suena cada animalito.
+ * @param {object} agent  entrada del censo (name, type, night?, dawn?)
+ * @param {string} phase  fase de la hora
+ * @param {string} [weather]  clima actual (para la regla de lluvia)
+ */
+export function timeWeight(agent, phase, weather) {
   const night = phase === 'night' || phase === 'pre-dawn'
   const dawn = phase === 'dawn chorus' || phase === 'first light'
-  if (agent.night) return night ? 3 : 0.15
-  if (agent.dawn) return dawn ? 3 : 1
-  return 1
+  const dusk = phase === 'golden hour' || phase === 'dusk'
+  let w = 1
+  if (agent.night) w = night ? 3 : 0.2                              // nocturnos
+  else if (agent.dawn) w = dawn ? 3 : dusk ? 1.8 : 1                // cantores: alba fuerte, ocaso algo
+  else if (CREPUSCULAR.has(agent.name)) w = (dawn || dusk) ? 2.6 : 1 // crepusculares: alba y ocaso
+  if (agent.type === 'human') w *= 0.35                             // pocos transeúntes
+  const raining = weather === 'light rain' || weather === 'heavy rain'
+  if (raining && agent.type === 'flying_animal' && !LARGE_FLIERS.has(agent.name)) w *= 0.25
+  return w
 }
