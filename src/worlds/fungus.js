@@ -1284,6 +1284,8 @@ export function createFungusScene(container, cfg, agentNames = []) {
   }
 
   let clock = 0
+  let demarcCooldown = 0        // s hasta poder narrar otra vez la demarcación
+  const DEMARC_EVERY = 22       // cadencia mínima de la línea de demarcación
 
   function update(swarm, dt, eco) {
     const step = dt || 0.016
@@ -1304,13 +1306,21 @@ export function createFungusScene(container, cfg, agentNames = []) {
     }
     const events = []
     const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
-    // Demarcación: dos colonias se tocan y NO se fusionan → línea negra (spec §5).
+    // Demarcación: dos colonias se tocan y NO se fusionan → zone line (spec §5).
+    // El frente trabado dispara barreras SIN PARAR (decenas por segundo), así
+    // que la marca visual se pinta con cada una, pero el REGISTRO se narra a lo
+    // sumo cada `DEMARC_EVERY` segundos — si no, la misma línea inunda el log en
+    // un loop. Es un estado que dura, no una noticia nueva por frame.
+    demarcCooldown -= step
+    let sawBarrier = false
     for (const ev of netEvents) {
       if (ev.type !== 'barrier') continue
       addZoneMark(ev)
-      if (rnd() < 0.02) {
-        events.push({ type: 'conflict', agent: 'Pleurotus', agentType: 'colony', kind: 'demarcation' })
-      }
+      sawBarrier = true
+    }
+    if (sawBarrier && demarcCooldown <= 0) {
+      demarcCooldown = DEMARC_EVERY
+      events.push({ type: 'conflict', agent: 'Pleurotus', agentType: 'colony', kind: 'demarcation' })
     }
 
     // El micelio COME donde tiene puntas: eso agota el sustrato localmente, y
