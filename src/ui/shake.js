@@ -1,20 +1,9 @@
-// "Shake": botón + gestos reales que sacuden el mundo. En murmur.living el shake
-// de la web es un botón (no hay acelerómetro); acá lo replicamos como botón y
-// ADEMÁS agregamos gesto físico: devicemotion en móvil y sacudida rápida de
-// mouse en desktop. Todos llaman al mismo onShake.
+// "Shake": gestos reales que sacuden el mundo + la animación de vibración. El
+// BOTÓN ahora es una tarjeta del selector vertical (ui/selector.js), que llama a
+// `trigger`; acá quedan solo los gestos físicos y el meneo del canvas. Todos
+// pasan por `trigger` → animación + onShake.
 
 const CSS = `
-.shake-btn {
-  position: fixed; bottom: 16px; right: 16px; z-index: 20;
-  display: inline-flex; align-items: center; gap: 7px;
-  padding: 8px 14px; border-radius: 999px; cursor: pointer;
-  background: rgba(6, 10, 8, 0.62); backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.10); color: #eafff0;
-  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.10em; text-transform: uppercase; user-select: none;
-}
-.shake-btn:hover { border-color: var(--accent, #8fe04a); color: var(--accent, #8fe04a); }
-.shake-btn .g { font-size: 13px; line-height: 1; }
 @keyframes wshake {
   10%, 90% { transform: translate3d(-1px, 0, 0); }
   20%, 80% { transform: translate3d(2px, 0, 0); }
@@ -29,11 +18,6 @@ export function createShake(onShake) {
   style.textContent = CSS
   document.head.appendChild(style)
 
-  const btn = document.createElement('button')
-  btn.className = 'shake-btn'
-  btn.innerHTML = `<span class="g">⤨</span>agitar`
-  document.body.appendChild(btn)
-
   let lastTrigger = 0
   function trigger() {
     const now = performance.now()
@@ -44,14 +28,13 @@ export function createShake(onShake) {
     onShake()
   }
 
-  btn.addEventListener('click', () => {
-    // En iOS el acelerómetro requiere permiso tras un gesto: lo pedimos aquí.
+  // iOS: el acelerómetro requiere permiso tras un gesto del usuario. Lo pedimos
+  // en el primer tap (el mismo que entra al mundo ya sirve).
+  window.addEventListener('pointerdown', function reqPerm() {
     const DME = window.DeviceMotionEvent
-    if (DME && typeof DME.requestPermission === 'function') {
-      DME.requestPermission().catch(() => {})
-    }
-    trigger()
-  })
+    if (DME && typeof DME.requestPermission === 'function') DME.requestPermission().catch(() => {})
+    window.removeEventListener('pointerdown', reqPerm)
+  }, { once: true })
 
   // Gesto móvil: una sacudida física fuerte.
   window.addEventListener('devicemotion', (e) => {
@@ -77,5 +60,5 @@ export function createShake(onShake) {
     lastX = e.clientX
   })
 
-  return { el: btn, trigger }
+  return { trigger }
 }
