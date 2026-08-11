@@ -83,37 +83,37 @@ export const CELL_CENSUS = [
   { name: 'la onda de calcio', type: 'signal', static: true },
 ]
 
-/** Censo del estanque, por tipo. Coherente con los SFX del shake de agua del bundle
- * (heron/swan/geese/coot/moorhen/vole/cetti…). */
+/** Censo del estanque, por tipo. Fauna de humedal chilena, en español (coherente
+ * con el bosque). Móviles sin artículo; estáticos con artículo. */
 export const POND_CENSUS = [
-  // flying_animal (mayoría en un humedal)
-  { name: 'grey heron', type: 'flying_animal' },
-  { name: 'mute swan', type: 'flying_animal' },
-  { name: 'greylag goose', type: 'flying_animal' },
-  { name: 'coot', type: 'flying_animal' },
-  { name: 'moorhen', type: 'flying_animal' },
-  { name: 'mallard', type: 'flying_animal' },
-  { name: 'kingfisher', type: 'flying_animal' },
-  { name: 'great crested grebe', type: 'flying_animal' },
-  { name: "cetti's warbler", type: 'flying_animal', dawn: true },
-  { name: 'sedge warbler', type: 'flying_animal', dawn: true },
-  { name: 'tufted duck', type: 'flying_animal' },
-  { name: 'cormorant', type: 'flying_animal' },
-  { name: 'reed bunting', type: 'flying_animal' },
-  // walking_animal
-  { name: 'water vole', type: 'walking_animal', night: true },
-  { name: 'otter', type: 'walking_animal', night: true },
-  { name: 'common frog', type: 'walking_animal' },
-  { name: 'grass snake', type: 'walking_animal' },
-  // static_object (no se mueven pero suenan)
-  { name: 'the reedbed', type: 'static_object' },
-  { name: 'still water', type: 'static_object' },
-  { name: 'lily pads', type: 'static_object' },
-  { name: 'midges over water', type: 'static_object' },
+  // flying_animal — aves de humedal (mayoría)
+  { name: 'garza cuca', type: 'flying_animal' },
+  { name: 'cisne de cuello negro', type: 'flying_animal' },
+  { name: 'tagua', type: 'flying_animal' },
+  { name: 'pidén', type: 'flying_animal' },
+  { name: 'pato jergón', type: 'flying_animal' },
+  { name: 'martín pescador', type: 'flying_animal' },
+  { name: 'hualas', type: 'flying_animal' },
+  { name: 'siete colores', type: 'flying_animal', dawn: true },
+  { name: 'trile', type: 'flying_animal', dawn: true },
+  { name: 'run-run', type: 'flying_animal' },
+  { name: 'pato colorado', type: 'flying_animal' },
+  { name: 'yeco', type: 'flying_animal' },
+  { name: 'garza grande', type: 'flying_animal' },
+  // walking_animal — de la ribera
+  { name: 'coipo', type: 'walking_animal', night: true },
+  { name: 'huillín', type: 'walking_animal', night: true },
+  { name: 'rana chilena', type: 'walking_animal' },
+  { name: 'culebra de cola larga', type: 'walking_animal' },
+  // static_object — el paisaje: no deambula pero suena
+  { name: 'el juncal', type: 'static_object' },
+  { name: 'el agua quieta', type: 'static_object' },
+  { name: 'los nenúfares', type: 'static_object' },
+  { name: 'los mosquitos', type: 'static_object' },
   // human (raros)
-  { name: 'angler', type: 'human' },
-  { name: 'kayaker', type: 'human' },
-  { name: 'birdwatcher', type: 'human' },
+  { name: 'el pescador', type: 'human' },
+  { name: 'la kayakista', type: 'human' },
+  { name: 'el observador de aves', type: 'human' },
 ]
 
 /**
