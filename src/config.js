@@ -111,8 +111,9 @@ export const CONFIG = {
       turnRate: 0.5, bias: 1.0, noise: 0.9,
       maxSpeed: 0.10, protrusionGain: 1.6, atpFloor: 0.3,
     },
+    // ~44 microtúbulos visibles (una célula real tiene cientos; ver spec §4.2bis).
     rails: {
-      count: 16, originX: 0.06, originZ: -0.04,
+      count: 44, originX: 0.06, originZ: -0.04,
       minLen: 0.28, maxLen: 0.72,
       growRate: 0.045, shrinkRate: 0.26, catastrophe: 0.12, rescue: 0.4,
     },
@@ -136,11 +137,19 @@ export const CONFIG = {
       // se pegan a la línea exacta y parecen cuentas en un alambre.
       pathPull: 0.22, pathRadius: 0.20,
     },
-    ribosomes: 4200,
+    // Densidades según los modelos de referencia (spec §4.2bis): el realismo
+    // es densidad molecular, no pocas formas grandes.
+    ribosomes: 6400,
     substrateDots: 2600,
     cortexStrands: 190,
+    lamelliMesh: 130,       // malla dendrítica del lamelipodio (segmentos máx)
     adhesions: 30,
     nucleusR: 0.30,
+    pores: 46,              // poros nucleares visibles (reales: miles)
+    channels: 22,           // proteínas de canal montadas en la membrana
+    glycans: 16,            // glicoproteínas (espirales del glicocálix)
+    ifLoops: 12,            // filamentos intermedios: jaula alrededor del núcleo
+    mtBeads: 8,             // cuentas de tubulina α/β visibles por microtúbulo
     height: 3.2,            // altura de la lámina celular sobre el sustrato
   },
   render: {

@@ -328,6 +328,45 @@ Se mantienen sin excepción las reglas de `2026-08-10-lenguaje-visual.md`:
 | **Bacteria** | Bastón wireframe + flagelo helicoidal que rota visiblemente |
 | **Virión** | Icosaedro diminuto con espículas radiales. Casi invisible por tamaño real — se le da un halo tenue |
 
+### 4.2bis Estructuras reales — recetas extraídas de modelos 3D (2026-08-11)
+
+El usuario aportó 4 modelos 3D reales y pidió estructuras "más reales y complejas". Siguiendo la
+regla del proyecto (**no adivinar a ojo — extraer de la fuente**), se parsearon los archivos:
+
+| Archivo | Qué se extrajo | Lección |
+|---|---|---|
+| `animal-cell-20-annotated` (.blend) | **2015 esferas instanciadas**, 7 curvas Bézier, roundcubes, textura de Golgi | El realismo es sobre todo **densidad molecular**: miles de puntitos, no pocas formas grandes |
+| `cell-membrane` (.fbx, parseado nodo a nodo) | 1 esfera de **84 240 vértices** (campo de cabezas lipídicas) + **espirales** (glicoproteínas) + **toros** (canales) + **hexágonos** (balsas) + base | La membrana real no es una línea: es un campo de cabezas + **proteínas transmembrana** que la tachonan |
+| `Citoesqueleto` (.usdz) | Texturas nombradas: `alfabeta` (dímeros de tubulina), `cilindrosazules` (microtúbulos), `trenza/trena` (actina trenzada), `muelle` (filamento intermedio), `estrellas` (áster), `pliegues`, `bolitas` | Cada filamento tiene firma visual propia: MT = cilindro con cuentas α/β; actina = **trenza de 2 hebras**; FI = **muelle** |
+| `Mitochondria` (.usdz, 10.4 MB) | Un solo mesh esculpido con crestas | La mitocondria se lee por sus **crestas transversales onduladas**, no por barras rectas |
+
+Anclas cuantitativas (literatura/Allen Cell Explorer; HCA es transcriptómica, no morfología):
+célula extendida ~40 µm, núcleo ~1/3 del diámetro (✅ ya), **poros nucleares miles** (visibles:
+decenas, no 14), **microtúbulos cientos** irradiando del centrosoma (visibles: ~44, no 16),
+centrosoma = **2 centriolos ortogonales** de 9 tripletes, Golgi = cinta de **5–7 cisternas** con
+vesículas brotando del borde, ER **continuo con la envoltura nuclear**: láminas rugosas cerca +
+red tubular con **uniones de 3 vías** hacia la periferia, ribosomas ~10⁷ (el `.blend` usa 2015
+esferas: subimos los puntos), lamelipodio = malla dendrítica ramificada a ~70° (Arp2/3),
+filamentos intermedios = jaula ondulada alrededor del núcleo.
+
+Recetas de render (todas dentro del look matrix — líneas finas + puntos):
+
+1. **Membrana**: bicapa (2 contornos) + cabezas + **canales** (circulitos montados sobre el
+   contorno, del toro del FBX) + **glicoproteínas** (espirales cortas hacia afuera, el glicocálix).
+2. **Núcleo**: **doble envoltura** (2 esferas wireframe casi pegadas), ~46 poros como anillos
+   estáticos, cromatina densa, nucleolo.
+3. **ER**: láminas plegadas junto al núcleo (continuas con la envoltura) + red tubular poligonal
+   con uniones de 3 vías; ribosomas sobre las láminas y libres.
+4. **Golgi**: cinta de 6 cisternas × 5 capas con jitter + **vesículas brotando** en los bordes.
+5. **Microtúbulos**: par de líneas casi paralelas (se lee cilindro) + **cuentas alternadas** α/β
+   (2 tonos) que siguen al riel al crecer/colapsar; **centrosoma** = 2 barriles ortogonales de
+   9 líneas + material pericentriolar (puntos).
+6. **Actina cortical**: cada hebra = **2 sub-hebras trenzadas** (sinusoides en contrafase);
+   lamelipodio = malla ramificada ±35° respecto del radio, densidad ∝ protrusión.
+7. **Filamentos intermedios**: 10–14 lazos ondulados en jaula alrededor del núcleo.
+8. **Mitocondria (agente)**: cápsula (anillos en los extremos + 4 largueros curvos) con
+   **crestas en zigzag** transversales dentro.
+
 ### 4.3 Paleta
 
 Se reutiliza `PALETTE` de `src/config.js` sin inventar colores nuevos — es la paleta exacta de
