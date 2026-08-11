@@ -306,7 +306,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
     // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
     // aparecía todo hecho y no se veía crecer nada.)
-    for (let i = 0; i < 220; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
+    for (let i = 0; i < 620; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
   }
 
   // Dos registros visuales del micelio (spec §10). La red se dibuja con capacidad
@@ -316,11 +316,23 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // Calibrado contra los valores reales que produce la sim (mediana ≈ 5): con un
   // umbral bajo TODAS las aristas salían bundleadas y desbordaban el buffer.
   const CORD_W = 9
-  const netMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })
+  // Blending ADITIVO: el micelio no es un dibujo de líneas, es materia que
+  // BRILLA y se acumula. Donde muchas hifas se superponen el aditivo suma y
+  // aparece el mat algodonoso blanco; donde hay pocas queda un hilo tenue. Es
+  // lo que hace que se lea como micelio y no como un diagrama de red.
+  const netMat = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.85,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  })
   // Cada arista se dibuja curva (3 segmentos) y, si es cordón, ×3 hifas.
   const netBuf = createLineBuffer(cc.mycelium.maxEdges * 9, netMat)
   scene.add(netBuf.mesh)
-  const frontMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 })
+  // El frente plumoso también aditivo: el borde algodonoso se ve porque muchas
+  // hifas finas se suman, no porque cada una sea brillante.
+  const frontMat = new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.5,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  })
   const FAN = 10                       // hifas finas por punta (el borde plumoso)
   const frontBuf = createLineBuffer(cc.mycelium.maxTips * FAN * 3, frontMat)
   scene.add(frontBuf.mesh)

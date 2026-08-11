@@ -204,8 +204,8 @@ export const CONFIG = {
     // Denso: muchas puntas y ramificación alta, pasos cortos.
     mycelium: {
       maxNodes: 2600, maxEdges: 2800, maxTips: 260,
-      stepLen: 0.016, tipSpeed: 0.017, turnRate: 1.6, noise: 0.55,
-      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.1,
+      stepLen: 0.020, tipSpeed: 0.038, turnRate: 1.6, noise: 0.55,
+      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.6,
       fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.035, flowDecay: 0.35,
       pruneBelow: 0.1, pruneRate: 0.5, bound: 0.62,
     },
