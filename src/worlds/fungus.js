@@ -512,6 +512,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     for (const t of net.tips) {
       if (t.alive) consume(sub, t.x, t.z, cc.eatRate * step * growthMul)
     }
+    drawNetwork()
     drawFront()
     drawTips()
 
