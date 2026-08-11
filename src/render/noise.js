@@ -1,7 +1,8 @@
 // Ruido de valor 2D coherente. Puro: sin three/DOM.
 // Se usa para peinar el pasto en corrientes y para los campos del terreno.
 
-function hash2(x, y) {
+/** Hash determinista en [0,1) para un par de enteros. */
+export function hash2(x, y) {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453
   return s - Math.floor(s)
 }

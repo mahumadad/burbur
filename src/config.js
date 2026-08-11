@@ -224,8 +224,12 @@ export const CONFIG = {
     // curvado: `logArch` chico = leve guata arriba (un huequito, no un portal);
     // `logBury` chico = las puntas se hunden un poco. `logCurve` suave.
     // logSink: fracción del radio que queda ENTERRADA (el tronco se hunde en el
-    // suelo, no apoyado encima). logBury: cuánto más se hunden las puntas rotas.
-    substrate: { logAngle: 0.6, logCurve: 0.35, logArch: 0.07, logBury: 0.16, logSink: 0.4, logHalfLength: 0.52, logRadius: 0.2, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
+    // suelo, no apoyado encima). logBury: cuánto más se hunde la punta QUEBRADA
+    // — moderado a propósito: con la punta muy hundida el quiebre asomaba apenas
+    // un casquete y las astillas no tenían dónde verse.
+    // logLift: cuánto se LEVANTA la punta cortada (+eje) para que su disco de
+    // anillos apoye entero sobre el suelo, en vez de hundirse como la quebrada.
+    substrate: { logAngle: 0.6, logCurve: 0.35, logArch: 0.07, logBury: 0.10, logLift: 0.05, logSink: 0.4, logHalfLength: 0.52, logRadius: 0.2, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
     // Ajustado al look de placa de cultivo (referencia del usuario): más puntas
     // = borde más plumoso; más ramificación + autotropismo = rosetón radial que
     // se esparce parejo; más widthGain = rizomorfos (cordones) marcados.
@@ -258,7 +262,10 @@ export const CONFIG = {
     trapRadius: 0.05,
     fauna: 10,              // agentes visibles de fauna del suelo
     litter: 900,            // puntos de hojarasca
-    logDither: 11000,        // puntos de textura del tronco
+    // Bajo a propósito: la textura de la corteza la lleva la MALLA ILUMINADA
+    // (placas + fisuras + luz rasante). Con el dither alto, estos puntos sin
+    // iluminar se pintaban encima y aplanaban todo el relieve.
+    logDither: 3800,        // puntos de textura del tronco
   },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos

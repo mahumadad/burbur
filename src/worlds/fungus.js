@@ -9,6 +9,7 @@ import { createNetwork, updateNetwork, tipPositions } from '../sim/mycelium.js'
 import { createFruiting, updateFruiting } from '../sim/fruiting.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { noise2 } from '../render/noise.js'
+import { barkCell } from '../render/bark.js'
 
 // MUNDO MICELIO — vista cenital de un tramo de tronco podrido colonizado por
 // dos hongos en guerra (spec docs/superpowers/specs/2026-08-11-diseno-mundo-micelio.md).
@@ -118,13 +119,19 @@ export function createFungusScene(container, cfg, agentNames = []) {
   const baseA = cc.substrate.logAngle
   const archAmp = cc.substrate.logArch || 0
   const buryAmp = cc.substrate.logBury || 0
+  const liftAmp = cc.substrate.logLift || 0
   const sink = cc.substrate.logSink || 0   // fracción del radio enterrada
   function centerX(u) { return k ? (Math.sin(baseA + k * u) - Math.sin(baseA)) / k : logAx * u }
   function centerZ(u) { return k ? (Math.cos(baseA) - Math.cos(baseA + k * u)) / k : logAz * u }
-  /** Arco vertical del eje: el CENTRO se eleva (guata hacia arriba) y las dos
-   * PUNTAS se hunden bajo el suelo (t=±1 → -buryAmp). Deja un túnel en el medio.
-   * En unidades de MUNDO. */
-  function centerY(u) { const t = u / halfLen; return (archAmp * (1 - t * t) - buryAmp * t * t) * R * LOG_HEIGHT_SCALE }
+  /** Arco vertical del eje: el CENTRO se eleva (guata hacia arriba) y las puntas
+   * son ASIMÉTRICAS — la punta QUEBRADA (-u) se hunde bajo el suelo (-buryAmp),
+   * la punta CORTADA (+u) se LEVANTA (+liftAmp) para que su disco de anillos
+   * apoye entero sobre la tierra y se vea. En unidades de MUNDO. */
+  function centerY(u) {
+    const t = u / halfLen
+    const end = t < 0 ? -buryAmp * t * t : liftAmp * t * t
+    return (archAmp * (1 - t * t) + end) * R * LOG_HEIGHT_SCALE
+  }
   function perpX(u) { return -Math.sin(baseA + k * u) }
   function perpZ(u) { return Math.cos(baseA + k * u) }
   /** El punto más cercano del eje curvo a (x,z): devuelve [u, v] (v = offset
@@ -179,11 +186,12 @@ export function createFungusScene(container, cfg, agentNames = []) {
   function logEdgeAt(u, side) {
     return logRAt(u) * (0.82 + 0.3 * noise2(u * 4.7 + (side > 0 ? 31 : 61), side * 2.3))
   }
-  /** ¿(u,v) cae dentro del tronco, con su borde irregular? */
+  /** ¿(u,v) cae dentro del tronco, con su borde irregular? La punta +u está
+   * CORTADA (cara plana: más allá de halfLen no hay tronco) y la -u QUEBRADA,
+   * que se redondea al hundirse. */
   function insideLog(u, v) {
-    const uc = Math.max(-halfLen, Math.min(halfLen, u))
-    const over = u - uc
-    if (over !== 0) return Math.hypot(over, v) <= logRAt(uc) // puntas redondeadas
+    if (u > halfLen) return false
+    if (u < -halfLen) return Math.hypot(u + halfLen, v) <= logRAt(-halfLen)
     return Math.abs(v) <= logEdgeAt(u, Math.sign(v) || 1)
   }
   function bump(u, v) {
@@ -197,130 +205,304 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // (`axisY`), así el fondo toca y=0 y arriba llega a 2·radio. Esto es la mitad
   // de arriba (donde va el musgo y la red); el cuerpo redondo lo dibuja el tubo.
   function surfaceYUV(u, v) {
-    const uc = Math.max(-halfLen, Math.min(halfLen, u))
-    const overEnd = u - uc
+    if (u > halfLen) return 0            // más allá de la cara CORTADA es suelo
+    const uc = Math.max(-halfLen, u)
+    const overEnd = u - uc               // solo la punta quebrada se redondea
     const rad = Math.hypot(overEnd, v)
     const lr = logRAt(uc)
     const rr = Math.min(rad, lr)
     const axisY = lr * (1 - sink) * R * LOG_HEIGHT_SCALE   // hundido en el suelo
     const half = Math.sqrt(Math.max(0, lr * lr - rr * rr)) * R * LOG_HEIGHT_SCALE
-    return axisY + centerY(u) + half + (rad < lr ? bump(u, v) : 0)
+    // Nunca bajo tierra: sobre la punta hundida lo que hay es suelo, y lo que se
+    // apoye ahí (red, musgo, bichos) tiene que quedar a ras y no flotando.
+    return Math.max(0, axisY + centerY(u) + half + (rad < lr ? bump(u, v) : 0))
   }
   function uvToWorld(u, v) {
     return [centerX(u) + perpX(u) * v, centerZ(u) + perpZ(u) * v]
   }
 
-  // ─── TRONCO: CUERPO SÓLIDO como TUBO (cilindro completo) alrededor del eje
-  // curvo, apoyado en el suelo. Antes era un domo (media caña) con una "falda"
-  // que colgaba como sábana bajo tierra — feo en perspectiva baja. Ahora el
-  // tronco es redondo por TODOS lados: mirándolo desde abajo se ve su panza
-  // curva, no una lámina. La corteza rugosa (ruido en radio + color) va en toda
-  // la vuelta; el musgo y la red se apoyan en la mitad de arriba. ────────────
-  {
-    const NU = 200, NA = 64           // fina: los surcos necesitan resolución
-    const u0 = -halfLen - logR, u1 = halfLen + logR
-    const pos = [], col = [], idx = []
-    // Paletas de corteza para variar el TONO (no solo el brillo): gris, pardo
-    // rojizo, pardo oscuro — como una corteza real, no un marrón plano.
-    const BARK_A = [0.34, 0.25, 0.17]   // pardo claro (crestas)
-    const BARK_B = [0.11, 0.07, 0.045]  // pardo MUY oscuro (surcos)
-    const BARK_C = [0.19, 0.18, 0.16]   // gris (líquenes/edad)
-    for (let i = 0; i <= NU; i++) {
-      const u = u0 + (u1 - u0) * (i / NU)
-      const uc = Math.max(-halfLen, Math.min(halfLen, u))
-      const over = Math.max(0, Math.abs(u) - halfLen)
-      const cap = Math.sqrt(Math.max(0, 1 - (over / logR) * (over / logR)))
-      const worldR = logRAt(uc) * cap * R
-      const cx = centerX(u) * R, cz = centerZ(u) * R
-      const px = perpX(u), pz = perpZ(u)
-      const axisY = logRAt(uc) * (1 - sink) * R * LOG_HEIGHT_SCALE  // hundido
-      const f = edgeFade(centerX(u), centerZ(u))
-      const cy = centerY(u)
-      for (let a = 0; a <= NA; a++) {
-        const th = (a % NA) / NA * Math.PI * 2
-        const st = Math.sin(th), ct = Math.cos(th)
-        // SURCOS PROFUNDOS: ~13 crestas alrededor, onduladas a lo largo, que
-        // MUERDEN la silueta (crestas afuera, surcos MUY adentro) — así el
-        // contorno se ve dentado, no un chorizo liso.
-        const wander = noise2(u * 1.3, th * 0.5) * 4
-        const plate = Math.pow(Math.abs(Math.sin(th * 6.5 + wander + u * 2)), 0.7) // 0 surco, 1 cresta
-        const knots = noise2(u * 3, th * 1.2)                     // bultos/nudos anchos
-        const micro = noise2(u * 34 + a, th * 9)                   // grano fino
-        // Surcos MÁS profundos → más variación de normal → más sombra (Lambert).
-        const rough = 1 + 0.30 * plate - 0.24 * (1 - plate) + 0.12 * (knots - 0.5) + 0.06 * (micro - 0.5) * 2
-        const rr = worldR * Math.max(0.45, rough)
-        const x = cx + px * rr * st
-        const z = cz + pz * rr * st
-        const y = axisY + cy + rr * ct                            // puede hundirse bajo el suelo (puntas)
-        pos.push(x, y, z)
-        // COLOR = ALBEDO oscuro (la LUZ Lambert genera el volumen; nada de brillo
-        // horneado). Mezcla de tres tonos por ruido + AO: los surcos van más
-        // oscuros aunque les pegue la luz.
-        const mixAB = plate
-        const grey = Math.max(0, (noise2(u * 1.1 - 15, th * 0.9) - 0.55) * 3)
-        let br = BARK_A[0] * mixAB + BARK_B[0] * (1 - mixAB)
-        let bg = BARK_A[1] * mixAB + BARK_B[1] * (1 - mixAB)
-        let bb = BARK_A[2] * mixAB + BARK_B[2] * (1 - mixAB)
-        br = br * (1 - grey) + BARK_C[0] * grey
-        bg = bg * (1 - grey) + BARK_C[1] * grey
-        bb = bb * (1 - grey) + BARK_C[2] * grey
-        const ao = (0.35 + 0.65 * plate) * (0.8 + 0.2 * micro)    // surcos ocluidos
-        col.push(br * ao, bg * ao, bb * ao)
-      }
-    }
-    const ring = NA + 1
-    for (let i = 0; i < NU; i++) {
-      for (let a = 0; a < NA; a++) {
-        const p0 = i * ring + a, p1 = (i + 1) * ring + a
-        const p2 = i * ring + a + 1, p3 = (i + 1) * ring + a + 1
-        idx.push(p0, p1, p2, p1, p3, p2)
-      }
-    }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
-    geo.setIndex(idx)
-    geo.computeVertexNormals()
-    // Lambert (NO basic): la referencia consigue la textura con LUZ sobre la
-    // geometría rugosa. El resto del mundo es unlit (points/lines/basic) y no
-    // ve las luces; solo el tronco las aprovecha para tener sombras reales en
-    // los surcos y en la cara inferior.
-    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })))
-    const sun = new THREE.DirectionalLight(0xfff2e2, 1.5)
-    sun.position.set(0.4, 1, 0.25)
-    scene.add(sun)
-    scene.add(new THREE.AmbientLight(0x3a3a44, 1.0))
+  // ─── CORTEZA DE PLACAS. La corteza de un tronco viejo no son surcos
+  // paralelos: son PLACAS poligonales irregulares separadas por fisuras hondas
+  // casi negras, con motas anaranjadas donde la placa se descascara (fotos de
+  // referencia). La técnica es la de alikim (docs/tronco-musgo.md): NO hay imagen
+  // de textura — la textura la hace la LUZ sobre la geometría rugosa. Por eso el
+  // relieve muerde el radio de verdad y las normales se perturban a mano. ─────
+  const C_PLATE = [0.46, 0.44, 0.40]   // cara de la placa (gris apenas pardo)
+  const C_RIM = [0.21, 0.20, 0.18]     // borde de la placa, ya en penumbra
+  const C_FISS = [0.05, 0.045, 0.04]   // fisura: casi negro
+  const C_FLECK = [0.46, 0.26, 0.12]   // descascarado anaranjado
+  const C_HEART = [0.42, 0.28, 0.16]   // duramen: centro más oscuro y rojizo
+  const C_SPLINTER = [0.66, 0.56, 0.38]
+  const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t) }
+  const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+
+  /** Relieve + albedo de la corteza en (u, θ). `k` multiplica el radio: las
+   * placas sobresalen y las fisuras muerden hacia adentro, así el CONTORNO sale
+   * dentado y no un chorizo liso. */
+  function barkAt(u, th, around, along) {
+    const { edge, id } = barkCell(u, th, around, along)
+    // Rampa CORTA: la placa llega enseguida a su altura plena y se queda plana,
+    // y la caída a la fisura es un tajo. Con una rampa larga las placas salían
+    // abombadas como escamas de piña, no como placas partidas.
+    const plate = smoothstep(0, 0.22, edge)
+    const grain = noise2(u * 24, th * 3.1)         // veta a lo largo del eje
+    const micro = noise2(u * 68 + 9, th * 13)      // grano fino
+    const k = 1 + 0.05 * plate - 0.21 * (1 - plate)
+      + 0.045 * (id - 0.5) * plate                 // cada placa a distinta altura
+      + 0.025 * (grain - 0.5) + 0.022 * (micro - 0.5)
+    let c = mix3(C_FISS, C_RIM, smoothstep(0, 0.14, edge))
+    c = mix3(c, C_PLATE, smoothstep(0.14, 0.45, edge))
+    const tone = 0.76 + 0.44 * id                  // unas placas más claras que otras
+    c = [c[0] * tone, c[1] * tone * 0.99, c[2] * tone * 0.96]
+    const fleck = noise2(u * 38 + id * 60, th * 7.5)
+    if (fleck > 0.78) c = mix3(c, C_FLECK, plate * (fleck - 0.78) * 1.6)
+    const ao = (0.28 + 0.72 * plate) * (0.88 + 0.12 * micro)
+    return { k, col: [c[0] * ao, c[1] * ao, c[2] * ao] }
+  }
+  /** Perturbación de la NORMAL (el `noiseNor` de la receta): coherente a escala
+   * micro, así el sombreado se vuelve rugoso sin agregar un solo polígono. */
+  function barkJitter(u, th) {
+    return [
+      noise2(u * 55, th * 11) - 0.5,
+      noise2(u * 55 + 17, th * 11 + 5) - 0.5,
+      noise2(u * 55 + 41, th * 11 + 23) - 0.5,
+    ]
   }
 
-  // ─── PUNTAS ROTAS: donde el tronco entra en la tierra no está cortado limpio
-  // sino QUEBRADO, con astillas de madera clara (albura) apuntando afuera y
-  // hacia arriba, irregulares — un tronco partido, no serruchado. ────────────
-  {
-    const C_SPLINTER = [0.72, 0.62, 0.42]
-    for (const endSign of [-1, 1]) {
-      const endU = endSign * (halfLen + logR * 0.15)
-      const lr = logRAt(Math.max(-halfLen, Math.min(halfLen, endU)))
-      const [ex, ez] = uvToWorld(endU, 0)
-      const baseY = logRAt(Math.max(-halfLen, Math.min(halfLen, endU))) * (1 - sink) * R + centerY(endU)
-      const tang = endSign > 0 ? baseA + k * halfLen : baseA - k * halfLen
-      const N = 26
-      for (let s = 0; s < N; s++) {
-        // Punto de arranque en la cara del quiebre (círculo de la sección).
-        const th = rnd() * Math.PI * 2
-        const rad = lr * R * (0.2 + rnd() * 0.85)
-        const bx = ex * R + perpX(endU) * rad * Math.sin(th)
-        const bz = ez * R + perpZ(endU) * rad * Math.sin(th)
-        const by = Math.max(0, baseY + rad * Math.cos(th))
-        // La astilla sale a lo largo del eje (hacia afuera) + arriba, irregular.
-        const len = (3 + rnd() * rnd() * 14)
-        const tx = bx + Math.cos(tang) * endSign * len + (rnd() - 0.5) * 4
-        const tz = bz + Math.sin(tang) * endSign * len + (rnd() - 0.5) * 4
-        const ty = by + (rnd() - 0.3) * 8
-        const fade = edgeFade(bx / R, bz / R)
-        draw.pushLine(bx, by, bz, tx, ty, tz,
-          tint(C_SPLINTER, 0.9 * fade), tint(C_SPLINTER, 0.3 * fade))
+  // Todo lo leñoso —tronco, ramas, discos de anillos, astillas— va a la MISMA
+  // malla iluminada: una sola geometría, un solo material, una sola luz.
+  const wPos = [], wCol = [], wJit = [], wIdx = []
+  function wVert(x, y, z, c, jit) {
+    wPos.push(x, y, z)
+    wCol.push(c[0], c[1], c[2])
+    wJit.push(jit ? jit[0] : 0, jit ? jit[1] : 0, jit ? jit[2] : 0)
+    return wPos.length / 3 - 1
+  }
+  function wQuad(a, b, c, d) { wIdx.push(a, b, c, b, d, c) }
+
+  /** Tubo de corteza sobre un eje arbitrario. `axis(u)` da el punto del eje en
+   * MUNDO y `dirP/dirQ(u)` los dos ejes unitarios de la sección; `rad(u)` el
+   * radio. Devuelve la última corona de vértices, para taparla. */
+  function pushBarkTube({ u0, u1, NU, NA, axis, dirP, dirQ, rad, around, along }) {
+    const rings = []
+    for (let i = 0; i <= NU; i++) {
+      const u = u0 + (u1 - u0) * (i / NU)
+      const [cx, cy, cz] = axis(u)
+      const [px, py, pz] = dirP(u)
+      const [qx, qy, qz] = dirQ(u)
+      const r0 = rad(u)
+      const row = []
+      for (let a = 0; a < NA; a++) {
+        const th = (a / NA) * Math.PI * 2
+        const b = barkAt(u, th, around, along)
+        const rr = r0 * b.k
+        const st = Math.sin(th) * rr, ct = Math.cos(th) * rr
+        row.push(wVert(cx + px * st + qx * ct, cy + py * st + qy * ct, cz + pz * st + qz * ct,
+          b.col, barkJitter(u, th)))
+      }
+      rings.push(row)
+    }
+    for (let i = 0; i < NU; i++) {
+      for (let a = 0; a < NA; a++) {
+        const b = (a + 1) % NA
+        wQuad(rings[i][a], rings[i + 1][a], rings[i][b], rings[i + 1][b])
       }
     }
+    return rings[rings.length - 1]
+  }
+
+  /** Cara CORTADA: el disco de anillos de crecimiento. Albura crema afuera,
+   * duramen oscuro al centro, anillos concéntricos de espaciado irregular y
+   * veta radial — el rasgo que define un tronco serruchado. */
+  function pushRingDisc({ cx, cy, cz, dirP, dirQ, nrm, rimR, NRAD, NA, rings, seed, relief }) {
+    const face = (t, th) => {
+      // La cara no es un plano perfecto: la sierra deja ondulación, y esa
+      // ondulación es lo que le da algo a la luz para agarrarse. La parte
+      // angular tiene que ser PERIÓDICA en θ (senos de múltiplos enteros): con
+      // ruido crudo la cara se partía en gajos y el disco se leía como flor.
+      const d = ((noise2(t * 7 + seed, 0.5) - 0.5) + 0.35 * Math.sin(th * 5 + t * 11 + seed)) * relief
+      const r = rimR(th) * t
+      const st = Math.sin(th) * r, ct = Math.cos(th) * r
+      return [cx + dirP[0] * st + dirQ[0] * ct + nrm[0] * d,
+        cy + dirP[1] * st + dirQ[1] * ct + nrm[1] * d,
+        cz + dirP[2] * st + dirQ[2] * ct + nrm[2] * d]
+    }
+    const shade = (t, th) => {
+      let c = mix3(C_HEART, C_SAPWOOD, smoothstep(0.05, 0.55, t))
+      // Anillos de crecimiento: MUCHAS bandas finas por radio (un tronco tiene
+      // decenas), con el espaciado modulado por ruido — no son equidistantes.
+      const band = 0.5 + 0.5 * Math.sin(t * rings + noise2(t * 5 + seed, 0.5) * 9)
+      c = tint(c, 0.76 + 0.3 * band)
+      // Veta radial: estrías finas del centro hacia la corteza. Periódica en θ.
+      const ray = 0.5 + 0.5 * Math.sin(th * 47 + Math.sin(th * 9 + seed) * 3)
+      c = tint(c, 0.92 + 0.12 * ray)
+      // El borde se apaga hacia la corteza que orla el corte.
+      return mix3(c, C_RIM, smoothstep(0.88, 1, t))
+    }
+    const center = wVert(...face(0, 0), shade(0, 0))
+    let prev = null
+    for (let i = 1; i <= NRAD; i++) {
+      const t = i / NRAD
+      const row = []
+      for (let a = 0; a < NA; a++) {
+        const th = (a / NA) * Math.PI * 2
+        row.push(wVert(...face(t, th), shade(t, th)))
+      }
+      for (let a = 0; a < NA; a++) {
+        const b = (a + 1) % NA
+        if (prev) wQuad(prev[a], row[a], prev[b], row[b])
+        else wIdx.push(center, row[a], row[b])
+      }
+      prev = row
+    }
+  }
+
+  /** Astilla: pirámide de 3 caras, ancha en la base y afilada en la punta.
+   * Madera clara — es albura fresca del quiebre, no corteza. */
+  function pushSplinter(bx, by, bz, dx, dy, dz, wid, cBase, cTip) {
+    const len = Math.hypot(dx, dy, dz) || 1
+    const ux = dx / len, uy = dy / len, uz = dz / len
+    // Dos perpendiculares a la dirección de la astilla.
+    let ax = 0, ay = 1, az = 0
+    if (Math.abs(uy) > 0.9) { ax = 1; ay = 0 }
+    let e1x = uy * az - uz * ay, e1y = uz * ax - ux * az, e1z = ux * ay - uy * ax
+    const e1n = Math.hypot(e1x, e1y, e1z) || 1
+    e1x /= e1n; e1y /= e1n; e1z /= e1n
+    const e2x = uy * e1z - uz * e1y, e2y = uz * e1x - ux * e1z, e2z = ux * e1y - uy * e1x
+    const base = []
+    for (let i = 0; i < 3; i++) {
+      const an = (i / 3) * Math.PI * 2 + rnd()
+      const w = wid * (0.6 + rnd() * 0.8)
+      const c = Math.cos(an) * w, s = Math.sin(an) * w
+      base.push(wVert(bx + e1x * c + e2x * s, by + e1y * c + e2y * s, bz + e1z * c + e2z * s, cBase))
+    }
+    const tip = wVert(bx + dx, by + dy, bz + dz, cTip)
+    wIdx.push(base[0], base[1], tip, base[1], base[2], tip, base[2], base[0], tip)
+  }
+
+  // ─── TRONCO: tubo completo sobre el eje curvo. Punta -u QUEBRADA (redondeada,
+  // hundiéndose en la tierra); punta +u CORTADA (cara plana con anillos). ─────
+  // Placas CHICAS: en las fotos hay decenas dando la vuelta, no una docena de
+  // escamas grandes. La malla tiene que dar para que la fisura tenga ancho.
+  const BARK_AROUND = 28, BARK_ALONG = 16
+  const axisYAt = (u) => logRAt(Math.max(-halfLen, Math.min(halfLen, u))) * (1 - sink) * R * LOG_HEIGHT_SCALE
+  const logAxis = (u) => [centerX(u) * R, axisYAt(u) + centerY(u), centerZ(u) * R]
+  const logDirP = (u) => [perpX(u), 0, perpZ(u)]
+  const logDirQ = () => [0, 1, 0]
+  /** Radio del tubo: se redondea SOLO en la punta quebrada; la cortada termina
+   * plana en halfLen. */
+  function logTubeR(u) {
+    const over = Math.max(0, -halfLen - u)
+    const cap = Math.sqrt(Math.max(0, 1 - (over / logR) * (over / logR)))
+    return logRAt(Math.max(-halfLen, Math.min(halfLen, u))) * cap * R
+  }
+  {
+    pushBarkTube({
+      u0: -halfLen - logR, u1: halfLen, NU: 340, NA: 176,
+      axis: logAxis, dirP: logDirP, dirQ: logDirQ, rad: logTubeR,
+      around: BARK_AROUND, along: BARK_ALONG,
+    })
+  }
+
+  // ─── PUNTA CORTADA (+u): el disco de anillos, orlado por la corteza dentada
+  // que sobresale del corte. ─────────────────────────────────────────────────
+  {
+    const uEnd = halfLen
+    const [cx, cy, cz] = logAxis(uEnd)
+    const p = logDirP(uEnd), q = logDirQ()
+    // Tangente del eje en la cara: la normal del corte.
+    const [ax, ay, az] = logAxis(uEnd - 0.004)
+    let nx = cx - ax, ny = cy - ay, nz = cz - az
+    const nn = Math.hypot(nx, ny, nz) || 1
+    nx /= nn; ny /= nn; nz /= nn
+    const rimR = (th) => logTubeR(uEnd) * barkAt(uEnd, th, BARK_AROUND, BARK_ALONG).k
+    pushRingDisc({
+      cx: cx + nx * 0.3, cy: cy + ny * 0.3, cz: cz + nz * 0.3,
+      dirP: p, dirQ: q, nrm: [nx, ny, nz],
+      // NRAD alto: con pocos pasos radiales no se pueden resolver los anillos
+      // (quedaban 6 bandas gordas en vez de las decenas finas de la referencia).
+      rimR, NRAD: 96, NA: 176, rings: 155, seed: 3.7, relief: 0.35,
+    })
+    // Orla dentada: la corteza no se corta limpia, sobresale en dientes CHICOS
+    // pegados al borde — si son largos el disco se lee como una flor, no como
+    // un corte de sierra.
+    for (let i = 0; i < 70; i++) {
+      const th = rnd() * Math.PI * 2
+      const r = rimR(th) * (0.94 + rnd() * 0.08)
+      const st = Math.sin(th) * r, ct = Math.cos(th) * r
+      const bx = cx + p[0] * st + q[0] * ct, by = cy + p[1] * st + q[1] * ct, bz = cz + p[2] * st + q[2] * ct
+      if (by < 0.5) continue
+      const len = 0.8 + rnd() * rnd() * 2.2
+      const out = 0.5 + rnd() * 0.6
+      pushSplinter(bx, by, bz,
+        nx * len + (p[0] * st + q[0] * ct) / r * len * out,
+        ny * len + (p[1] * st + q[1] * ct) / r * len * out,
+        nz * len + (p[2] * st + q[2] * ct) / r * len * out,
+        0.35 + rnd() * 0.4, tint(C_RIM, 1.2), tint(C_RIM, 0.5))
+    }
+  }
+
+  // ─── PUNTA QUEBRADA (-u): el tronco no está serruchado de este lado, está
+  // PARTIDO — astillas de albura clara apuntando afuera y arriba mientras se
+  // hunde en la tierra. Solo en el arco que queda SOBRE el suelo: la mitad de
+  // abajo está enterrada y ahí no se vería nada. ─────────────────────────────
+  {
+    const uEnd = -halfLen - logR * 0.42
+    const [cx, cy, cz] = logAxis(uEnd)
+    const p = logDirP(uEnd), q = logDirQ()
+    const [bxx, byy, bzz] = logAxis(uEnd + 0.004)
+    let nx = cx - bxx, ny = cy - byy, nz = cz - bzz
+    const nn = Math.hypot(nx, ny, nz) || 1
+    nx /= nn; ny /= nn; nz /= nn
+    let placed = 0
+    for (let a = 0; a < 700 && placed < 46; a++) {
+      const th = rnd() * Math.PI * 2
+      const r = logTubeR(uEnd) * (0.3 + rnd() * 0.8)
+      const st = Math.sin(th) * r, ct = Math.cos(th) * r
+      const bx = cx + p[0] * st + q[0] * ct, by = cy + p[1] * st + q[1] * ct, bz = cz + p[2] * st + q[2] * ct
+      if (by < 1.5) continue                       // enterrada: no se vería
+      placed++
+      const len = 9 + rnd() * rnd() * 22
+      const up = 0.25 + rnd() * 0.8
+      pushSplinter(bx, by, bz,
+        nx * len + (rnd() - 0.5) * len * 0.5,
+        ny * len + up * len,
+        nz * len + (rnd() - 0.5) * len * 0.5,
+        1.4 + rnd() * 1.8,
+        tint(C_SPLINTER, 1.0), tint(C_SPLINTER, 0.5))
+    }
+  }
+
+  // ─── La malla leñosa completa + su luz. Lambert (NO basic): la textura la
+  // hace la LUZ sobre la geometría rugosa. El resto del mundo es unlit (points/
+  // lines/basic) y no ve estas luces; solo la madera las aprovecha. ───────────
+  {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(wPos), 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(wCol), 3))
+    geo.setIndex(wIdx)
+    geo.computeVertexNormals()
+    // `noiseNor` de la receta: perturbar las NORMALES además de las posiciones.
+    // Sin esto la corteza se lee lisa aunque el relieve esté ahí.
+    const nor = geo.attributes.normal.array
+    for (let i = 0; i < nor.length; i += 3) {
+      const nx = nor[i] + wJit[i] * 0.7
+      const ny = nor[i + 1] + wJit[i + 1] * 0.7
+      const nz = nor[i + 2] + wJit[i + 2] * 0.7
+      const n = Math.hypot(nx, ny, nz) || 1
+      nor[i] = nx / n; nor[i + 1] = ny / n; nor[i + 2] = nz / n
+    }
+    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide })))
+    // Sol RASANTE (~23° sobre el horizonte). Con el sol casi cenital que había
+    // antes, las fisuras no proyectaban sombra y toda la corteza quedaba con el
+    // mismo valor: plana. La luz baja es lo que convierte el relieve en textura.
+    const sun = new THREE.DirectionalLight(0xfff5e8, 2.4)
+    sun.position.set(0.94, 0.4, 0.16)
+    scene.add(sun)
+    // Ambiente frío y contenido: la fisura tiene que irse casi a negro, pero el
+    // flanco en penumbra (la cámara orbita: la mitad del tiempo se lo mira) debe
+    // seguir mostrando las placas y no ser un recorte negro.
+    scene.add(new THREE.AmbientLight(0x39404f, 0.95))
   }
 
   // ─── TRONCO (textura): la superficie sólida de arriba le da masa; esto le
@@ -342,19 +524,19 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const [x, z] = uvToWorld(u, v)
       const y = surfaceYUV(u, v) + 0.15
       const fade = edgeFade(x, z)
-      // Musgo: parches en el flanco -v (húmedo), donde el ruido lo permite.
-      // Musgo en PARCHES, no en todo el tronco (un tronco real tiene manchones
-      // de musgo y zonas de corteza pelada). Ruido de baja frecuencia = manchas
-      // grandes; el flanco húmedo -v tiene más, el lomo seco menos.
-      const mossN = noise2(u * 0.9 + 20, v * 1.4 + 9)
-      const lichenN = noise2(u * 3.3 - 12, v * 3.7 - 4)
+      // Musgo, liquen y corteza desprendida van en MANCHONES. Las frecuencias
+      // tienen que caer varias celdas de ruido dentro del rango real de (u,v):
+      // el tronco mide ~1.4 de largo y ~0.4 de ancho, así que con frecuencias
+      // de 1-3 el ruido no alcanzaba a variar y devolvía casi el mismo valor en
+      // todo el tronco — el musgo salía como MANTA y tapaba toda la corteza.
+      const mossN = noise2(u * 7 + 20, v * 16 + 9)
+      const lichenN = noise2(u * 9 - 12, v * 20 - 4)
       // Corteza DESPRENDIDA: parches donde ya se cayó y asoma la albura clara
       // — el rasgo más característico de un tronco en descomposición.
-      const peelN = noise2(u * 2.1 - 40, v * 2.9 + 17)
+      const peelN = noise2(u * 5 - 40, v * 11 + 17)
       let col, size
-      // El musgo cubre casi todo el lomo (un tronco caído en sombra húmeda), más
-      // tupido en el flanco -v; la corteza y la tierra asoman donde ralea.
-      const mossThresh = v < -lr * 0.1 ? 0.52 : 0.66
+      // Más tupido en el flanco -v (el húmedo), ralo en el lomo.
+      const mossThresh = v < -lr * 0.1 ? 0.56 : 0.66
       if (mossN > mossThresh) {
         // MUSGO como hojitas orientadas por la NORMAL de la superficie (técnica
         // de la referencia, doc tronco-musgo.md): en el lomo apuntan hacia
