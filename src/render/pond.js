@@ -455,6 +455,7 @@ export function createPond(container, cfg, agentNames = []) {
       spinY: params.spinY, effR: params.effR,
       // Las 2 primeras son garzas: pican al agua a cazar peces.
       hunter: i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
+      skyer: i === 4, crossCool: 8 + q() * 16, crossing: 0, crossDur: 1, crossTx: 0, crossTz: 0, crossHi: 0,
     })
     trailColors.push(KIND_COLOR[kind])
   }
@@ -668,6 +669,33 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
+  // Un agente ave, de vez en cuando, SUBE a cruzar el cielo bien alto y vuelve.
+  // Es un agente real (con nombre del censo, estela y etiqueta) — no un adorno.
+  function crossSky(step) {
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      if (!a.skyer) continue
+      if (a.crossing > 0) {
+        a.crossing -= step
+        const k = 1 - Math.max(0, a.crossing) / a.crossDur       // 0 → 1
+        // Arco alto: sube y baja (medio seno), pico ~ht+30..42.
+        worldPos[i * 3 + 1] = ht + Math.sin(Math.min(1, k) * Math.PI) * (30 + a.crossHi)
+        // Empuja su rumbo hacia el borde opuesto para que de verdad cruce.
+        const r = roamers[i]
+        const dx = a.crossTx - worldPos[i * 3], dz = a.crossTz - worldPos[i * 3 + 2], dd = Math.hypot(dx, dz) || 1
+        r.vx += dx / dd * 0.5 * step; r.vz += dz / dd * 0.5 * step
+        if (a.crossing <= 0) a.crossCool = 16 + q() * 34
+      } else {
+        a.crossCool -= step
+        if (a.crossCool <= 0) {
+          const ang = Math.atan2(worldPos[i * 3 + 2], worldPos[i * 3]) + Math.PI + (q() - 0.5)
+          a.crossTx = Math.cos(ang) * mt * 1.3; a.crossTz = Math.sin(ang) * mt * 1.3
+          a.crossHi = q() * 12; a.crossDur = 6 + q() * 4; a.crossing = a.crossDur
+        }
+      }
+    }
+  }
+
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
   const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
@@ -774,6 +802,7 @@ export function createPond(container, cfg, agentNames = []) {
     mapPositions(step, clock)
     fish.update(step, clock)      // mueve los peces primero
     huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
+    crossSky(step)                // un ave cruza el cielo alto de vez en cuando
     updateBugs(step, clock)
     updateFrogs(step)
     updateLogs(step, clock)
