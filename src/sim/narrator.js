@@ -201,6 +201,106 @@ export const CELL_LEXICON = {
     : { log: `${cap(ev.agent)} se traba en la contracción y se detiene.`, short: `${ev.agent} se detiene` }),
 }
 
+// ── MICELIO ──────────────────────────────────────────────────────────────────
+// El terreno es la comida y la red es el organismo. Acciones por tipo (fauna del
+// suelo, la red, las colonias, el sustrato) + por nombre para las estructuras que
+// hacen algo distinto. Ver spec §12.
+const FUNGUS_ACTIONS = {
+  soil_fauna: [
+    { l: 'hurga entre la hojarasca', s: 'hurga' },
+    { l: 'pastorea el frente de avance', s: 'pastorea' },
+    { l: 'se escurre por una grieta', s: 'se escurre' },
+    { l: 'mordisquea una hifa y sigue', s: 'mordisquea' },
+    { l: 'se queda quieto, husmeando', s: 'husmea' },
+  ],
+  mycelium: [
+    { l: 'palpa la madera y avanza', s: 'avanza' },
+    { l: 'se ramifica hacia el recurso', s: 'se ramifica' },
+    { l: 'reconoce a otra hifa y se funde', s: 'se funde' },
+    { l: 'engruesa hasta volverse cordón', s: 'engruesa' },
+    { l: 'reabsorbe una rama estéril', s: 'poda' },
+  ],
+  colony: [
+    { l: 'empuja su frente por la albura', s: 'coloniza' },
+    { l: 'consolida el territorio ganado', s: 'consolida' },
+    { l: 'invierte en cordones hacia el duramen', s: 'invierte' },
+  ],
+  substrate: [
+    { l: 'cruje al ceder una fibra', s: 'cruje' },
+    { l: 'suelta una placa de corteza', s: 'se descama' },
+    { l: 'gotea agua acumulada', s: 'gotea' },
+    { l: 'se ablanda un poco más', s: 'se pudre' },
+  ],
+  // ── por nombre: cada estructura hace lo suyo ──
+  'el cordón': [
+    { l: 'bombea alimento hacia el frente', s: 'bombea' },
+    { l: 'se engrosa con el flujo', s: 'se engrosa' },
+  ],
+  'el escarabajo muerto': [
+    { l: 'entrega su nitrógeno a la red', s: 'nutre' },
+    { l: 'queda envuelto en hifas', s: 'se envuelve' },
+  ],
+  Armillaria: [
+    { l: 'enciende sus rizomorfos en la oscuridad', s: 'brilla' },
+    { l: 'tira un cordón negro bajo la corteza', s: 'extiende cordón' },
+  ],
+  'el tronco': [
+    { l: 'cruje en lo hondo', s: 'cruje' },
+    { l: 'cede una veta al duramen', s: 'se abre' },
+  ],
+}
+
+const FUNGUS_AMBIENT = [
+  { l: 'Una gota cae de la corteza empapada', s: 'gotea la corteza' },
+  { l: 'La madera cruje al asentarse', s: 'cruje la madera' },
+  { l: 'Un hilo de red palpa la oscuridad y sigue', s: 'palpa la red' },
+  { l: 'Algo menudo se remueve en la hojarasca', s: 'se remueve la hojarasca' },
+  { l: 'Un cordón late, tenue, bajo la corteza', s: 'late el cordón' },
+  { l: 'El aire huele a tierra y a hongo', s: 'huele a hongo' },
+]
+
+export const FUNGUS_LEXICON = {
+  actions: FUNGUS_ACTIONS,
+  ambient: FUNGUS_AMBIENT,
+  fallbackType: 'substrate',
+  place: 'la madera',
+  moment: (ctx) => ({
+    log: `El tronco cruje mientras ${weatherES(ctx.weather)} se asienta sobre la madera.`,
+    short: 'cruje el tronco',
+  }),
+  overview: (ctx) => ({
+    log: `${cap(weatherES(ctx.weather))} se asienta sobre la madera mientras avanza ${phaseES(ctx.phase)}.`,
+    short: 'panorama',
+  }),
+  // El "día" es el ciclo de humedad: la red crece de noche y con rocío.
+  shift: (ctx) => ({
+    log: `El aire cambia hacia ${phaseES(ctx.phase)}.`,
+    short: `cambio · ${phaseES(ctx.phase)}`,
+  }),
+  // El conflicto va en dos sentidos: el hongo caza (trampa de nematodos) y la
+  // fauna del suelo pastorea el micelio. La cara la decide `ev.kind`/tipo.
+  conflict: (ctx, ev) => {
+    if (ev.kind === 'trap' || ev.kind === 'phagocytosis') {
+      // Fraseo sin "de {nombre}": los móviles del censo van sin artículo.
+      return { log: `${cap(ev.agent)} roza el toxocisto y se paraliza; la hifa lo penetra.`, short: `trampa · ${ev.agent}` }
+    }
+    if (ev.kind === 'demarcation') {
+      return { log: `${cap(ev.agent)} toca a su rival; se levanta la línea negra.`, short: `línea · ${ev.agent}` }
+    }
+    return { log: `${cap(ev.agent)} pastorea el frente; la red retrocede.`, short: `${ev.agent} pastorea` }
+  },
+  // Clímax: la fructificación. La emite el mundo con `kind` cuando corresponde.
+  fruiting: (ctx, ev) => {
+    const map = {
+      primordia: { log: 'Asoman los primeros primordios en el flanco.', short: 'primordios' },
+      deformed: { log: 'La fructificación sale deforme: astas sin sombrero.', short: 'fructificación deforme' },
+      sporulating: { log: 'El sombrero se abre y suelta la bruma de esporas.', short: 'esporulación' },
+      newlog: { log: 'Cae un tronco nuevo sobre la hojarasca.', short: 'tronco nuevo' },
+    }
+    return map[ev.kind] || map.primordia
+  },
+}
+
 // Acciones por NOMBRE primero (si el léxico las trae), después por tipo.
 function action(type, rand, lex, name) {
   const list = (name && lex.actions[name]) || lex.actions[type] || lex.actions[lex.fallbackType]

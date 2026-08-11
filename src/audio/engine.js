@@ -210,6 +210,13 @@ export async function createAudio(cfg) {
       // Vida celular: bloops por tipo. Invasores más agudos; motores, graves.
       const f = type === 'invader' ? 320 + rand() * 130 : type === 'motor' ? 130 : 190 + rand() * 90
       bloop(f, t)
+    } else if (type === 'soil_fauna') {
+      rustleEnv.triggerAttackRelease(0.08, t) // roce menudo de bicho de suelo
+    } else if (type === 'mycelium' || type === 'colony') {
+      // Húmedo y grave: el "pico eléctrico" que emite la red (Adamatzky).
+      bloop(80 + rand() * 60, t)
+    } else if (type === 'substrate') {
+      buzzEnv.triggerAttackRelease(0.12, t) // madera/materia que cruje
     } else {
       chirp(700, 620, 0.14, t) // humano: silbido suave
     }
