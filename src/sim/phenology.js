@@ -77,5 +77,13 @@ export function phenology(env, curve = DEFAULT_CURVE) {
   // El prado: la lluvia FUERTE cierra las flores; la llovizna casi no las toca.
   const meadow = 1 - ss01(0.5, 1.0, rain)
 
-  return { bud, leaf, flower, fruit, autumn, meadow, shed, petals }
+  // Lo que se VE no es lo que HAY: con lluvia la copa se ralea y las flores se
+  // cierran. Es lo que hace legible que "si llueve también se caen algunas
+  // hojas" — las partículas sueltas casi no se notan a esta distancia.
+  // Importante: `shed` usa `leaf` SIN atenuar, porque si no la lluvia reduciría
+  // la caída en vez de aumentarla.
+  const leafShown = leaf * (1 - rain * 0.3)
+  const flowerShown = flower * (1 - rain * 0.7)
+
+  return { bud, leaf, flower, fruit, autumn, meadow, shed, petals, leafShown, flowerShown }
 }

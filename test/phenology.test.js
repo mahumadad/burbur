@@ -122,3 +122,23 @@ describe('invariante de las ventanas', () => {
     }
   })
 })
+
+describe('lo que se ve contra lo que hay', () => {
+  it('con lluvia la copa se ralea y las flores se cierran', () => {
+    const seco = en(VERANO, SECO)
+    const mojado = en(VERANO, LLUVIA)
+    expect(mojado.leafShown).toBeLessThan(seco.leafShown)
+    expect(en(PRIMAVERA, LLUVIA).flowerShown).toBeLessThan(en(PRIMAVERA, SECO).flowerShown)
+  })
+
+  it('la flor se cierra más que la hoja: es más frágil', () => {
+    const p = en(PRIMAVERA, LLUVIA)
+    expect(p.flowerShown / p.flower).toBeLessThan(p.leafShown / p.leaf)
+  })
+
+  it('la caída usa la hoja SIN atenuar: la lluvia la aumenta, no la reduce', () => {
+    // Si `shed` usara leafShown, llover reduciría la caída — justo al revés.
+    expect(en(VERANO, LLUVIA).shed).toBeGreaterThan(en(VERANO, SECO).shed)
+    expect(en(VERANO, SECO).leafShown).toBe(en(VERANO, SECO).leaf)
+  })
+})

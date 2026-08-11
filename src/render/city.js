@@ -2029,8 +2029,8 @@ export function createCityScene(container, cfg, agentNames = []) {
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.sakura.curve)
       foliageUniforms.uSeason.value = seasonT
-      foliageUniforms.uLeaf.value = phen.leaf
-      foliageUniforms.uFlower.value = phen.flower
+      foliageUniforms.uLeaf.value = phen.leafShown
+      foliageUniforms.uFlower.value = phen.flowerShown
       foliageUniforms.uAutumn.value = phen.autumn
       updateFallingLeaves(step, phen.shed, phen.autumn, phen.petals)
     }
