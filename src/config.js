@@ -132,11 +132,11 @@ export const CONFIG = {
     // macrófago vive casi siempre en G0 y solo entra en ciclo con señal
     // mitogénica SOSTENIDA (nutrientes o inflamación). Ver sim/cellCycle.js.
     cycle: {
-      atpMin: 0.55,
-      mitogenicMedia: ['nutrient rich', 'inflamed'],
-      readinessRate: 0.05,     // ~20 s sostenidos para decidirse
+      atpMin: 0.45,            // umbral de energía para entrar en ciclo
+      mitogenicMedia: ['nutrient rich', 'inflamed'],  // prolifera con nutrientes o inflamación
+      readinessRate: 0.05,     // ~20 s de señal sostenida para decidirse
       readinessDecay: 0.12,    // se desarma más rápido de lo que se arma
-      g1: 18, s: 22, g2: 12, m: 16, cyto: 8,
+      g1: 18, s: 22, g2: 12, m: 16, cyto: 8,   // segundos por etapa
       refractory: 90,          // no se divide en cadena
     },
     // Sustrato: se dibuja como un TILE periódico que se repite y hace wrap, así
@@ -156,7 +156,13 @@ export const CONFIG = {
       minLen: 0.28, maxLen: 0.72,
       growRate: 0.045, shrinkRate: 0.26, catastrophe: 0.12, rescue: 0.4,
     },
-    atp: { capacity: 26, speed: 0.42, arrive: 0.02, gainPerQuantum: 0.09, drain: 0.32 },
+    // Balance corregido: con los valores viejos (gain 0.09, drain 0.32) la
+    // producción (~0.14/s) no cubría la demanda a tensión normal (~0.18/s), así
+    // que el presupuesto se drenaba a 0 — la célula nunca acumulaba señal para
+    // el ciclo, y la motilidad quedaba débil. Ahora la producción supera la
+    // demanda en medio bueno (el presupuesto sube y se sostiene) y solo se hunde
+    // con hipoxia/ayuno (atpProdMul 0.4), que es cuando DEBE ampollarse.
+    atp: { capacity: 26, speed: 0.42, arrive: 0.02, gainPerQuantum: 0.12, drain: 0.20 },
     // Tráfico direccional (M3): kinesina lleva lo secretor (vesículas) hacia
     // afuera, dineína lo digestivo (lisosomas/endosomas) hacia el centro.
     traffic: { bias: 0.06, innerR: 0.12, outerR: 0.66 },
