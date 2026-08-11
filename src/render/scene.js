@@ -1169,14 +1169,26 @@ export function createScene(container, cfg, agentNames = []) {
     heightFn: terrainHeight,
   }).uniforms
 
-  // ─── AGENTES: jaula de aristas + criatura molecular + tallo ───────────────
-  // Un color por especie: la estela hereda el color de su individuo.
-  const AGENT_COLORS = [PALETTE.cyan, PALETTE.magenta, PALETTE.white, PALETTE.yellow]
+  // ─── AGENTES: jaula de aristas + molécula de colores + tallo ──────────────
+  // Un color por especie: la estela hereda el color de su individuo (alineado
+  // con SPECIES por índice).
+  const AGENT_COLORS = [
+    PALETTE.cyan, PALETTE.white, PALETTE.cyanSat,
+    PALETTE.white, PALETTE.magenta, PALETTE.yellow,
+  ]
   const kit = createAgentKit(rc)
-  const { fatLine, edgesOf, ringLoop, creature, wedge, pick } = kit
+  const { fatLine, ringLoop, boxCage, parallelepipedCage, frustumCage, edgesOf, creature, pick } = kit
 
-  // Las 4 especies del bosque, tal como las arma el original.
-  const SPECIES = ['cyan', 'flag', 'eye', 'dbl']
+  // Set de colores de la molécula por especie (cols[0] = núcleo).
+  const MOL = {
+    cube: [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyan],
+    slab: [PALETTE.magenta, PALETTE.white, PALETTE.yellow, PALETTE.orange],
+    frustum: [PALETTE.yellow, PALETTE.orange, PALETTE.white],
+    octa: [PALETTE.white, PALETTE.cyan, PALETTE.magenta],
+  }
+
+  // 6 especies del bosque: 4 jaulas prismáticas con molécula + trípode + doble anillo.
+  const SPECIES = ['cube', 'slab', 'frustum', 'octa', 'flag', 'dbl']
   const n = cfg.fireflies.count
   const agents = []
   for (let i = 0; i < n; i++) {
@@ -1184,31 +1196,30 @@ export function createScene(container, cfg, agentNames = []) {
     const group = new THREE.Group()
     let cage = null
 
-    if (kind === 'cyan') {
-      // Jaula cúbica de lado 6 + criatura dentro.
+    if (kind === 'cube') {
+      // Cubo cian de lado 6 + molécula (núcleo naranja).
       cage = new THREE.Group()
-      cage.add(edgesOf(new THREE.BoxGeometry(6, 6, 6), PALETTE.cyan))
-      cage.add(creature(1.15))
+      cage.add(boxCage(6, 6, 6, PALETTE.cyan))
+      cage.add(creature(1.15, MOL.cube))
       group.add(cage)
-    } else if (kind === 'eye') {
-      // Cuña planeadora (o octaedro) blanca + anillo, mástil y bolita.
+    } else if (kind === 'slab') {
+      // Paralelepípedo blanco alto con 2 travesaños + molécula magenta.
       cage = new THREE.Group()
-      cage.add(rnd() < 0.55
-        ? fatLine(wedge(1.15), PALETTE.white)
-        : edgesOf(new THREE.OctahedronGeometry(3.6), PALETTE.white))
+      cage.add(parallelepipedCage(5, 9, 5, PALETTE.white, 2))
+      cage.add(creature(1.1, MOL.slab))
       group.add(cage)
-      const deco = new THREE.Group()
-      const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
-        new THREE.MeshBasicMaterial({ color: PALETTE.magenta, side: THREE.DoubleSide }))
-      disc.rotation.x = -Math.PI / 2
-      deco.add(disc)
-      deco.add(ringLoop(1.55, 40, PALETTE.cyanEye))
-      deco.add(fatLine([0, 1, 0, 0, 4, 0], PALETTE.magenta))
-      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10),
-        new THREE.MeshBasicMaterial({ color: PALETTE.white }))
-      ball.position.set(0, 4, 0)
-      deco.add(ball)
-      group.add(deco)
+    } else if (kind === 'frustum') {
+      // Pirámide cortada (base 6, tope 3, alt 6) + molécula amarilla.
+      cage = new THREE.Group()
+      cage.add(frustumCage(6, 3, 6, PALETTE.cyan))
+      cage.add(creature(1.05, MOL.frustum))
+      group.add(cage)
+    } else if (kind === 'octa') {
+      // Octaedro blanco + molécula blanca.
+      cage = new THREE.Group()
+      cage.add(edgesOf(new THREE.OctahedronGeometry(3.6), PALETTE.white))
+      cage.add(creature(1.0, MOL.octa))
+      group.add(cage)
     } else if (kind === 'flag') {
       // Trípode: triángulo abajo, mástil y anillo arriba.
       const lo = -2.6, hi = 5, r = 2.8
@@ -1235,8 +1246,10 @@ export function createScene(container, cfg, agentNames = []) {
     // Parámetros de movimiento (del bundle): los cubos ruedan como esfera, los
     // planeadores se orientan al rumbo, los anillos giran en Y.
     let effR = 3.3, rollMul = 0, glide = false, spinY = 0
-    if (kind === 'cyan') { rollMul = 1; effR = 3.3 }
-    else if (kind === 'eye') { glide = rnd() < 0.55; rollMul = glide ? 0 : 0.3; effR = 6 }
+    if (kind === 'cube') { rollMul = 1; effR = 3.3 }
+    else if (kind === 'slab') { spinY = 0.3 }
+    else if (kind === 'frustum') { glide = true; effR = 6 }
+    else if (kind === 'octa') { rollMul = 0.4; effR = 3.6 }
     else if (kind === 'flag') { spinY = 0.5 }
     else { spinY = 0.7 } // dbl
 
