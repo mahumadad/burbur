@@ -232,7 +232,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
   const C_FISS = [0.05, 0.045, 0.04]   // fisura: casi negro
   const C_FLECK = [0.46, 0.26, 0.12]   // descascarado anaranjado
   const C_HEART = [0.42, 0.28, 0.16]   // duramen: centro más oscuro y rojizo
-  const C_SPLINTER = [0.66, 0.56, 0.38]
+  const C_SPLINTER = [0.78, 0.68, 0.48]   // albura fresca del quiebre
   const smoothstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t) }
   const mix3 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
 
@@ -447,29 +447,89 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // hunde en la tierra. Solo en el arco que queda SOBRE el suelo: la mitad de
   // abajo está enterrada y ahí no se vería nada. ─────────────────────────────
   {
-    const uEnd = -halfLen - logR * 0.42
-    const [cx, cy, cz] = logAxis(uEnd)
-    const p = logDirP(uEnd), q = logDirQ()
-    const [bxx, byy, bzz] = logAxis(uEnd + 0.004)
-    let nx = cx - bxx, ny = cy - byy, nz = cz - bzz
-    const nn = Math.hypot(nx, ny, nz) || 1
-    nx /= nn; ny /= nn; nz /= nn
     let placed = 0
-    for (let a = 0; a < 700 && placed < 46; a++) {
+    for (let a = 0; a < 900 && placed < 46; a++) {
+      // La base va SOBRE la superficie del tubo, cerca del extremo. Naciendo más
+      // adentro las astillas quedaban enterradas dentro de la propia geometría
+      // del tronco (el tubo sigue hasta -halfLen-logR) y no se veía ninguna.
+      const uS = -halfLen - logR * (0.5 + rnd() * 0.45)
+      const [cx, cy, cz] = logAxis(uS)
+      const p = logDirP(uS), q = logDirQ()
+      const [bxx, byy, bzz] = logAxis(uS + 0.004)
+      let nx = cx - bxx, ny = cy - byy, nz = cz - bzz
+      const nn = Math.hypot(nx, ny, nz) || 1
+      nx /= nn; ny /= nn; nz /= nn
       const th = rnd() * Math.PI * 2
-      const r = logTubeR(uEnd) * (0.3 + rnd() * 0.8)
-      const st = Math.sin(th) * r, ct = Math.cos(th) * r
-      const bx = cx + p[0] * st + q[0] * ct, by = cy + p[1] * st + q[1] * ct, bz = cz + p[2] * st + q[2] * ct
+      const r = logTubeR(uS) * 0.95
+      const rx = p[0] * Math.sin(th) + q[0] * Math.cos(th)
+      const ry = p[1] * Math.sin(th) + q[1] * Math.cos(th)
+      const rz = p[2] * Math.sin(th) + q[2] * Math.cos(th)
+      const bx = cx + rx * r, by = cy + ry * r, bz = cz + rz * r
       if (by < 1.5) continue                       // enterrada: no se vería
       placed++
-      const len = 9 + rnd() * rnd() * 22
-      const up = 0.25 + rnd() * 0.8
+      // Sale a lo largo del eje (hacia afuera del tronco) abriéndose en abanico
+      // por la normal radial, y siempre con algo de subida.
+      const len = 4.5 + rnd() * rnd() * 11
+      const fan = 0.25 + rnd() * 0.5
       pushSplinter(bx, by, bz,
-        nx * len + (rnd() - 0.5) * len * 0.5,
-        ny * len + up * len,
-        nz * len + (rnd() - 0.5) * len * 0.5,
-        1.4 + rnd() * 1.8,
-        tint(C_SPLINTER, 1.0), tint(C_SPLINTER, 0.5))
+        (nx + rx * fan) * len + (rnd() - 0.5) * len * 0.3,
+        (ny + ry * fan) * len + (0.25 + rnd() * 0.5) * len,
+        (nz + rz * fan) * len + (rnd() - 0.5) * len * 0.3,
+        0.85 + rnd() * 1.1,
+        tint(C_SPLINTER, 1.0), tint(C_SPLINTER, 0.55))
+    }
+  }
+
+  // ─── TOCONES DE RAMA: un tronco caído no es un cilindro pelado — tiene los
+  // muñones de las ramas que se le partieron. Cortos y gruesos, con la misma
+  // corteza de placas y su propio disquito de anillos en la punta. ───────────
+  for (const br of [
+    { u: -0.20, th: 1.05, len: 1.5, rad: 0.36, rise: 0.55, seed: 9.1 },
+    { u: 0.18, th: -1.3, len: 1.15, rad: 0.29, rise: 0.8, seed: 14.3 },
+  ]) {
+    const A = logAxis(br.u)
+    const p = logDirP(br.u), q = logDirQ()
+    const sa = Math.sin(br.th), ca = Math.cos(br.th)
+    const rx = p[0] * sa + q[0] * ca, ry = p[1] * sa + q[1] * ca, rz = p[2] * sa + q[2] * ca
+    const trunkR = logTubeR(br.u)
+    // La rama sale por la normal del tronco y sube.
+    let dx = rx, dy = ry + br.rise, dz = rz
+    const dn = Math.hypot(dx, dy, dz) || 1
+    dx /= dn; dy /= dn; dz /= dn
+    // Arranca DENTRO del tronco: si naciera en la superficie quedaría una
+    // juntura abierta entre el muñón y la corteza.
+    const sx = A[0] + rx * trunkR * 0.45, sy = A[1] + ry * trunkR * 0.45, sz = A[2] + rz * trunkR * 0.45
+    const L = trunkR * br.len, r0 = trunkR * br.rad
+    // Dos perpendiculares a la dirección de la rama.
+    let e1x = -dz, e1y = 0, e1z = dx
+    const e1n = Math.hypot(e1x, e1y, e1z) || 1
+    e1x /= e1n; e1y /= e1n; e1z /= e1n
+    const e2x = dy * e1z - dz * e1y, e2y = dz * e1x - dx * e1z, e2z = dx * e1y - dy * e1x
+    const E1 = [e1x, e1y, e1z], E2 = [e2x, e2y, e2z]
+    const brAround = 13, brAlong = 9
+    const brRad = (s) => r0 * (1 - 0.28 * s)
+    pushBarkTube({
+      u0: 0, u1: 1, NU: 30, NA: 56,
+      axis: (s) => [sx + dx * L * s, sy + dy * L * s, sz + dz * L * s],
+      dirP: () => E1, dirQ: () => E2, rad: brRad,
+      around: brAround, along: brAlong,
+    })
+    // Punta de la rama: también partida, con su cara de anillos y sus astillas.
+    const tx = sx + dx * L, ty = sy + dy * L, tz = sz + dz * L
+    const rimR = (th) => brRad(1) * barkAt(1, th, brAround, brAlong).k
+    pushRingDisc({
+      cx: tx, cy: ty, cz: tz, dirP: E1, dirQ: E2, nrm: [dx, dy, dz],
+      rimR, NRAD: 26, NA: 56, rings: 52, seed: br.seed, relief: 0.25,
+    })
+    for (let i = 0; i < 14; i++) {
+      const th = rnd() * Math.PI * 2
+      const r = rimR(th) * (0.9 + rnd() * 0.15)
+      const bx = tx + E1[0] * Math.sin(th) * r + E2[0] * Math.cos(th) * r
+      const by = ty + E1[1] * Math.sin(th) * r + E2[1] * Math.cos(th) * r
+      const bz = tz + E1[2] * Math.sin(th) * r + E2[2] * Math.cos(th) * r
+      const len = 1 + rnd() * rnd() * 4
+      pushSplinter(bx, by, bz, dx * len, dy * len, dz * len,
+        0.3 + rnd() * 0.4, tint(C_SPLINTER, 0.9), tint(C_SPLINTER, 0.45))
     }
   }
 
@@ -496,13 +556,21 @@ export function createFungusScene(container, cfg, agentNames = []) {
     // Sol RASANTE (~23° sobre el horizonte). Con el sol casi cenital que había
     // antes, las fisuras no proyectaban sombra y toda la corteza quedaba con el
     // mismo valor: plana. La luz baja es lo que convierte el relieve en textura.
-    const sun = new THREE.DirectionalLight(0xfff5e8, 2.4)
+    // Intensidades altas a propósito: three ≥r155 usa iluminación física y el
+    // Lambert divide por π, así que una direccional de 1.0 deja la superficie a
+    // menos de un tercio de su albedo.
+    const sun = new THREE.DirectionalLight(0xfff5e8, 3.4)
     sun.position.set(0.94, 0.4, 0.16)
     scene.add(sun)
-    // Ambiente frío y contenido: la fisura tiene que irse casi a negro, pero el
-    // flanco en penumbra (la cámara orbita: la mitad del tiempo se lo mira) debe
-    // seguir mostrando las placas y no ser un recorte negro.
-    scene.add(new THREE.AmbientLight(0x39404f, 0.95))
+    // REBOTE frío desde el lado opuesto y bajo. No es un segundo sol: con un
+    // solo direccional la cara del quiebre —que mira justo en contra— quedaba
+    // siempre a contraluz y las astillas no se veían nunca. Débil, para no
+    // aplanar el relieve que consigue el sol rasante.
+    const bounce = new THREE.DirectionalLight(0x9fb4d0, 1.1)
+    bounce.position.set(-0.85, 0.3, -0.45)
+    scene.add(bounce)
+    // Ambiente frío y contenido: la fisura tiene que irse casi a negro.
+    scene.add(new THREE.AmbientLight(0x39404f, 0.9))
   }
 
   // ─── TRONCO (textura): la superficie sólida de arriba le da masa; esto le
