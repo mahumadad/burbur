@@ -1171,7 +1171,7 @@ export function createCityScene(container, cfg, agentNames = []) {
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        precision mediump float; varying vec3 vC; uniform float uNight;
+        varying vec3 vC; uniform float uNight;
         void main() {
           vec2 uv = gl_PointCoord - 0.5; float d2 = dot(uv, uv);
           if (d2 > 0.25) discard;
