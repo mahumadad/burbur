@@ -17,7 +17,13 @@
       #overlay.hidden { display: none; }
       #overlay.leaving { opacity: 0; }
 
-      .gate { display: flex; flex-direction: column; align-items: center; gap: 34px; }
+      .gate { display: flex; flex-direction: column; align-items: center; gap: 30px; }
+      /* La semilla ES el link: un área de hover generosa que la agranda al pasar. */
+      .seedWrap {
+        display: grid; place-items: center; width: 80px; height: 80px; cursor: pointer;
+        transition: transform .55s cubic-bezier(.2, .7, .2, 1);
+      }
+      .seedWrap:hover { transform: scale(2); }
 
       /* La semilla: un punto de luz que late lento (como una luciérnaga lejana). */
       .seed {
@@ -41,10 +47,14 @@
       .whisper { font-size: 12px; letter-spacing: .1em; color: rgba(207,232,216,.42); }
       .cta {
         font-size: 11px; text-transform: uppercase; letter-spacing: .4em; text-indent: .4em;
-        color: rgba(207,232,216,.3); transition: color .45s ease, letter-spacing .45s ease;
+        color: rgba(234,255,240,0);   /* oculto: aparece al pasar por la semilla */
+        transition: color .5s ease, letter-spacing .5s ease;
       }
-      #overlay:hover .cta { color: rgba(234,255,240,.92); letter-spacing: .56em; }
-      #overlay:hover .seed { animation-duration: 3.4s; }
+      /* Hover sobre la semilla → ENTRA aparece (la invitación) y late más rápido. */
+      .seedWrap:hover ~ .lines .cta { color: rgba(234,255,240,.95); letter-spacing: .58em; }
+      .seedWrap:hover .seed { animation-duration: 3.2s; }
+      /* En táctil (sin hover) ENTRA queda tenue para verse igual. */
+      @media (hover: none) { .cta { color: rgba(207,232,216,.42); } }
 
       /* Al hacer click: la semilla se ABRE y nos atraviesa; el velo se disuelve. */
       #overlay.leaving .seed {
@@ -62,7 +72,7 @@
     <div id="app"></div>
     <div id="overlay">
       <div class="gate">
-        <div class="seed"></div>
+        <div class="seedWrap"><div class="seed"></div></div>
         <div class="lines">
           <span class="whisper">algo respira aquí</span>
           <span class="cta">entra</span>
