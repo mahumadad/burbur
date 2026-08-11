@@ -103,7 +103,11 @@ export const SPECIES = {
     },
     // ribs: costillas de la corteza (Task 6). depth bajo → 1-2 brazos, casi vertical.
     form: { len: 6, radius: 0.9, depth: 2, gnarl: 0.05, droop: -0.6, kids: [1, 2], ribs: 9 },
+    // Sin follaje: `clusters: 0` no pasa por buildFoliage. Las flores son la
+    // excepción — `flowerOnly` le pide a foliage.js un racimo SOLO de flor,
+    // colocado únicamente en las puntas de orden máximo (Task 6).
     clusters: 0,
+    flowerOnly: true,
   },
 
   // Nomeolvides: flora de suelo, no es un árbol. Florece en primavera.

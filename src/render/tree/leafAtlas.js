@@ -51,8 +51,13 @@ export function buildAtlas(especie, THREE) {
   const ctx = cv.getContext('2d')
   ctx.clearRect(0, 0, 512, 512)
 
+  // El cactus (Task 6) no tiene hoja (`colors.leaf: null`): pasa por acá
+  // porque `flowerOnly` lo hace pedir atlas, pero solo necesita la celda de
+  // flor — las celdas de hoja se dejan en blanco.
   const hoja = leafShape(especie, 'leaf')
-  pintarRacimo(ctx, hoja, 0, 0, def.colors.leaf)
+  if (def.colors.leaf) {
+    pintarRacimo(ctx, hoja, 0, 0, def.colors.leaf)
+  }
 
   if (def.colors.flower) {
     pintarRacimo(ctx, leafShape(especie, 'flower'), CELDA, 0, def.colors.flower)
@@ -61,7 +66,9 @@ export function buildAtlas(especie, THREE) {
     pintarPoligono(ctx, leafShape(especie, 'fruit'),
       CELDA * 0.5, CELDA * 1.5, CELDA * 0.8, 0, rgb(def.colors.fruit[0]))
   }
-  pintarPoligono(ctx, hoja, CELDA * 1.5, CELDA * 1.5, CELDA * 0.9, 0, rgb(def.colors.leaf[0]))
+  if (def.colors.leaf) {
+    pintarPoligono(ctx, hoja, CELDA * 1.5, CELDA * 1.5, CELDA * 0.9, 0, rgb(def.colors.leaf[0]))
+  }
 
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace

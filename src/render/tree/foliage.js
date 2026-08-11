@@ -31,7 +31,10 @@ const mezclar = (a, b, t) => [
 
 /**
  * @param {Array} tips        salida de growSkeleton
- * @param {object} def        SPECIES[especie]
+ * @param {object} def        SPECIES[especie]. Si `def.flowerOnly` es true
+ *   (el cactus, Task 6), el racimo generado es SOLO de flor y se coloca
+ *   únicamente en las puntas de orden máximo (las de más arriba del esqueleto,
+ *   no las intermedias) — no hay hoja ni fruto para esa especie.
  * @param {THREE.Texture} atlas
  * @returns {{mesh, uniforms, geometry, material, leafAnchors, flowerAnchors, fruitAnchors}}
  *   `leafAnchors`: Float32Array de 9 floats por racimo de hoja — posición(3) +
@@ -48,7 +51,14 @@ const mezclar = (a, b, t) => [
  *   verde, o una "hoja" rosada.
  */
 export function buildFoliage(tips, def, atlas, THREE, rnd) {
-  const n = Math.min(tips.length, def.clusters)
+  // Flor sola (cactus): solo las puntas de orden máximo, ninguna intermedia —
+  // así la flor sale en la corona del brazo, no salpicada por todo el tallo.
+  let fuente = tips
+  if (def.flowerOnly) {
+    const ordenMax = tips.reduce((m, t) => Math.max(m, t.order), 0)
+    fuente = tips.filter((t) => t.order === ordenMax)
+  }
+  const n = def.flowerOnly ? fuente.length : Math.min(tips.length, def.clusters)
   const geo = geometriaCruz(THREE)
 
   const iPos = new Float32Array(n * 3)
@@ -62,8 +72,11 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
   const fruitAnchors = []
 
   const celdaHoja = [0, 0], celdaFlor = [0.5, 0], celdaFruto = [0, 0.5]
-  const cLeafLo = def.colors.leaf[0], cLeafHi = def.colors.leaf[1]
-  const autumnPar = def.colors.autumn || def.colors.leaf
+  // Sin hoja (cactus, `flowerOnly`): nunca se entra a la rama de hoja del
+  // reparto de abajo, pero igual hace falta un color válido para no romper.
+  const hojaPar = def.colors.leaf || [[1, 1, 1], [1, 1, 1]]
+  const cLeafLo = hojaPar[0], cLeafHi = hojaPar[1]
+  const autumnPar = def.colors.autumn || def.colors.leaf || hojaPar
   const cAutLo = autumnPar[0], cAutHi = autumnPar[1]
   const florPar = def.colors.flower || [[1, 1, 1], [1, 1, 1]]
   const cFlorLo = florPar[0], cFlorHi = florPar[1] || florPar[0]
@@ -71,7 +84,7 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
   const cFrutoLo = frutoPar[0], cFrutoHi = frutoPar[1] || frutoPar[0]
 
   for (let i = 0; i < n; i++) {
-    const t = tips[(i * 7919) % tips.length]   // barajado determinista
+    const t = fuente[(i * 7919) % fuente.length]   // barajado determinista
     const j = (0.3 + rnd() * 0.7)
     iPos[i * 3] = t.p.x + (rnd() - 0.5) * j
     iPos[i * 3 + 1] = t.p.y + (rnd() - 0.5) * j
@@ -81,8 +94,9 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     iRot[i] = rnd() * 6.2832
     // Reparto: flor, fruto y hoja. La flor y el fruto nunca se dibujan a la
     // vez porque sus densidades (uFlower/uFruit) no se solapan en el año.
+    // `flowerOnly` fuerza la celda de flor en el 100% de las instancias.
     const r = rnd()
-    const esFlor = !!def.colors.flower && r < (def.flowerRatio || 0.35)
+    const esFlor = def.flowerOnly || (!!def.colors.flower && r < (def.flowerRatio || 0.35))
     const esFruto = !esFlor && !!def.colors.fruit &&
       r < (def.flowerRatio || 0.35) + (def.fruitRatio || 0.12)
     iCell[i * 2] = esFlor ? celdaFlor[0] : esFruto ? celdaFruto[0] : celdaHoja[0]

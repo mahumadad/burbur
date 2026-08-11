@@ -1057,6 +1057,30 @@ export function createCityScene(container, cfg, agentNames = []) {
     }
   }
 
+  // ─── CACTUS: mismo generador con costillas, sin ciclo de vida (Task 6) ───
+  // No es un sakura: nace adulto (`setGrowth(99)`) y no tiene hoja, otoño ni
+  // caída — solo flores en las puntas, que sí siguen la fenología propia de
+  // la especie (`update()` más abajo, junto al resto de las estaciones).
+  let cactus = null
+  {
+    const p = puntoSakura()
+    if (p) {
+      cactus = arboles.createTree({
+        species: 'cactus',
+        origin: new THREE.Vector3(p.tx, p.gy - 0.4, p.tz),
+        dir: new THREE.Vector3(0, 1, 0),
+        rnd,
+      })
+      cactus.setGrowth(99)   // el cactus no tiene ciclo de vida
+      scene.add(cactus.group)
+      // Espinas: puntos claros sobre las aristas de las costillas.
+      const bp = cactus.barkGeometry.attributes.position
+      for (let i = 0; i < bp.count; i += 7) {
+        draw.pushPoint(bp.getX(i), bp.getY(i), bp.getZ(i), [0.88, 0.90, 0.74], 0.16, 0)
+      }
+    }
+  }
+
   // ─── PÉTALOS Y HOJAS QUE CAEN: pool reciclable, mismo patrón que el bosque.
   const litter = createLitter({
     THREE, count: 480, ground: we, pointUniforms: draw.uniforms,
@@ -1835,6 +1859,13 @@ export function createCityScene(container, cfg, agentNames = []) {
       litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
         { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
       lastPhen = phen
+
+      // El cactus tiene su propia curva (solo florece en primavera): sin esto
+      // `uFlower` se queda en 0 para siempre y nunca se ven las flores.
+      if (cactus) {
+        const phenCactus = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.cactus.curve)
+        cactus.update(phenCactus, clock)
+      }
     }
 
     moveAgents(step * moveScale, clock)

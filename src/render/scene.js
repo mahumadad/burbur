@@ -492,6 +492,32 @@ export function createScene(container, cfg, agentNames = []) {
     }
   }
 
+  // ─── NOMEOLVIDES: flora de suelo, no un árbol (Task 6) ────────────────────
+  // Racimo bajo y muy denso, azul con centro amarillo, solo en las zonas
+  // sombrías del claro. `hbloom=1` (el último argumento de pushPoint) los
+  // marca como cabeza de flor: la lluvia fuerte también los cierra, igual
+  // que al resto del prado (ver litter/Task 2).
+  const NOMEOLVIDES = [[0.42, 0.62, 0.95], [0.60, 0.76, 1.0], [0.34, 0.52, 0.88]]
+  const NOMEOLVIDES_CENTRO = [1.0, 0.86, 0.30]
+  for (let p = 0; p < 3; p++) {
+    const pa = rnd() * 6.2832, pr = R * (0.2 + rnd() * 0.5)
+    const px = Math.cos(pa) * pr, pz = Math.sin(pa) * pr
+    if (islandMask(px, pz, R) < 0.25) continue
+    if (lightPool(px, pz) > 0.9) continue     // solo a la sombra
+    poiFlowers.push({ x: px / R, z: pz / R })
+    for (let i = 0, k = 40 + ((rnd() * 30) | 0); i < k; i++) {
+      const b = rnd() * 6.2832, d = 2.2 * Math.sqrt(rnd())
+      const fx = px + Math.cos(b) * d, fz = pz + Math.sin(b) * d
+      if (islandMask(fx, fz, R) < 0.1) continue
+      const fy = G + terrainHeight(fx, fz)
+      const h = 0.9 + rnd() * 0.7        // muy bajos, a ras de pasto
+      pushLine(fx, fy, fz, fx, fy + h, fz, STEM_LO, STEM_MID)
+      const c = NOMEOLVIDES[(rnd() * NOMEOLVIDES.length) | 0]
+      pushPoint(fx, fy + h, fz, c, 0.30 + rnd() * 0.14, rnd(), 1)
+      pushPoint(fx, fy + h, fz, NOMEOLVIDES_CENTRO, 0.11, rnd(), 1)
+    }
+  }
+
   // ─── BAYAS: tallos blancos que se bifurcan con racimos de puntos ──────────
   const STEM_W = [1, 1, 1]
   function berry(x, y, z) {

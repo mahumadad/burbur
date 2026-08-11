@@ -47,7 +47,10 @@ export function createTreeFactory(THREE, noise2) {
     group.add(relleno, aristas)
 
     let fol = null
-    if (def.clusters > 0) {
+    // `flowerOnly` (cactus, Task 6) pasa por buildFoliage aunque `clusters`
+    // sea 0: el racimo no es de hoja, es de flor, y foliage.js lo arma solo
+    // con las puntas de orden máximo.
+    if (def.clusters > 0 || def.flowerOnly) {
       fol = buildFoliage(tips, def, atlasDe(spec.species), THREE, rnd)
       group.add(fol.mesh)
       recursos.push(fol.geometry, fol.material)
