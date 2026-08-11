@@ -455,6 +455,7 @@ export function createPond(container, cfg, agentNames = []) {
       spinY: params.spinY, effR: params.effR,
       // Las 2 primeras son garzas: pican al agua a cazar peces.
       hunter: i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
+      skyer: i === 4, crossCool: 8 + q() * 16, crossing: 0, crossDur: 1, crossTx: 0, crossTz: 0, crossHi: 0,
     })
     trailColors.push(KIND_COLOR[kind])
   }
@@ -505,52 +506,6 @@ export function createPond(container, cfg, agentNames = []) {
       frogCloud.pos[(b + 2) * 3] = f.x - 0.12; frogCloud.pos[(b + 2) * 3 + 1] = f.y + 0.16; frogCloud.pos[(b + 2) * 3 + 2] = f.z - 0.08
     }
     frogCloud.commit()
-  }
-
-  // ─── PÁJARO ALTO: de vez en cuando cruza el cielo bien arriba, aleteando ──
-  const skyBird = { active: false, wait: 8 + q() * 18, t: 0, dur: 1, sx: 0, sz: 0, ex: 0, ez: 0, y: 0 }
-  const birdGroup = new THREE.Group()
-  {
-    // Silueta gris fría; cada ala = hombro→codo→punta (2 segmentos, forma de V).
-    const wingMat = new THREE.LineBasicMaterial({ color: 0x9aa0ac, transparent: true, opacity: 0.85, fog: false })
-    function wing(side) {
-      const g = new THREE.Group()
-      const geo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0), new THREE.Vector3(side * 2.2, 0.2, -0.4),
-        new THREE.Vector3(side * 2.2, 0.2, -0.4), new THREE.Vector3(side * 4.2, -0.1, -1.4),
-      ])
-      g.add(new THREE.LineSegments(geo, wingMat))
-      return g
-    }
-    birdGroup.__wl = wing(-1); birdGroup.__wr = wing(1)
-    birdGroup.add(birdGroup.__wl); birdGroup.add(birdGroup.__wr)
-    birdGroup.scale.setScalar(1.6); birdGroup.visible = false
-    scene.add(birdGroup)
-  }
-  function updateSkyBird(step, t) {
-    if (!skyBird.active) {
-      skyBird.wait -= step
-      if (skyBird.wait > 0) return
-      // Entra por un borde y sale por el opuesto, bien alto.
-      const a = q() * 6.2832, R2 = mt * 1.9
-      skyBird.sx = Math.cos(a) * R2; skyBird.sz = Math.sin(a) * R2
-      skyBird.ex = -skyBird.sx + (q() - 0.5) * mt; skyBird.ez = -skyBird.sz + (q() - 0.5) * mt
-      skyBird.y = ht + 26 + q() * 16
-      skyBird.dur = 7 + q() * 5; skyBird.t = 0
-      skyBird.active = true; birdGroup.visible = true
-      return
-    }
-    skyBird.t += step / skyBird.dur
-    if (skyBird.t >= 1) { skyBird.active = false; birdGroup.visible = false; skyBird.wait = 18 + q() * 40; return }
-    const k = skyBird.t
-    birdGroup.position.set(
-      skyBird.sx + (skyBird.ex - skyBird.sx) * k,
-      skyBird.y + Math.sin(t * 0.8) * 1.5,
-      skyBird.sz + (skyBird.ez - skyBird.sz) * k,
-    )
-    birdGroup.rotation.y = Math.atan2(skyBird.ex - skyBird.sx, skyBird.ez - skyBird.sz)
-    const flap = Math.sin(t * 9) * 0.6
-    birdGroup.__wl.rotation.z = flap; birdGroup.__wr.rotation.z = -flap
   }
 
   // ─── TRONCO(S) DE ÁRBOL flotando en el agua ───────────────────────────────
@@ -714,6 +669,33 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
+  // Un agente ave, de vez en cuando, SUBE a cruzar el cielo bien alto y vuelve.
+  // Es un agente real (con nombre del censo, estela y etiqueta) — no un adorno.
+  function crossSky(step) {
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      if (!a.skyer) continue
+      if (a.crossing > 0) {
+        a.crossing -= step
+        const k = 1 - Math.max(0, a.crossing) / a.crossDur       // 0 → 1
+        // Arco alto: sube y baja (medio seno), pico ~ht+30..42.
+        worldPos[i * 3 + 1] = ht + Math.sin(Math.min(1, k) * Math.PI) * (30 + a.crossHi)
+        // Empuja su rumbo hacia el borde opuesto para que de verdad cruce.
+        const r = roamers[i]
+        const dx = a.crossTx - worldPos[i * 3], dz = a.crossTz - worldPos[i * 3 + 2], dd = Math.hypot(dx, dz) || 1
+        r.vx += dx / dd * 0.5 * step; r.vz += dz / dd * 0.5 * step
+        if (a.crossing <= 0) a.crossCool = 16 + q() * 34
+      } else {
+        a.crossCool -= step
+        if (a.crossCool <= 0) {
+          const ang = Math.atan2(worldPos[i * 3 + 2], worldPos[i * 3]) + Math.PI + (q() - 0.5)
+          a.crossTx = Math.cos(ang) * mt * 1.3; a.crossTz = Math.sin(ang) * mt * 1.3
+          a.crossHi = q() * 12; a.crossDur = 6 + q() * 4; a.crossing = a.crossDur
+        }
+      }
+    }
+  }
+
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
   const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
@@ -820,10 +802,10 @@ export function createPond(container, cfg, agentNames = []) {
     mapPositions(step, clock)
     fish.update(step, clock)      // mueve los peces primero
     huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
+    crossSky(step)                // un ave cruza el cielo alto de vez en cuando
     updateBugs(step, clock)
     updateFrogs(step)
     updateLogs(step, clock)
-    updateSkyBird(step, clock)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
