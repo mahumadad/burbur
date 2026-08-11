@@ -128,6 +128,20 @@ export const CONFIG = {
       turnRate: 0.7, bias: 1.2, noise: 0.8,
       maxSpeed: 0.14, protrusionGain: 1.6, atpFloor: 0.3,
     },
+    // Ciclo celular (spec 2026-08-11-ciclo-y-division-celula.md §4): un
+    // macrófago vive casi siempre en G0 y solo entra en ciclo con señal
+    // mitogénica SOSTENIDA (nutrientes o inflamación) + energía. Es un
+    // acontecimiento OCASIONAL, no un reloj. Ver sim/cellCycle.js. Tiempos
+    // afinados para que se vea "de vez en cuando" (1ra división ~2.6 min de
+    // mediana, intervalo ~1.6 min) con la mitosis bien visible (~20 s).
+    cycle: {
+      atpMin: 0.4,             // umbral de energía para entrar en ciclo
+      mitogenicMedia: ['nutrient rich', 'inflamed'],  // prolifera con nutrientes o inflamación
+      readinessRate: 0.12,     // ~8 s de señal sostenida para decidirse
+      readinessDecay: 0.12,    // se desarma tan rápido como se arma
+      g1: 10, s: 10, g2: 6, m: 14, cyto: 6,   // s por etapa (M+CYTO=20s visibles)
+      refractory: 40,          // pausa entre divisiones
+    },
     // Sustrato: se dibuja como un TILE periódico que se repite y hace wrap, así
     // nunca se acaba por mucho que la célula avance (antes se deslizaba fuera de
     // cuadro y todo parecía estático). Las fibras de matriz (ECM) dan la
@@ -145,7 +159,13 @@ export const CONFIG = {
       minLen: 0.28, maxLen: 0.72,
       growRate: 0.045, shrinkRate: 0.26, catastrophe: 0.12, rescue: 0.4,
     },
-    atp: { capacity: 26, speed: 0.42, arrive: 0.02, gainPerQuantum: 0.09, drain: 0.32 },
+    // Balance corregido: con los valores viejos (gain 0.09, drain 0.32) la
+    // producción (~0.14/s) no cubría la demanda a tensión normal (~0.18/s), así
+    // que el presupuesto se drenaba a 0 — la célula nunca acumulaba señal para
+    // el ciclo, y la motilidad quedaba débil. Ahora la producción supera la
+    // demanda en medio bueno (el presupuesto sube y se sostiene) y solo se hunde
+    // con hipoxia/ayuno (atpProdMul 0.4), que es cuando DEBE ampollarse.
+    atp: { capacity: 26, speed: 0.42, arrive: 0.02, gainPerQuantum: 0.12, drain: 0.20 },
     // Tráfico direccional (M3): kinesina lleva lo secretor (vesículas) hacia
     // afuera, dineína lo digestivo (lisosomas/endosomas) hacia el centro.
     traffic: { bias: 0.06, innerR: 0.12, outerR: 0.66 },
@@ -189,12 +209,81 @@ export const CONFIG = {
     mtBeads: 8,             // cuentas de tubulina α/β visibles por microtúbulo
     height: 3.2,            // altura de la lámina celular sobre el sustrato
   },
+  // Mundo NEURONA: una microred cortical vista desde arriba. Los somas están
+  // fijos; lo que se mueve es la señal. Ver
+  // docs/superpowers/specs/2026-08-11-diseno-mundo-neurona.md
+  neuron: {
+    // Cableado de la red (sim/netwire.js): 12 neuronas (10 piramidales + 2
+    // interneuronas) + 6 astrocitos. Topología dependiente de la distancia.
+    network: {
+      neurons: 12, inhibitory: 2, glia: 6, lambda: 0.5,
+      degreeMin: 1, degreeMax: 4, interDegreeMin: 4, interDegreeMax: 6,
+      interLocalR: 0.85, spread: 0.9, minSep: 0.26,
+      axonPoints: 9, axonBend: 0.28, axonNoise: 0.02, nodes: 5,
+    },
+    somaR: 0.05,        // radio del soma (normalizado)
+    height: 3.0,        // altura de la lámina neural sobre el plano
+    // Propagación del potencial de acción (sim/spikes.js): al disparar una
+    // neurona sale un pulso por cada axón saliente. El mielinizado va más rápido
+    // (conducción saltatoria: salta de nodo en nodo) que el amielínico. Al llegar
+    // al terminal empuja la fase de la postsináptica (+ excita / − inhibe), así
+    // la actividad se PROPAGA visiblemente por la red.
+    spikes: {
+      neurons: 12,
+      myelinatedSpeed: 1.7, unmyelinatedSpeed: 0.42, refractory: 0.16,
+      fireThresh: 0.82,        // umbral de swarm.flash[i] para lanzar el pulso
+      exciteBump: 0.85, inhibitBump: 0.6,   // empujón de fase a la postsináptica
+      cap: 80, trail: 5,       // pool de pulsos en vuelo + puntos de estela
+    },
+    // Flujo CONTINUO de energía por cada axón: el murmullo de fondo que hace que
+    // la red se lea VIVA (no como un diagrama). Los spikes reales corren encima.
+    flow: { perAxon: 15, speed: 0.13, size: 0.95 },
+    // Estado cerebral (sim/brainstate.js): el eje del mundo. Traduce el estado de
+    // sueño y el neuromodulador en sincronía, ritmo, estados UP/DOWN, husos y la
+    // convulsión. `syncPull` es la fuerza con que la red se acerca a su sincronía
+    // objetivo cada frame. Tiempos en segundos.
+    brain: {
+      riskRate: 0.10, seizeExc: 2.6, seizeInh: 0.2, seizeDur: 9, postictalDur: 5,
+      downMin: 0.7, downMax: 1.6, downDur: 0.4, spindleGap: 2.6, spindleDur: 1.0,
+      syncPull: 1.6,
+    },
+    // Shock del botón AGITAR: una descarga que enciende TODO el sistema a la vez
+    // (`dur` segundos de fogonazo) y después resetea y calma la red.
+    shock: { dur: 0.7, flash: 1.0 },
+    // Arbor dendrítico: árbol ramificado en el plano, congelado en el build.
+    dendrite: { levels: 3, branches: 3, len: 0.16, lenDecay: 0.62, spread: 1.2, jitter: 0.22, spines: 4 },
+    neuropil: 3800,     // puntos de fondo (la maraña de procesos que no se dibuja)
+    capillarySegs: 44,  // segmentos de la línea serpenteante del capilar
+    glia: { arms: 8, armLen: 0.11 },   // radios de la estrella del astrocito
+    // Los astrocitos son los únicos que se desplazan, y muy lento (§3.1).
+    wander: {
+      density: 0.5, wanderTurn: 1.2, wanderPush: 0.010,
+      kickMin: 0.02, kickRange: 0.03, separation: 0.06, sepRadius: 0.14,
+      drag: 0.94, maxSpeed: 0.022, softR: 0.72, centerPull: 0.5, bound: 0.9,
+      obstaclePush: 0, flowFreq: 3.0, flowPush: 0.008, pathPull: 0, pathRadius: 0.1,
+    },
+  },
   // Mundo MICELIO: la red que crece y se come su propio tronco.
   // Ver docs/superpowers/specs/2026-08-11-diseno-mundo-micelio.md
   fungus: {
     // Tronco más chico y más esbelto que antes: así entra ENTERO en cuadro con
     // hojarasca alrededor (antes llenaba la pantalla y no se leía como tronco).
-    substrate: { logAngle: 0.6, logHalfLength: 0.52, logRadius: 0.15, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
+    // logCurve: curvatura del eje (rad por unidad de u) → tronco curvo tipo
+    // banana, no un cilindro recto (referencia alikim: medio toro, arc = PI).
+    // ARCO: el tronco se arquea como un puente — el centro se eleva (`logArch`,
+    // la "guata" hacia arriba) y las dos puntas se HUNDEN en la tierra
+    // (`logBury`), dejando un túnel debajo donde anidan los bichos. `logCurve`
+    // es la curva horizontal (banana), aquí suave para no competir con el arco.
+    // Tronco BAJO y grueso tirado en el suelo (referencia alikim), apenas
+    // curvado: `logArch` chico = leve guata arriba (un huequito, no un portal);
+    // `logBury` chico = las puntas se hunden un poco. `logCurve` suave.
+    // logSink: fracción del radio que queda ENTERRADA (el tronco se hunde en el
+    // suelo, no apoyado encima). logBury: cuánto más se hunde la punta QUEBRADA
+    // — moderado a propósito: con la punta muy hundida el quiebre asomaba apenas
+    // un casquete y las astillas no tenían dónde verse.
+    // logLift: cuánto se LEVANTA la punta cortada (+eje) para que su disco de
+    // anillos apoye entero sobre el suelo, en vez de hundirse como la quebrada.
+    substrate: { logAngle: 0.6, logCurve: 0.35, logArch: 0.07, logBury: 0.10, logLift: 0.05, logSink: 0.4, logHalfLength: 0.52, logRadius: 0.2, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
     // Ajustado al look de placa de cultivo (referencia del usuario): más puntas
     // = borde más plumoso; más ramificación + autotropismo = rosetón radial que
     // se esparce parejo; más widthGain = rizomorfos (cordones) marcados.
@@ -202,12 +291,41 @@ export const CONFIG = {
     // (crecimiento radial, no garabato). `tipSpeed` bajo + poco pre-crecido =
     // la colonia se toma el tronco DE A POCO, que es lo que se quiere ver.
     // Denso: muchas puntas y ramificación alta, pasos cortos.
+    // Denso de verdad: el mat algodonoso de la referencia son MILES de hifas
+    // finas, no un puñado de trazos. Los topes altos los banca la grilla
+    // espacial de sim/mycelium.js (sin ella la vecindad era O(puntas × nodos)).
     mycelium: {
-      maxNodes: 2600, maxEdges: 2800, maxTips: 260,
+      maxNodes: 12000, maxEdges: 15000, maxTips: 700,
       stepLen: 0.020, tipSpeed: 0.038, turnRate: 1.6, noise: 0.55,
-      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.6,
-      fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.035, flowDecay: 0.35,
-      pruneBelow: 0.1, pruneRate: 0.5, bound: 0.62,
+      // `radial` BAJO sobre la madera. El tronco es largo y angosto, así que
+      // "hacia afuera del inóculo" es casi siempre "a lo largo del eje": con el
+      // sesgo radial alto la colonia se estiraba en una LÍNEA sobre la cresta en
+      // vez de tomarse la cara de arriba. Sobre el tronco manda el autotropismo
+      // (se aparta de sí misma y cubre); el rosetón radial se reserva para la
+      // tierra, vía `soil.radial`.
+      tropism: 0.55, autotropism: 1.3, radial: 0.7, branchRate: 1.8,
+      fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.10, flowDecay: 0.35,
+      // `bound` acotado: con el tope lejos las puntas se amontonaban contra él y
+      // el abanico se leía como un ANILLO despegado del tronco en vez de una
+      // mancha que se abre desde la madera.
+      pruneBelow: 0.1, pruneRate: 1.0, bound: 0.66,
+      // Brote lateral: la red saca frentes nuevos del costado de hifas ya
+      // hechas. Sin esto, en cuanto todas las puntas se fusionan la colonia se
+      // queda sin frentes y el mundo se congela para siempre.
+      lateralRate: 40,
+      // Guerra entre colonias. Dos hongos incompatibles se reconocen ANTES de
+      // tocarse y se frenan: queda una franja de nadie con una barrera
+      // pigmentada — la "zone line" oscura de la madera podrida. Es competencia
+      // por interferencia entre dos organismos, no reacción-difusión.
+      antagonism: 1.8, barrierRate: 14,
+      // Al llegar al canto del tronco, esta fracción de las puntas dobla y sigue
+      // comiendo por la PANZA en vez de salir a la tierra.
+      wrapChance: 0.45,
+      // En TIERRA el micelio crece distinto: más rápido, mucho más ramificado y
+      // más radial — el abanico algodonoso que se abre alrededor del tronco.
+      // `speed` por debajo de 1: en la tierra el avance radial va MÁS LENTO que
+      // sobre la madera, para que el abanico se abra despacio y se lo vea crecer.
+      soil: { speed: 0.85, branch: 1.3, radial: 2.2, noise: 1.3 },
     },
     // Cuánto esfuerzo de forrajeo aplica cada punta por segundo. Es lo que
     // agota el sustrato y, por lo tanto, lo que hace que la red se remodele.
@@ -227,7 +345,10 @@ export const CONFIG = {
     trapRadius: 0.05,
     fauna: 10,              // agentes visibles de fauna del suelo
     litter: 900,            // puntos de hojarasca
-    logDither: 5200,        // puntos de textura del tronco
+    // Bajo a propósito: la textura de la corteza la lleva la MALLA ILUMINADA
+    // (placas + fisuras + luz rasante). Con el dither alto, estos puntos sin
+    // iluminar se pintaban encima y aplanaban todo el relieve.
+    logDither: 3800,        // puntos de textura del tronco
   },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos

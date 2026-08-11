@@ -84,6 +84,62 @@ export const CELL_CENSUS = [
 ]
 
 /**
+ * Censo de la NEURONA (una microred cortical). Los `neuron`/`interneuron`/`glia`
+ * son los individuos con jaula y nombre (las neuronas están FIJAS, la glía se
+ * mueve lento); las estructuras, neurotransmisores, señales y tejido son el
+ * paisaje: suenan y se narran. Ver spec §3. Móviles sin artículo; el resto con
+ * artículo (son también las CLAVES del léxico por nombre).
+ */
+export const NEURON_CENSUS = [
+  // neuron — piramidales excitatorias (los slots bajos, vía slotClass)
+  { name: 'piramidal', type: 'neuron' },
+  { name: 'piramidal de capa 5', type: 'neuron' },
+  { name: 'piramidal de capa 3', type: 'neuron' },
+  { name: 'piramidal de capa 2', type: 'neuron' },
+  { name: 'célula estrellada espinosa', type: 'neuron' },
+  { name: 'neurona fusiforme', type: 'neuron' },
+  // interneuron — inhibitorias GABA (los slots medios)
+  { name: 'interneurona en cesta', type: 'interneuron' },
+  { name: 'célula candelabro', type: 'interneuron' },
+  { name: 'célula de Martinotti', type: 'interneuron' },
+  // glia — astrocitos, los únicos que se desplazan (los slots altos)
+  { name: 'astrocito', type: 'glia' },
+  { name: 'astrocito protoplásmico', type: 'glia' },
+  { name: 'astrocito fibroso', type: 'glia' },
+  // structure — el paisaje sináptico: no deambula. Con artículo.
+  { name: 'el cono axónico', type: 'structure', static: true },
+  { name: 'el botón terminal', type: 'structure', static: true },
+  { name: 'la hendidura sináptica', type: 'structure', static: true },
+  { name: 'la zona activa', type: 'structure', static: true },
+  { name: 'la espina dendrítica', type: 'structure', static: true },
+  { name: 'el nodo de Ranvier', type: 'structure', static: true },
+  { name: 'la vaina de mielina', type: 'structure', static: true },
+  { name: 'el receptor AMPA', type: 'structure', static: true },
+  { name: 'el receptor NMDA', type: 'structure', static: true },
+  { name: 'el receptor GABA-A', type: 'structure', static: true },
+  { name: 'el canal de sodio', type: 'structure', static: true },
+  { name: 'el canal de potasio', type: 'structure', static: true },
+  { name: 'la bomba sodio-potasio', type: 'structure', static: true },
+  // neurotransmitter — la química de la hendidura
+  { name: 'el glutamato', type: 'neurotransmitter', static: true },
+  { name: 'el GABA', type: 'neurotransmitter', static: true },
+  { name: 'la dopamina', type: 'neurotransmitter', static: true },
+  { name: 'la acetilcolina', type: 'neurotransmitter', static: true },
+  { name: 'la noradrenalina', type: 'neurotransmitter', static: true },
+  { name: 'la adenosina', type: 'neurotransmitter', static: true },
+  // signal — recorren la red sin ser objetos
+  { name: 'la onda lenta', type: 'signal', static: true },
+  { name: 'el huso de sueño', type: 'signal', static: true },
+  { name: 'el complejo K', type: 'signal', static: true },
+  { name: 'la ráfaga gamma', type: 'signal', static: true },
+  // tissue — el fondo no-neural
+  { name: 'el capilar', type: 'tissue', static: true },
+  { name: 'el neuropilo', type: 'tissue', static: true },
+  { name: 'la microglía', type: 'tissue', static: true },
+  { name: 'el oligodendrocito', type: 'tissue', static: true },
+]
+
+/**
  * Censo del MICELIO. Los individuos VISIBLES (jaula + nombre) son la fauna del
  * suelo — móviles, sin artículo, como la fauna del bosque. La red NO es un
  * agente: es el terreno del mundo (como la membrana en la célula). Las colonias,
@@ -193,23 +249,30 @@ export const CITY_CENSUS = [
  * Construye el censo del mundo y asigna identidad a los agentes VISIBLES.
  * Devuelve { census, visible } donde `visible[i]` = { name, type, idx, memory, state }.
  */
-export function createCensus(source, visibleCount, rand = Math.random, isAerial = null) {
+export function createCensus(source, visibleCount, rand = Math.random, isAerial = null, slotClass = null) {
   const census = source.map((a) => ({ ...a, memory: [], state: 'move' }))
   // A cada agente visible se le da una identidad del censo (para la etiqueta al
   // pasar el mouse y para las interacciones). Se prefieren tipos que "se mueven":
   // el bosque los marca con el tipo `static_object`, los demás mundos con `static`.
   const movers = census.filter((a) => !(a.static ?? a.type === 'static_object'))
-  // La LOCOMOCIÓN manda: si el mundo declara qué slots son AÉREOS (los que se
-  // posan alto o cruzan el cielo) y tiene aves, esos slots solo reciben aves
-  // (`flying_animal`) y el resto, animales de tierra o personas. Así ningún zorro
-  // termina volando. Sin `isAerial` —o sin aves, p. ej. la célula— todos salen
-  // del mismo conjunto de móviles (comportamiento base, intacto).
+  // Un mundo puede declarar la CLASE de cada slot (`slotClass(i) → tipo`): ese
+  // slot recibe solo nombres de ese tipo (con fallback al conjunto general si el
+  // censo no tiene ninguno). Lo usa la neurona para que los slots inhibitorios y
+  // de glía no reciban nombres de piramidal. Es la forma general de lo que
+  // `isAerial` hace para las aves — que se mantiene intacto para bosque/agua/ciudad.
   const fliers = movers.filter((a) => a.type === 'flying_animal')
   const walkers = movers.filter((a) => a.type !== 'flying_animal')
   const split = isAerial && fliers.length > 0 && walkers.length > 0
   const visible = []
   for (let i = 0; i < visibleCount; i++) {
-    const pool = split ? (isAerial(i) ? fliers : walkers) : movers
+    let pool
+    if (slotClass) {
+      const want = slotClass(i)
+      const byClass = movers.filter((a) => a.type === want)
+      pool = byClass.length ? byClass : movers
+    } else {
+      pool = split ? (isAerial(i) ? fliers : walkers) : movers
+    }
     const src = pool[(rand() * pool.length) | 0]
     visible.push({ name: src.name, type: src.type, idx: i, memory: [], state: 'move' })
   }

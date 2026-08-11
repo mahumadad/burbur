@@ -193,3 +193,210 @@ describe('mycelium: el grafo que crece', () => {
     expect(conPoda).toBeLessThan(sinPoda)
   })
 })
+
+// ─── Lado (lomo/panza) y modo suelo ───────────────────────────────────────
+// La red vive sobre un tronco: puede ir por el LOMO o, envolviendo el flanco,
+// por la PANZA; y cuando sale a la tierra crece distinto (abanico radial).
+describe('mycelium: lado del tronco y modo suelo', () => {
+  // Tronco de prueba: un disco de radio 0.3 centrado en el origen.
+  const onLog = (x, z) => Math.hypot(x, z) < 0.3
+
+  const STRAIGHT = {
+    maxNodes: 200, maxEdges: 200, maxTips: 20,
+    stepLen: 0.05, tipSpeed: 0.3,
+    turnRate: 0, noise: 0, tropism: 0, autotropism: 0, branchRate: 0,
+    fuseRadius: 0.01,
+    widthGain: 0, flowDecay: 0, pruneBelow: 0, pruneRate: 0,
+  }
+  const field = { resourceAt: () => 0, moisture: 0.5, onLog }
+
+  it('nodos y puntas arrancan en el lomo', () => {
+    const net = createNetwork(STRAIGHT, [{ x: 0, z: 0, colony: 1 }], seeded(1))
+    expect(net.tips[0].side).toBe(1)
+    expect(net.nodes[0].side).toBe(1)
+  })
+
+  it('con wrapChance 1 la punta envuelve el flanco y sigue por la panza sin salir del tronco', () => {
+    const cfg = { ...STRAIGHT, wrapChance: 1 }
+    const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(2))
+    net.tips[0].ang = 0                     // derecho hacia el borde
+    const rand = seeded(3)
+    for (let i = 0; i < 60; i++) updateNetwork(net, cfg, 1 / 30, rand, field)
+    const t = net.tips[0]
+    expect(t.alive).toBe(true)
+    expect(t.side).toBe(-1)                 // se dio vuelta: ahora va por la panza
+    expect(onLog(t.x, t.z)).toBe(true)      // y nunca se fue del tronco
+  })
+
+  it('con wrapChance 0 la punta sale a la tierra y no se da vuelta', () => {
+    const cfg = { ...STRAIGHT, wrapChance: 0 }
+    const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(4))
+    net.tips[0].ang = 0
+    const rand = seeded(5)
+    for (let i = 0; i < 60; i++) updateNetwork(net, cfg, 1 / 30, rand, field)
+    const t = net.tips[0]
+    expect(t.side).toBe(1)
+    expect(onLog(t.x, t.z)).toBe(false)     // se fue al suelo
+  })
+
+  it('los nodos que deja la punta heredan su lado', () => {
+    const cfg = { ...STRAIGHT, wrapChance: 1 }
+    const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(6))
+    net.tips[0].ang = 0
+    const rand = seeded(7)
+    for (let i = 0; i < 60; i++) updateNetwork(net, cfg, 1 / 30, rand, field)
+    const sides = net.nodes.filter((n) => n.alive).map((n) => n.side)
+    expect(sides).toContain(1)
+    expect(sides).toContain(-1)             // dejó rastro en los dos lados
+  })
+
+  it('no hay anastomosis entre lados distintos: la madera está en el medio', () => {
+    const cfg = {
+      ...STRAIGHT, stepLen: 1, fuseRadius: 0.05, wrapChance: 0,
+    }
+    const net = createNetwork(cfg, [{ x: -0.1, z: 0, colony: 1 }, { x: 0.1, z: 0, colony: 1 }], seeded(8))
+    net.tips[0].ang = 0
+    net.tips[1].ang = Math.PI
+    net.tips[1].side = -1                   // una va por la panza
+    net.nodes[1].side = -1
+    const rand = seeded(9)
+    let events = []
+    for (let i = 0; i < 100; i++) events = events.concat(updateNetwork(net, cfg, 1 / 30, rand, field))
+    expect(events.filter((e) => e.type === 'fusion')).toHaveLength(0)
+  })
+
+  it('modo suelo: fuera del tronco la punta avanza a su propia velocidad', () => {
+    const cfg = { ...STRAIGHT, wrapChance: 0, soil: { speed: 2 } }
+    const net = createNetwork(cfg, [{ x: 0.5, z: 0, colony: 1 }], seeded(10))
+    net.tips[0].ang = 0
+    updateNetwork(net, cfg, 1 / 30, seeded(11), field)
+    // Ya arranca en tierra: un paso vale el doble que el del tronco.
+    expect(net.tips[0].x - 0.5).toBeCloseTo(2 * cfg.tipSpeed / 30, 6)
+  })
+})
+
+// La búsqueda de vecinos usa una grilla espacial. Un bug de celda se ve como
+// fusiones que no ocurren cuando el encuentro cae justo sobre un borde.
+describe('mycelium: vecindad espacial', () => {
+  const CFGF = {
+    maxNodes: 40, maxEdges: 40, maxTips: 10,
+    stepLen: 1, tipSpeed: 0.3,
+    turnRate: 0, noise: 0, tropism: 0, autotropism: 0, branchRate: 0,
+    fuseRadius: 0.05,
+    widthGain: 0, flowDecay: 0, pruneBelow: 0, pruneRate: 0,
+  }
+
+  it('fusiona sin importar dónde caiga el encuentro respecto de la grilla', () => {
+    for (const off of [0, 0.017, 0.05, 0.113, -0.24, 0.5]) {
+      const net = createNetwork(CFGF, [
+        { x: off - 0.1, z: off, colony: 1 },
+        { x: off + 0.1, z: off, colony: 1 },
+      ], seeded(30))
+      net.tips[0].ang = 0
+      net.tips[1].ang = Math.PI
+      const rand = seeded(31)
+      let events = []
+      for (let i = 0; i < 100; i++) {
+        events = events.concat(updateNetwork(net, CFGF, 1 / 30, rand, NO_FIELD))
+      }
+      expect(events.filter((e) => e.type === 'fusion').length,
+        `encuentro en offset ${off}`).toBeGreaterThan(0)
+    }
+  })
+
+  it('el autotropismo sigue apartando las puntas de su propia red', () => {
+    // fuseRadius POR DEBAJO de stepLen: si no, cada punta se fusiona con su
+    // propio rastro recién dejado y la colonia muere en el origen.
+    const cfg = {
+      ...CFGF, stepLen: 0.02, fuseRadius: 0.008, autotropism: 3, turnRate: 4,
+      maxNodes: 300, maxEdges: 300, maxTips: 40, branchRate: 0.5,
+    }
+    const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(32))
+    const rand = seeded(33)
+    for (let i = 0; i < 900; i++) updateNetwork(net, cfg, 1 / 30, rand, NO_FIELD)
+    const live = net.nodes.filter((n) => n.alive)
+    const spread = Math.max(...live.map((n) => Math.hypot(n.x, n.z)))
+    expect(spread).toBeGreaterThan(0.1)   // colonizó, no se amontonó en el origen
+  })
+})
+
+// Una red densa termina fusionando todas sus puntas: sin brotes laterales la
+// colonia se queda sin frentes vivos y el mundo se congela para siempre.
+describe('mycelium: brote lateral', () => {
+  const CFGL = {
+    maxNodes: 400, maxEdges: 400, maxTips: 30,
+    stepLen: 0.02, tipSpeed: 0.2,
+    turnRate: 3, noise: 1, tropism: 0, autotropism: 0.5, branchRate: 0.4,
+    fuseRadius: 0.008,
+    widthGain: 0, widthDecay: 0, flowDecay: 0, pruneBelow: 0, pruneRate: 0,
+  }
+
+  it('con lateralRate la colonia nunca se queda sin frentes vivos', () => {
+    // Pool chico y mucha ramificación: la red se satura y todo se fusiona.
+    const cfg = { ...CFGL, fuseRadius: 0.018, branchRate: 3, lateralRate: 6 }
+    const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(42))
+    const rand = seeded(43)
+    for (let i = 0; i < 3000; i++) {
+      updateNetwork(net, cfg, 1 / 30, rand, NO_FIELD)
+      expect(networkStats(net).tips).toBeGreaterThan(0)
+    }
+  })
+
+  it('el brote lateral hereda colonia y lado del nodo del que sale', () => {
+    const cfg = { ...CFGL, lateralRate: 20, maxTips: 30 }
+    const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 3, side: -1 }], seeded(44))
+    const rand = seeded(45)
+    for (let i = 0; i < 200; i++) updateNetwork(net, cfg, 1 / 30, rand, NO_FIELD)
+    for (const t of net.tips) {
+      if (!t.alive) continue
+      expect(t.colony).toBe(3)
+      expect(t.side).toBe(-1)
+    }
+  })
+})
+
+// El tronco es un cilindro apoyado: su flanco es una pared. Una hifa no baja
+// por ahí — sólo pasa a la tierra donde el tronco la TOCA. Si no, sigue
+// bordeando el tronco por abajo.
+describe('mycelium: sólo pasa a tierra donde el tronco toca el suelo', () => {
+  const onLog = (x, z) => Math.hypot(x, z) < 0.3
+  const CFGC = {
+    maxNodes: 300, maxEdges: 300, maxTips: 20,
+    stepLen: 0.05, tipSpeed: 0.3,
+    turnRate: 0, noise: 0, tropism: 0, autotropism: 0, branchRate: 0,
+    fuseRadius: 0.01,
+    widthGain: 0, flowDecay: 0, pruneBelow: 0, pruneRate: 0,
+    wrapChance: 0,                      // aunque pudiera, no dobla por gusto
+  }
+
+  it('sin contacto con el suelo la punta NUNCA sale del tronco', () => {
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog, canLeave: () => false }
+    const net = createNetwork(CFGC, [{ x: 0, z: 0, colony: 1 }], seeded(70))
+    net.tips[0].ang = 0
+    const rand = seeded(71)
+    for (let i = 0; i < 300; i++) {
+      updateNetwork(net, CFGC, 1 / 30, rand, field)
+      expect(onLog(net.tips[0].x, net.tips[0].z)).toBe(true)
+    }
+    expect(net.tips[0].side).toBe(-1)   // se dio vuelta: siguió por la panza
+  })
+
+  it('donde hay contacto la punta sí pasa a la tierra', () => {
+    // Contacto sólo en el semiplano +x.
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog, canLeave: (x) => x > 0 }
+    const net = createNetwork(CFGC, [{ x: 0, z: 0, colony: 1 }], seeded(72))
+    net.tips[0].ang = 0                 // derecho hacia +x
+    const rand = seeded(73)
+    for (let i = 0; i < 200; i++) updateNetwork(net, CFGC, 1 / 30, rand, field)
+    expect(onLog(net.tips[0].x, net.tips[0].z)).toBe(false)
+  })
+
+  it('sin canLeave en el field, el comportamiento no cambia', () => {
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog }
+    const net = createNetwork(CFGC, [{ x: 0, z: 0, colony: 1 }], seeded(74))
+    net.tips[0].ang = 0
+    const rand = seeded(75)
+    for (let i = 0; i < 200; i++) updateNetwork(net, CFGC, 1 / 30, rand, field)
+    expect(onLog(net.tips[0].x, net.tips[0].z)).toBe(false)
+  })
+})

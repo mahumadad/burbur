@@ -43,10 +43,68 @@ function turnToward(from, to, maxDelta) {
   return from + Math.sign(diff) * maxDelta
 }
 
-/** Primer slot libre (`!alive`) de un pool. `-1` si está lleno: el tope duro. */
+/** Primer slot libre (`!alive`) de un pool. `-1` si está lleno: el tope duro.
+ * Arranca donde terminó la búsqueda anterior: con pools grandes, empezar
+ * siempre de cero hace que cada asignación recorra todo lo ya ocupado. */
 function allocFree(pool) {
-  for (let i = 0; i < pool.length; i++) if (!pool[i].alive) return i
+  const start = pool._cursor || 0
+  for (let i = 0; i < pool.length; i++) {
+    const j = (start + i) % pool.length
+    if (!pool[j].alive) { pool._cursor = (j + 1) % pool.length; return j }
+  }
   return -1
+}
+
+// ── Grilla espacial de nodos ────────────────────────────────────────────────
+// Autotropismo y anastomosis preguntan "¿qué nodos tengo cerca?". Recorrer los
+// nodos enteros por cada punta es O(puntas × nodos): con la red densa que pide
+// el mundo son millones de comparaciones por frame. La grilla las baja a las
+// pocas de las 9 celdas vecinas. Los arrays se reusan entre frames (se vacían
+// con `length = 0`) para no generar basura cada cuadro.
+
+const GRID_SPAN = 4096   // índice de celda máximo por eje; sobra para [-1,1]
+
+function cellKey(x, z, cell) {
+  const ix = Math.floor(x / cell) + GRID_SPAN
+  const iz = Math.floor(z / cell) + GRID_SPAN
+  return ix * (GRID_SPAN * 2) + iz
+}
+
+function rebuildGrid(net, cell) {
+  const g = net._grid || (net._grid = { map: new Map(), cell, live: [] })
+  g.cell = cell
+  for (const arr of g.map.values()) arr.length = 0
+  g.live.length = 0
+  const { nodes } = net
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]
+    if (!n.alive) continue
+    g.live.push(i)                 // índice de nodos vivos, para el brote lateral
+    const key = cellKey(n.x, n.z, cell)
+    let arr = g.map.get(key)
+    if (!arr) g.map.set(key, (arr = []))
+    arr.push(i)
+  }
+  return g
+}
+
+// Scratch reusado: junta los índices de nodo de las 9 celdas alrededor de un
+// punto. Con celda = radio de búsqueda, esas 9 celdas cubren el radio entero.
+const NEAR = []
+const EMPTY = []
+
+function collectNear(g, x, z) {
+  NEAR.length = 0
+  const cell = g.cell
+  const ix = Math.floor(x / cell), iz = Math.floor(z / cell)
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const arr = g.map.get((ix + dx + GRID_SPAN) * (GRID_SPAN * 2) + (iz + dz + GRID_SPAN))
+      if (!arr) continue
+      for (let k = 0; k < arr.length; k++) NEAR.push(arr[k])
+    }
+  }
+  return NEAR
 }
 
 /**
@@ -56,10 +114,10 @@ function allocFree(pool) {
  * @param {Array<{x:number,z:number,colony:number}>} seeds  de dónde arranca cada colonia
  */
 export function createNetwork(cfg, seeds, rand = Math.random) {
-  const nodes = Array.from({ length: cfg.maxNodes }, () => ({ x: 0, z: 0, colony: 0, alive: false }))
+  const nodes = Array.from({ length: cfg.maxNodes }, () => ({ x: 0, z: 0, colony: 0, side: 1, alive: false }))
   const edges = Array.from({ length: cfg.maxEdges }, () => ({ a: 0, b: 0, width: 0, flow: 0, colony: 0, alive: false }))
   const tips = Array.from({ length: cfg.maxTips }, () => ({
-    node: -1, ang: 0, colony: 0, vigor: 1, alive: false, x: 0, z: 0, dist: 0,
+    node: -1, ang: 0, colony: 0, vigor: 1, side: 1, alive: false, x: 0, z: 0, dist: 0, age: 0,
   }))
 
   // Origen (inóculo) de cada colonia: de ahí sale el crecimiento RADIAL, que es
@@ -71,14 +129,15 @@ export function createNetwork(cfg, seeds, rand = Math.random) {
     origins[seed.colony] = { x: seed.x, z: seed.z }
     const ni = allocFree(nodes)
     if (ni === -1) continue // tope: no debería pasar con un cfg razonable
-    nodes[ni].x = seed.x; nodes[ni].z = seed.z; nodes[ni].colony = seed.colony; nodes[ni].alive = true
+    nodes[ni].x = seed.x; nodes[ni].z = seed.z; nodes[ni].colony = seed.colony
+    nodes[ni].side = seed.side || 1; nodes[ni].alive = true
 
     const ti = allocFree(tips)
     if (ti === -1) continue
     const t = tips[ti]
-    t.node = ni; t.x = seed.x; t.z = seed.z; t.dist = 0
+    t.node = ni; t.x = seed.x; t.z = seed.z; t.dist = 0; t.age = 0
     t.ang = rand() * TWO_PI
-    t.colony = seed.colony; t.vigor = 1; t.alive = true
+    t.colony = seed.colony; t.vigor = 1; t.side = seed.side || 1; t.alive = true
   }
 
   return net
@@ -93,15 +152,38 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
   const events = []
   const { nodes, edges, tips } = net
   const resourceAt = field && typeof field.resourceAt === 'function' ? field.resourceAt : null
+  // `onLog(x,z)` dice si ese punto cae sobre el tronco. Con él la red distingue
+  // dos terrenos: la MADERA (donde puede envolver el flanco y seguir por la
+  // panza) y la TIERRA (donde se abre en abanico). Sin él todo es madera.
+  const onLogAt = field && typeof field.onLog === 'function' ? field.onLog : null
+  // `canLeave(x,z)`: ¿el tronco toca la tierra ahí? El flanco de un tronco
+  // apoyado es una pared; la hifa no baja por ella. Sólo PASA a la tierra donde
+  // hay contacto, y si no lo hay sigue bordeando el tronco por abajo.
+  const canLeaveAt = field && typeof field.canLeave === 'function' ? field.canLeave : null
+  const soil = cfg.soil || null
+  // La celda vale el mayor de los radios de búsqueda (el del antagonismo), así
+  // las 9 celdas vecinas cubren también el autotropismo y la anastomosis.
+  const FOE_R = cfg.fuseRadius * 6
+  const grid = rebuildGrid(net, FOE_R)
 
   for (let i = 0; i < tips.length; i++) {
     const tip = tips[i]
     if (!tip.alive) continue
 
+    // ¿Esta punta está pisando tierra? En tierra crece distinto: más rápido,
+    // más ramificada y más radial — el abanico algodonoso que se abre alrededor
+    // del tronco cuando la colonia sale de la madera.
+    const onSoil = onLogAt ? !onLogAt(tip.x, tip.z) : false
+    const mul = onSoil && soil ? soil : null
+    const soilSpeed = mul && mul.speed ? mul.speed : 1
+    const soilBranch = mul && mul.branch ? mul.branch : 1
+    const soilRadial = mul && mul.radial ? mul.radial : 1
+    const soilNoise = mul && mul.noise ? mul.noise : 1
+
     // 1. Dirección: paseo aleatorio sesgado, acotado por turnRate (la punta
     //    no puede reorientarse instantáneamente ni con ruido).
     let ang = tip.ang
-    const jitter = (rand() * 2 - 1) * cfg.noise * dt
+    const jitter = (rand() * 2 - 1) * cfg.noise * soilNoise * dt
     const maxJitter = cfg.turnRate * dt
     ang += Math.max(-maxJitter, Math.min(maxJitter, jitter))
 
@@ -123,7 +205,9 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
     if (cfg.autotropism > 0) {
       let rx = 0, rz = 0
       const R = cfg.fuseRadius * 4 // radio de "sentir" la propia red
-      for (const n of nodes) {
+      const near = collectNear(grid, tip.x, tip.z)
+      for (let k = 0; k < near.length; k++) {
+        const n = nodes[near[k]]
         if (!n.alive || n.colony !== tip.colony) continue
         const dx = tip.x - n.x, dz = tip.z - n.z
         const d2 = dx * dx + dz * dz
@@ -139,6 +223,44 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       }
     }
 
+    // 3bis. ANTAGONISMO. Dos hongos incompatibles se reconocen ANTES de tocarse
+    //    —los inhibidores difunden— así que la punta que huele a la otra colonia
+    //    se frena y se aparta. Eso deja el "deadlock": una franja de nadie entre
+    //    las dos redes, con su barrera pigmentada, en vez de dos micelios
+    //    interpenetrados. Es competencia por interferencia, no reacción-difusión.
+    let foe = 0
+    if (cfg.antagonism > 0) {
+      let rx = 0, rz = 0, foeColony = -1
+      const near = collectNear(grid, tip.x, tip.z)
+      for (let k = 0; k < near.length; k++) {
+        const n = nodes[near[k]]
+        if (!n.alive || n.colony === tip.colony) continue
+        const dx = tip.x - n.x, dz = tip.z - n.z
+        const d2 = dx * dx + dz * dz
+        if (d2 > 1e-9 && d2 < FOE_R * FOE_R) {
+          const d = Math.sqrt(d2)
+          const w = 1 - d / FOE_R
+          rx += (dx / d) * w
+          rz += (dz / d) * w
+          if (w > foe) { foe = w; foeColony = n.colony }
+        }
+      }
+      if (rx !== 0 || rz !== 0) {
+        ang = turnToward(ang, Math.atan2(rz, rx), cfg.turnRate * cfg.antagonism * dt)
+      }
+      // La barrera pigmentada se deposita en el frente TRABADO, no sólo donde
+      // dos hifas chocan: con el antagonismo a distancia casi nunca llegan a
+      // tocarse, y sin embargo la raya oscura en la madera existe igual.
+      // Sin umbral: la barrera se deposita a un ritmo proporcional a cuánto
+      // FRENA el enemigo a esta punta, así se concentra sola donde el frente
+      // está más trabado. Con un umbral fijo no se depositaba nada cuando el
+      // antagonismo era fuerte, porque entonces las puntas se apartan tan lejos
+      // que nunca llegan a acercarse al valor de corte.
+      if (foe > 0 && rand() < (cfg.barrierRate || 6) * foe * foe * dt) {
+        events.push({ type: 'barrier', x: tip.x, z: tip.z, side: tip.side, colony: tip.colony, otherColony: foeColony })
+      }
+    }
+
     // CRECIMIENTO RADIAL: la punta se orienta hacia afuera desde el inóculo de
     // su colonia. Es lo que hace que la colonia avance como un frente circular
     // —el rosetón de una placa— en vez de enredarse sobre sí misma. Cuanto más
@@ -148,7 +270,7 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       if (o) {
         const outAng = Math.atan2(tip.z - o.z, tip.x - o.x)
         const d = ((outAng - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI
-        ang += d * Math.min(1, cfg.radial * dt)
+        ang += d * Math.min(1, cfg.radial * soilRadial * dt)
       }
     }
 
@@ -164,21 +286,47 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
         ang += d * Math.min(1, (m - cfg.bound) * 6)
       }
     }
-    tip.ang = ang
 
     // 4. Avanza. Solo la punta se mueve — el resto de la red queda quieto.
-    const step = cfg.tipSpeed * dt
+    // Cerca de la otra colonia la punta casi se detiene: el frente se traba.
+    const step = cfg.tipSpeed * soilSpeed * (1 - 0.85 * foe) * dt
+    const prevX = tip.x, prevZ = tip.z
     tip.x += Math.cos(ang) * step
     tip.z += Math.sin(ang) * step
     tip.dist += step
+
+    // 4bis. ENVOLVER EL FLANCO. Una punta que llega al borde del tronco sólo
+    //    PASA a la tierra si el tronco la toca ahí. Si no, dobla sobre el canto
+    //    y sigue comiendo por la PANZA: envolver = deshacer el paso, darse
+    //    vuelta y cambiar de lado. El trazo (x,z) sigue siendo el mismo mapa en
+    //    planta; lo que cambia es en qué mitad del tronco se apoya.
+    if (onLogAt && !onSoil && !onLogAt(tip.x, tip.z)) {
+      const puedeSalir = canLeaveAt ? canLeaveAt(prevX, prevZ) : true
+      if (!puedeSalir || (cfg.wrapChance && rand() < cfg.wrapChance)) {
+        tip.x = prevX; tip.z = prevZ; tip.dist -= step
+        ang = wrapAngle(ang + Math.PI + (rand() * 2 - 1) * 0.5)
+        tip.side = -tip.side
+      }
+    }
+    tip.ang = ang
 
     // 5. Anastomosis: ¿está cerca de un nodo ajeno a su propio último nodo?
     //    (fuseRadius debe ser menor que stepLen: si no, una punta puede
     //    "fusionarse" con su propio rastro recién dejado.)
     let fused = false
-    for (let ni = 0; ni < nodes.length; ni++) {
+    // Una punta recién nacida no se fusiona: arranca PEGADA a la hifa de la que
+    // salió, así que sin esta gracia moriría en el acto contra sus propios
+    // vecinos — y los brotes laterales no servirían de nada.
+    tip.age += step
+    const nearFuse = tip.age > cfg.fuseRadius ? collectNear(grid, tip.x, tip.z) : EMPTY
+    for (let k = 0; k < nearFuse.length; k++) {
+      const ni = nearFuse[k]
       const n = nodes[ni]
       if (!n.alive || ni === tip.node) continue
+      // Lados distintos no se tocan: entre el lomo y la panza hay madera. Sin
+      // esto una hifa de arriba se fusionaría con una de abajo atravesando el
+      // tronco, porque en planta (x,z) las dos caen en el mismo punto.
+      if (n.side !== tip.side) continue
       const dx = tip.x - n.x, dz = tip.z - n.z
       if (dx * dx + dz * dz > cfg.fuseRadius * cfg.fuseRadius) continue
 
@@ -206,7 +354,7 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       const nodeIdx = allocFree(nodes)
       if (nodeIdx !== -1) {
         const n = nodes[nodeIdx]
-        n.x = tip.x; n.z = tip.z; n.colony = tip.colony; n.alive = true
+        n.x = tip.x; n.z = tip.z; n.colony = tip.colony; n.side = tip.side; n.alive = true
 
         const edgeIdx = allocFree(edges)
         if (edgeIdx !== -1) {
@@ -221,16 +369,37 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
     // 7. Ramificación: nace en el NODO actual (no a mitad de camino), con
     //    ángulo desviado. La población de puntas crece — a diferencia de
     //    todos los otros módulos del repo.
-    if (rand() < cfg.branchRate * dt) {
+    if (rand() < cfg.branchRate * soilBranch * dt) {
       const ti = allocFree(tips)
       if (ti !== -1) {
         const baseNode = nodes[tip.node]
         const off = (Math.PI / 6 + rand() * Math.PI / 3) * (rand() < 0.5 ? -1 : 1)
         const child = tips[ti]
-        child.node = tip.node; child.x = baseNode.x; child.z = baseNode.z; child.dist = 0
+        child.node = tip.node; child.x = baseNode.x; child.z = baseNode.z; child.dist = 0; child.age = 0
         child.ang = tip.ang + off
-        child.colony = tip.colony; child.vigor = tip.vigor; child.alive = true
+        child.colony = tip.colony; child.vigor = tip.vigor; child.side = tip.side; child.alive = true
       }
+    }
+  }
+
+  // 7bis. BROTE LATERAL. Una hifa no solo crece por la punta: la red madura
+  //    saca ramas nuevas del COSTADO de cordones ya hechos. Sin esto, en una red
+  //    densa todas las puntas terminan fusionándose, la colonia se queda con
+  //    cero frentes vivos y el mundo se congela para siempre — no hay forma de
+  //    volver a tener una punta, porque ramificar necesita una punta.
+  if (cfg.lateralRate) {
+    const want = cfg.lateralRate * dt
+    let spawns = Math.floor(want)
+    if (rand() < want - spawns) spawns++
+    for (let s = 0; s < spawns; s++) {
+      const ti = allocFree(tips)
+      if (ti === -1) break                    // puntas al tope: ya hay de sobra
+      if (grid.live.length === 0) break
+      const ni = grid.live[(rand() * grid.live.length) | 0]
+      const n = nodes[ni], t = tips[ti]
+      t.node = ni; t.x = n.x; t.z = n.z; t.dist = 0; t.age = 0
+      t.ang = rand() * TWO_PI
+      t.colony = n.colony; t.side = n.side; t.vigor = 1; t.alive = true
     }
   }
 
@@ -281,7 +450,7 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
 /** Puntas vivas, para dibujar. */
 export function tipPositions(net) {
   const out = []
-  for (const t of net.tips) if (t.alive) out.push({ x: t.x, z: t.z, colony: t.colony })
+  for (const t of net.tips) if (t.alive) out.push({ x: t.x, z: t.z, colony: t.colony, side: t.side })
   return out
 }
 

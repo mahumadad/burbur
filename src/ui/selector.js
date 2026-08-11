@@ -1,48 +1,60 @@
-// Selector de mundo: una figura por bioma (triángulo/gota/bloque/hexágono) con
-// el color de acento exacto de cada mundo y un glow del mismo tono. Click →
-// cambia de mundo. Réplica del selector de murmur (`window.setScene(id)`), pero
-// con geometría en vez de simples puntos. El nombre del mundo SIEMPRE se ve:
-// muestra el del mundo activo y se resalta al pasar el mouse por otro.
+// Selector de mundo VERTICAL en el borde derecho (pensado para mobile, estilo
+// murmur.living): una tarjeta redondeada por bioma con un "blob" de su color de
+// acento, y al final una tarjeta de AGITAR. Click → cambia de mundo / sacude.
+// El nombre del mundo aparece a la IZQUIERDA de la tarjeta al pasar el mouse
+// (y un instante al seleccionar, útil en mobile sin hover).
 
-// Figura SVG por mundo (viewBox 0 0 24 24, se pinta con currentColor).
+// Blob SVG por mundo (viewBox 0 0 24 24, pintado con el acento del mundo).
 const SHAPES = {
   land: '<polygon points="12,3.5 20.5,20 3.5,20"/>',                                     // cerro/árbol
   water: '<path d="M12 3.2c-4.3 6-5.6 9.3-3.8 12.4a4.7 4.7 0 0 0 8.1 0C17.6 12.5 16.3 9.2 12 3.2Z"/>', // gota
   city: '<rect x="4.5" y="4.5" width="15" height="15" rx="2.6"/>',                       // bloque
   cell: '<polygon points="12,2.8 19.9,7.4 19.9,16.6 12,21.2 4.1,16.6 4.1,7.4"/>',        // hexágono
+  fungus: '<path d="M3.4 11.5a8.6 6.2 0 0 1 17.2 0z"/><rect x="9.8" y="11.5" width="4.4" height="8.4" rx="1.8"/>', // hongo
 }
 const shapeFor = (id) => SHAPES[id] || '<circle cx="12" cy="12" r="8.2"/>'
+// Icono de AGITAR: rombo con dos arcos de vibración (guiño al shake de murmur).
+const SHAKE_SVG =
+  '<path d="M12 7.2l3.6 4.8-3.6 4.8-3.6-4.8z"/>' +
+  '<path d="M5.2 9a4.4 5 0 0 0 0 6M18.8 9a4.4 5 0 0 1 0 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>'
 
 const CSS = `
 .wsel {
-  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 20;
-  display: flex; gap: 6px; padding: 7px 10px; border-radius: 999px;
-  background: rgba(6, 10, 8, 0.55); backdrop-filter: blur(7px);
-  border: 1px solid rgba(255, 255, 255, 0.09); user-select: none;
+  position: fixed; left: 12px; bottom: 14px; z-index: 20;
+  display: flex; flex-direction: column; gap: 8px; user-select: none;
 }
 .wsel button {
   all: unset; cursor: pointer; display: grid; place-items: center;
-  width: 30px; height: 30px; border-radius: 9px;
-  transition: transform .16s ease, background .16s ease;
+  width: 46px; height: 46px; border-radius: 14px;
+  background: rgba(6, 10, 8, 0.5); backdrop-filter: blur(7px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform .16s ease, background .16s ease, box-shadow .16s ease;
 }
-.wsel button:hover { transform: translateY(-2px); background: rgba(255,255,255,.06); }
-.wsel .shape { color: #fff; line-height: 0; transition: transform .16s ease, filter .16s ease; }
-.wsel .shape svg { display: block; fill: currentColor; width: 20px; height: 20px; }
-.wsel button:hover .shape { filter: drop-shadow(0 0 5px); }
-.wsel button[aria-selected="true"] .shape { transform: scale(1.16); filter: drop-shadow(0 0 6px) drop-shadow(0 0 2px); }
-.wsel button[data-ready="false"] .shape { opacity: .4; filter: saturate(.55); }
-.wsel button[data-ready="false"][aria-selected="true"] .shape { opacity: .62; }
+.wsel button:hover { transform: scale(1.06); background: rgba(255,255,255,.07); }
+.wsel .ico { line-height: 0; }
+.wsel .ico svg { display: block; width: 26px; height: 26px; fill: currentColor;
+  filter: drop-shadow(0 0 5px); transition: transform .16s ease, filter .16s ease; }
+.wsel button[aria-selected="true"] {
+  background: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 0 0 2px var(--tile-accent), 0 0 16px -3px var(--tile-accent);
+}
+.wsel button[aria-selected="true"] .ico svg { transform: scale(1.14); filter: drop-shadow(0 0 9px); }
+.wsel button[data-ready="false"] .ico { opacity: .4; filter: saturate(.5); }
+.wsel .shk { color: #eafff0; }
+.wsel .shk .ico svg { filter: none; }
+.wsel .shk:hover { color: var(--accent, #8fe04a); }
+body.is-shaking .wsel .shk .ico svg { animation: wsel-shk .55s ease; }
+@keyframes wsel-shk { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-13deg)} 75%{transform:rotate(13deg)} }
 .wsel-lbl {
-  position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%); z-index: 21;
+  position: fixed; z-index: 21; transform: translateY(-50%);
   font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: .16em; text-transform: uppercase; color: #eafff0;
-  opacity: .5; transition: opacity .16s ease, letter-spacing .16s ease;
-  pointer-events: none; white-space: nowrap; text-shadow: 0 1px 7px rgba(0,0,0,.65);
+  opacity: 0; transition: opacity .16s ease; pointer-events: none; white-space: nowrap;
+  text-shadow: 0 1px 7px rgba(0,0,0,.7);
 }
-.wsel-lbl.hot { opacity: 1; letter-spacing: .2em; }
 `
 
-export function createWorldSelector(worlds, current, onSelect) {
+export function createWorldSelector(worlds, current, onSelect, onShake) {
   const style = document.createElement('style')
   style.textContent = CSS
   document.head.appendChild(style)
@@ -54,15 +66,17 @@ export function createWorldSelector(worlds, current, onSelect) {
   const byId = {}
   for (const w of worlds) byId[w.id] = w
   const nameOf = (w) => w.name || w.label
-  let currentId = current
-  let hovering = false
 
-  function renderLabel(id, hot) {
-    const w = byId[id]
-    if (!w) return
-    lbl.textContent = nameOf(w) + (w.ready ? '' : ' · próximamente')
-    lbl.classList.toggle('hot', hot)
+  // El nombre se posiciona a la izquierda de la tarjeta que lo dispara.
+  function showLabel(text, btn) {
+    lbl.textContent = text
+    const r = btn.getBoundingClientRect()
+    lbl.style.top = (r.top + r.height / 2) + 'px'
+    lbl.style.left = (r.right + 10) + 'px'   // el selector va a la izquierda → nombre a la derecha
+    lbl.style.right = 'auto'
+    lbl.style.opacity = '1'
   }
+  function hideLabel() { lbl.style.opacity = '0' }
 
   const el = document.createElement('div')
   el.className = 'wsel'
@@ -72,27 +86,39 @@ export function createWorldSelector(worlds, current, onSelect) {
     b.dataset.id = w.id
     b.dataset.ready = String(w.ready)
     b.setAttribute('aria-selected', String(w.id === current))
+    b.style.setProperty('--tile-accent', w.accent)
     b.title = nameOf(w)
-    const shape = document.createElement('span')
-    shape.className = 'shape'
-    shape.style.color = w.accent
-    shape.innerHTML = `<svg viewBox="0 0 24 24">${shapeFor(w.id)}</svg>`
-    b.appendChild(shape)
+    const ico = document.createElement('span')
+    ico.className = 'ico'
+    ico.style.color = w.accent
+    ico.innerHTML = `<svg viewBox="0 0 24 24">${shapeFor(w.id)}</svg>`
+    b.appendChild(ico)
     b.addEventListener('click', () => onSelect(w.id))
-    b.addEventListener('pointerenter', () => { hovering = true; renderLabel(w.id, true) })
-    b.addEventListener('pointerleave', () => { hovering = false; renderLabel(currentId, false) })
+    b.addEventListener('pointerenter', () => showLabel(nameOf(w) + (w.ready ? '' : ' · próximamente'), b))
+    b.addEventListener('pointerleave', hideLabel)
     el.appendChild(b)
     btns[w.id] = b
   }
-  document.body.appendChild(el)
 
-  // El nombre del mundo activo se ve desde el arranque (no solo en hover).
-  renderLabel(currentId, false)
+  // Tarjeta de AGITAR al final (mismo estilo). Llama al mismo trigger que los
+  // gestos físicos (sacudir el móvil / el mouse), así todo pasa por un solo lugar.
+  if (onShake) {
+    const s = document.createElement('button')
+    s.className = 'shk'
+    s.title = 'Agitar'
+    s.innerHTML = `<span class="ico"><svg viewBox="0 0 24 24">${SHAKE_SVG}</svg></span>`
+    s.addEventListener('click', onShake)
+    s.addEventListener('pointerenter', () => showLabel('Agitar', s))
+    s.addEventListener('pointerleave', hideLabel)
+    el.appendChild(s)
+  }
+  document.body.appendChild(el)
 
   function setActive(id) {
     for (const k in btns) btns[k].setAttribute('aria-selected', String(k === id))
-    currentId = id
-    if (!hovering) renderLabel(id, false)
+    // Mostrar el nombre del nuevo mundo un instante (en mobile no hay hover).
+    const b = btns[id]
+    if (b) { showLabel(nameOf(byId[id]), b); setTimeout(hideLabel, 1400) }
   }
   return { el, setActive }
 }

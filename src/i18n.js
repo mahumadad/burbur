@@ -24,8 +24,24 @@ export const WEATHER_ES = {
   'heavy rain': 'lluvia fuerte',
 }
 
-// Mundo CÉLULA: el "día" es el ciclo celular y el "clima" es el medio.
+// Mundo CÉLULA: el "día" es el ritmo funcional del macrófago (spec
+// 2026-08-11-ciclo-y-division-celula.md §3) y el "clima" es el medio.
 export const CELL_PHASE_ES = {
+  'resting': 'reposo',
+  'surveillance': 'vigilancia',
+  'patrolling': 'patrulla',
+  'chemotaxis': 'quimiotaxis',
+  'alert': 'alerta',
+  'hunting': 'caza',
+  'engulfing': 'fagocitosis',
+  'digesting': 'digestión',
+  'antigen presentation': 'presentación de antígeno',
+  'cytokine secretion': 'secreción de citoquinas',
+  'efferocytosis': 'barrido de restos',
+  'recovery': 'recuperación',
+  // Entradas viejas del ciclo celular (ya no las produce ecosystem.js: el
+  // ciclo pasó a sim/cellCycle.js). Se conservan porque test/cellNarration.test.js
+  // las sigue usando para probar la traducción genérica de fase.
   'G1 early': 'G1 temprana',
   'G1': 'G1',
   'G1/S checkpoint': 'control G1/S',
@@ -50,6 +66,34 @@ export const CELL_WEATHER_ES = {
 }
 Object.assign(PHASE_ES, CELL_PHASE_ES)
 Object.assign(WEATHER_ES, CELL_WEATHER_ES)
+
+// Mundo NEURONA: el "día" es un ciclo de sueño y el "clima", los neuromoduladores
+// (spec 2026-08-11-diseno-mundo-neurona.md §6).
+export const NEURON_PHASE_ES = {
+  'quiet wake': 'vigilia tranquila',
+  'alert wake': 'vigilia alerta',
+  'focused': 'atención',
+  'drowsy': 'somnolencia',
+  'N1': 'sueño ligero (N1)',
+  'N2 spindles': 'husos (N2)',
+  'N3 slow wave': 'ondas lentas (N3)',
+  'N3 deep': 'sueño profundo (N3)',
+  'N2 return': 'vuelta a husos (N2)',
+  'REM': 'REM',
+  'REM burst': 'ráfaga REM',
+  'waking': 'despertar',
+}
+
+export const NEURON_WEATHER_ES = {
+  'cholinergic': 'colinérgico',
+  'noradrenergic': 'noradrenérgico',
+  'dopaminergic': 'dopaminérgico',
+  'high adenosine': 'adenosina alta',
+  'caffeine': 'cafeína',
+  'gabaergic': 'gabaérgico',
+}
+Object.assign(PHASE_ES, NEURON_PHASE_ES)
+Object.assign(WEATHER_ES, NEURON_WEATHER_ES)
 
 export const phaseES = (p) => PHASE_ES[p] || p
 export const weatherES = (w) => WEATHER_ES[w] || w
