@@ -33,7 +33,7 @@ const CSS = `
 .wsel button[data-ready="false"] .shape { opacity: .4; filter: saturate(.55); }
 .wsel button[data-ready="false"][aria-selected="true"] .shape { opacity: .62; }
 .wsel-lbl {
-  position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%); z-index: 20;
+  position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%); z-index: 21;
   font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: .16em; text-transform: uppercase; color: #eafff0;
   opacity: .5; transition: opacity .16s ease, letter-spacing .16s ease;
