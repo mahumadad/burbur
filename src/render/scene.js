@@ -1098,11 +1098,10 @@ export function createScene(container, cfg, agentNames = []) {
   // Se suman a los árboles de puntos que ya existen (arriba): NO los
   // reemplazan. Se plantan lejos de ellos y entre sí usando `treeObstacles`,
   // para que las dos estéticas no se encimen. El manzano es la única especie
-  // con fruto — el resto tiene `colors.fruit = null` y no aporta nada a
-  // `fruitAnchors`.
+  // con fruto — el resto tiene `colors.fruit = null`. Cada árbol emite desde
+  // sus propias anclas, así que no hay pool combinado de fruto.
   const arboles = createTreeFactory(THREE, noise2)
   const lush = []
-  const fruitAnchors = [] // por fruto: x,y,z, color(3) = 6 floats
   // Mismos años que el sakura de la ciudad (Task 4): plantón→joven→maduro→
   // senescente→caído→rebrote.
   const VIDA_CFG_LUSH = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
@@ -1152,19 +1151,21 @@ export function createScene(container, cfg, agentNames = []) {
     scene.add(t.group)
     lush.push(t)
     treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
-    for (let i = 0; i < t.leafAnchors.length; i++) leafAnchors.push(t.leafAnchors[i])
-    for (let i = 0; i < t.flowerAnchors.length; i++) petalAnchors.push(t.flowerAnchors[i])
-    for (let i = 0; i < t.fruitAnchors.length; i++) fruitAnchors.push(t.fruitAnchors[i])
+    // Las anclas lush NO se mezclan con el pool de los árboles de puntos: cada
+    // árbol lush emite desde LAS SUYAS y solo cuando está poblado (ver el update).
+    // Además evita mezclar strides distintos (viejo 9 floats, lush 6).
   }
 
   const litter = createLitter({
     THREE, count: 320, ground: G, pointUniforms,
   })
   scene.add(litter.mesh)
+  // Anclas de los árboles de PUNTOS (siempre poblados). Los lush emiten desde
+  // las suyas, aparte. `anclas.leaf` lleva el color virado; `anclas.petal` es
+  // pos+color directo.
   const anclas = {
     leaf: new Float32Array((leafAnchors.length / 9) * 6),
     petal: new Float32Array(petalAnchors),
-    fruit: new Float32Array(fruitAnchors),
   }
   // Las anclas de hoja llevan el color YA VIRADO (verde→otoño). Se recalculan
   // cuando el otoño avanza de forma apreciable — no cada frame, que sería
@@ -1519,11 +1520,15 @@ export function createScene(container, cfg, agentNames = []) {
       const phenDe = (e) => (phenPorEspecie[e] ||=
         phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, TREE_SPECIES[e].curve))
       const gust = (eco.rain || 0) + (eco.wind || 0) * 0.7
-      let lushLeafShed = 0, lushPetalShed = 0, fruitShed = 0, lushFruitPhen = 0
-      for (const t of lush) {
+      const litterEnv = { wind: eco.wind || 0, windDir: eco.windDir || 0 }
+      for (let ti = 0; ti < lush.length; ti++) {
+        const t = lush[ti]
         const ph = phenDe(t.especie)
         const ev = updateTreeLife(t.vida, VIDA_CFG_LUSH, step, seasonT)
         t.setGrowth(t.vida.growth)
+        // Cuánta copa hay realmente puesta: un árbol vacío (plantón recién
+        // rebrotado) no debe botar nada, por más que la estación sea de caída.
+        const frac = t.foliageFrac()
         // El vigor recorta la copa: un árbol viejo o recién nacido sostiene
         // menos hoja/flor/fruto que uno maduro.
         t.update({
@@ -1533,14 +1538,20 @@ export function createScene(container, cfg, agentNames = []) {
         }, clock)
         if (t.vida.stage === 'fallen') t.group.rotation.z = t.vida.tilt * Math.PI * 0.42
 
-        lushLeafShed += ph.shed * t.vida.vigor
-        lushPetalShed += ph.petals * t.vida.vigor
+        // Emisión POR ÁRBOL desde SUS anclas, escalada por vigor × copa real: un
+        // árbol vacío no emite, y las hojas nacen SOLO donde ese árbol tiene copa.
+        const dens = t.vida.vigor * frac
+        // Cuánto follaje tiene puesto AHORA: lo usa el shake para soltar en
+        // proporción, per-árbol (un árbol vacío no suelta al agitar).
+        t._leafAmt = ph.leaf * dens; t._flowerAmt = ph.flower * dens; t._fruitAmt = ph.fruit * dens
+        const src = 'lush' + ti
+        litter.emitRate('leaf', ph.shed * dens, step, t.leafAnchors, src)
+        litter.emitRate('petal', ph.petals * dens, step, t.flowerAnchors, src)
         // Solo el manzano fructifica (las demás tienen curve.fruit = null y
         // ph.fruit da 0 siempre): el fruto cae A PLOMO (perfil `fruit` de
         // litter.js), a diferencia de la hoja, que deriva de lado.
         if (ph.fruit > 0) {
-          fruitShed += ph.fruit * (0.6 + gust * 4) * t.vida.vigor
-          lushFruitPhen += ph.fruit * t.vida.vigor
+          litter.emitRate('fruit', ph.fruit * (0.6 + gust * 4) * dens, step, t.fruitAnchors, src)
         }
 
         // Un plantón no ofrece posadero: se registra recién al dejar de serlo.
@@ -1574,10 +1585,13 @@ export function createScene(container, cfg, agentNames = []) {
         }
       }
 
-      anclasHoja(phen.autumn)
-      litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
-        { leaf: phen.shed + lushLeafShed, petal: phen.petals + lushPetalShed, fruit: fruitShed }, anclas)
-      lastPhen = { leaf: phen.leaf, flower: phen.flower, fruit: lushFruitPhen }
+      // Árboles de puntos (los de siempre): también emiten desde SUS anclas, con
+      // su propia curva. Están siempre poblados, así que no se gatean por vida.
+      litter.emitRate('leaf', phen.shed, step, anclasHoja(phen.autumn), 'puntos')
+      litter.emitRate('petal', phen.petals, step, anclas.petal, 'puntos')
+      // Una sola vez por frame: avanza la física de todo lo que ya cae.
+      litter.step(step, litterEnv)
+      lastPhen = { leaf: phen.leaf, flower: phen.flower }
     }
 
     mapPositions(step)
@@ -1673,12 +1687,18 @@ export function createScene(container, cfg, agentNames = []) {
       b.tx = (Math.random() * 2 - 1) * 0.85
       b.tz = (Math.random() * 2 - 1) * 0.85
     }
-    // El shake sacude la copa: suelta hojas y flores en proporción a lo que el
-    // árbol tenga puesto. Un árbol pelado en invierno no suelta nada.
+    // El shake sacude la copa: suelta en proporción a lo que hay puesto, y desde
+    // las anclas de cada fuente. Un árbol pelado (o vacío) no suelta nada.
+    // Árboles de puntos (siempre poblados):
     litter.burst('leaf', 40 * strength * lastPhen.leaf, anclas.leaf)
     litter.burst('petal', 50 * strength * lastPhen.flower, anclas.petal)
-    // El manzano suelta el fruto a plomo, no de lado como la hoja.
-    litter.burst('fruit', 24 * strength * lastPhen.fruit, anclas.fruit)
+    // Cada árbol lush, desde SUS anclas y según SU follaje actual: el manzano
+    // vacío no bota manzanas, el sakura en flor suelta una nube de pétalos.
+    for (const t of lush) {
+      litter.burst('leaf', 40 * strength * (t._leafAmt || 0), t.leafAnchors)
+      litter.burst('petal', 50 * strength * (t._flowerAmt || 0), t.flowerAnchors)
+      litter.burst('fruit', 24 * strength * (t._fruitAmt || 0), t.fruitAnchors)
+    }
   }
 
   // El desmontaje: libera la hojarasca y los árboles lush, y delega el resto

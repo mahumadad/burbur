@@ -41,7 +41,7 @@ const mezclar = (a, b, t) => [
  *   color verde(3) + color de otoño(3) — mismo formato que consume
  *   `tintLeafAnchors` de litter.js.
  *   `flowerAnchors`: Float32Array de 6 floats por racimo de flor — posición(3)
- *   + color(3) — listo para `litter.update`/`litter.burst`.
+ *   + color(3) — listo para `litter.emitRate`/`litter.burst`.
  *   `fruitAnchors`: Float32Array de 6 floats por fruto — mismo formato que
  *   `flowerAnchors`. Vacío si la especie no fructifica (`def.colors.fruit`
  *   nulo, como en todas menos el manzano).
@@ -181,6 +181,7 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
   mesh.frustumCulled = false
   return {
     mesh, uniforms, geometry: geo, material: mat,
+    years: iYear,   // año de cada racimo: sirve para saber cuánta copa está revelada
     leafAnchors: new Float32Array(leafAnchors),
     flowerAnchors: new Float32Array(flowerAnchors),
     fruitAnchors: new Float32Array(fruitAnchors),

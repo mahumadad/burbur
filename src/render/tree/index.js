@@ -69,9 +69,23 @@ export function createTreeFactory(THREE, noise2) {
       flowerAnchors: fol ? fol.flowerAnchors : new Float32Array(0),
       // Vacío en toda especie que no fructifique (solo el manzano lo hace).
       fruitAnchors: fol ? fol.fruitAnchors : new Float32Array(0),
+      // Fracción de la copa REALMENTE revelada por el crecimiento (0..1): es el
+      // promedio del mismo `smoothstep(año, año+1, growth)` que usa el shader
+      // para hacer aparecer cada racimo. Un plantón recién rebrotado da ~0, un
+      // árbol maduro da ~1. El mundo la usa para NO botar hojas de un árbol vacío.
+      _folFrac: 0,
+      foliageFrac() { return this._folFrac },
       setGrowth(y) {
         bark.uniforms.uGrowth.value = y
         if (fol) fol.uniforms.uGrowth.value = y
+        if (fol && fol.years.length) {
+          let s = 0
+          for (let i = 0; i < fol.years.length; i++) {
+            const u = Math.min(1, Math.max(0, y - fol.years[i]))
+            s += u * u * (3 - 2 * u)
+          }
+          this._folFrac = s / fol.years.length
+        }
       },
       update(phen, t) {
         if (!fol) return

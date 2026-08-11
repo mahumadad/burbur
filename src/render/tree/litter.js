@@ -52,7 +52,9 @@ export function createLitter({ THREE, count = 320, ground = 0, pointUniforms }) 
   const vy = new Float32Array(count)
   const phase = new Float32Array(count)
   const activo = new Uint8Array(count)
-  const presupuesto = { leaf: 0, petal: 0, fruit: 0 }
+  // Presupuesto fraccional POR FUENTE: cada árbol (y los árboles de puntos
+  // viejos) acumula el suyo, así emitir per-árbol no se pisa entre fuentes.
+  const presupuesto = new Map()
   let head = 0
 
   const geo = new THREE.BufferGeometry()
@@ -127,20 +129,25 @@ export function createLitter({ THREE, count = 320, ground = 0, pointUniforms }) 
   }
 
   /**
+   * Emisión continua de UNA fuente (un árbol, o el conjunto de árboles de
+   * puntos): acumula presupuesto fraccional propio (permite tasas < 1/s) y
+   * emite desde SUS anclas. `fuente` distingue el presupuesto de cada emisor.
+   * @param {'leaf'|'petal'|'fruit'} tipo
+   * @param {number} rate  unidades/segundo
    * @param {number} dt
-   * @param {{wind:number, windDir:number}} env
-   * @param {{leaf:number, petal:number, fruit:number}} rates  unidades/segundo
-   * @param {{leaf:Float32Array, petal:Float32Array, fruit:Float32Array}} anclas
+   * @param {Float32Array} anchors
+   * @param {string} fuente  clave del presupuesto (p. ej. 'lush-0', 'puntos')
    */
-  function update(dt, env, rates, anclas) {
-    // Emisión continua con presupuesto fraccional (permite tasas < 1/s).
-    for (const tipo of ['leaf', 'petal', 'fruit']) {
-      const r = rates[tipo] || 0
-      if (r <= 0) continue
-      presupuesto[tipo] += r * dt
-      while (presupuesto[tipo] >= 1) { presupuesto[tipo] -= 1; emit(tipo, anclas[tipo]) }
-    }
+  function emitRate(tipo, rate, dt, anchors, fuente) {
+    if (!(rate > 0) || !anchors || !anchors.length) return
+    const clave = tipo + ':' + fuente
+    let b = (presupuesto.get(clave) || 0) + rate * dt
+    while (b >= 1) { b -= 1; emit(tipo, anchors) }
+    presupuesto.set(clave, b)
+  }
 
+  /** Avanza SOLO la física de las partículas que ya están cayendo. */
+  function step(dt, env) {
     const wind = env.wind || 0
     const wx = Math.cos(env.windDir || 0), wz = Math.sin(env.windDir || 0)
     const t = (pointUniforms.uT.value) || 0
@@ -169,5 +176,5 @@ export function createLitter({ THREE, count = 320, ground = 0, pointUniforms }) 
 
   function dispose() { geo.dispose(); mat.dispose() }
 
-  return { mesh, emit, burst, update, dispose }
+  return { mesh, emit, burst, emitRate, step, dispose }
 }

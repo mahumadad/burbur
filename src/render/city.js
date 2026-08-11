@@ -14,7 +14,7 @@ import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
 import { phenology } from '../sim/phenology.js'
 import { SPECIES } from './tree/species.js'
-import { createLitter, tintLeafAnchors } from './tree/litter.js'
+import { createLitter } from './tree/litter.js'
 import { createTreeFactory } from './tree/index.js'
 import { createTreeLife, updateTreeLife, seedMature } from '../sim/treeLife.js'
 
@@ -995,8 +995,6 @@ export function createCityScene(container, cfg, agentNames = []) {
   // atlas pintado en canvas), que se lee bien desde cualquier ángulo.
   const arboles = createTreeFactory(THREE, noise2)
   const sakuras = []
-  const leafAnchors = []    // 9 floats por racimo de hoja: pos(3)+verde(3)+otoño(3)
-  const petalAnchors = []   // 6 floats por racimo de flor: pos(3)+color(3)
 
   // Ciclo de vida (Task 4): años en los que un sakura pasa de plantón a
   // adulto, envejece, cae y rebrota. Mismos años que usará el bosque.
@@ -1052,8 +1050,8 @@ export function createCityScene(container, cfg, agentNames = []) {
       // corteza ya crecida (mismo muestreo que usaba el tronco combinado).
       const bp = t.barkGeometry.attributes.position
       for (let i = 0; i < bp.count; i += 5) capPos.push(bp.getX(i), bp.getY(i) + 0.1, bp.getZ(i))
-      for (let i = 0; i < t.leafAnchors.length; i++) leafAnchors.push(t.leafAnchors[i])
-      for (let i = 0; i < t.flowerAnchors.length; i++) petalAnchors.push(t.flowerAnchors[i])
+      // Las anclas NO se juntan en un pool: cada sakura emite desde LAS SUYAS
+      // (ver el update), y solo cuando tiene copa.
     }
   }
 
@@ -1086,19 +1084,6 @@ export function createCityScene(container, cfg, agentNames = []) {
     THREE, count: 480, ground: we, pointUniforms: draw.uniforms,
   })
   scene.add(litter.mesh)
-  const anclas = {
-    leaf: new Float32Array((leafAnchors.length / 9) * 6),
-    petal: new Float32Array(petalAnchors),
-    fruit: new Float32Array(0),
-  }
-  // Ver el comentario equivalente en scene.js: la interpolación verde→otoño
-  // vive en litter.js (tintLeafAnchors) para no duplicarla en cada mundo.
-  let autumnCache = -1
-  function anclasHoja(autumn) {
-    if (Math.abs(autumn - autumnCache) < 0.02) return anclas.leaf
-    autumnCache = autumn
-    return tintLeafAnchors(leafAnchors, anclas.leaf, autumn)
-  }
 
   // ─── An: POLVO/BRUMA — puerto fiel ──────────────────────────────────────
   // 2400 puntos naranjas, más densos cerca del borde de manzana (`an` =
@@ -1812,9 +1797,18 @@ export function createCityScene(container, cfg, agentNames = []) {
       // fallback local que usa el bosque).
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.sakura.curve)
-      for (const t of sakuras) {
+      const litterEnv = { wind: eco.wind || 0, windDir: eco.windDir || 0 }
+      for (let ti = 0; ti < sakuras.length; ti++) {
+        const t = sakuras[ti]
         const ev = updateTreeLife(t.vida, VIDA_CFG, step, seasonT)
         t.setGrowth(t.vida.growth)
+        const frac = t.foliageFrac()
+        // Emisión POR ÁRBOL desde SUS anclas, escalada por vigor × copa real: un
+        // sakura vacío no emite, y los pétalos nacen solo donde tiene copa.
+        const dens = t.vida.vigor * frac
+        t._leafAmt = phen.leaf * dens; t._flowerAmt = phen.flower * dens
+        litter.emitRate('leaf', phen.shed * dens, step, t.leafAnchors, 'sakura' + ti)
+        litter.emitRate('petal', phen.petals * dens, step, t.flowerAnchors, 'sakura' + ti)
         // El vigor recorta la hoja: un árbol viejo o recién nacido sostiene
         // menos copa. `leafShown` (no solo `leaf`) porque `Tree.update` la
         // prefiere cuando está presente (ver tree/index.js).
@@ -1855,17 +1849,18 @@ export function createCityScene(container, cfg, agentNames = []) {
           t.group.rotation.z = 0
         }
       }
-      anclasHoja(phen.autumn)
-      litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
-        { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
-      lastPhen = phen
-
       // El cactus tiene su propia curva (solo florece en primavera): sin esto
-      // `uFlower` se queda en 0 para siempre y nunca se ven las flores.
+      // `uFlower` se queda en 0 para siempre y nunca se ven las flores. Sus
+      // flores también caen, desde SUS anclas (siempre está "adulto").
       if (cactus) {
         const phenCactus = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.cactus.curve)
         cactus.update(phenCactus, clock)
+        cactus._flowerAmt = phenCactus.flower
+        litter.emitRate('petal', phenCactus.petals, step, cactus.flowerAnchors, 'cactus')
       }
+      // Una sola vez por frame: avanza la física de todo lo que ya cae.
+      litter.step(step, litterEnv)
+      lastPhen = phen
     }
 
     moveAgents(step * moveScale, clock)
@@ -1935,10 +1930,14 @@ export function createCityScene(container, cfg, agentNames = []) {
       r.vx += (r.x / m) * kf + (rnd() - 0.5) * kf * 1.5
       r.vz += (r.z / m) * kf + (rnd() - 0.5) * kf * 1.5
     }
-    // El sakura suelta una nube de pétalos (y alguna hoja), igual que en el
-    // bosque. Antes el shake movía agentes/aves pero no soltaba nada del árbol.
-    litter.burst('petal', 60 * strength * lastPhen.flower, anclas.petal)
-    litter.burst('leaf', 24 * strength * lastPhen.leaf, anclas.leaf)
+    // Cada árbol suelta desde SUS anclas y según SU follaje actual: un sakura en
+    // flor bota una nube de pétalos, uno vacío no bota nada. (Antes el shake
+    // movía agentes/aves pero no soltaba follaje.)
+    for (const t of sakuras) {
+      litter.burst('petal', 60 * strength * (t._flowerAmt || 0), t.flowerAnchors)
+      litter.burst('leaf', 24 * strength * (t._leafAmt || 0), t.leafAnchors)
+    }
+    if (cactus) litter.burst('petal', 40 * strength * (cactus._flowerAmt || 0), cactus.flowerAnchors)
   }
 
   // El desmontaje: libera la hojarasca, los árboles (geometrías, materiales y
