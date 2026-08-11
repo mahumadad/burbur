@@ -6,6 +6,7 @@ import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
 import { lichenRosette, mossClump, LICHEN_ORANGE, LICHEN_PALE } from './engine/crust.js'
 import { createRain, createSnow } from './engine/weather.js'
+import { buildFallenLog } from './engine/deadwood.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
@@ -509,28 +510,10 @@ export function createPond(container, cfg, agentNames = []) {
   // ─── TRONCO(S) DE ÁRBOL flotando en el agua ───────────────────────────────
   const floatLogs = []
   for (let li = 0; li < 1 + (q() < 0.5 ? 1 : 0); li++) {
-    const g = new THREE.Group()
-    const len = 9 + q() * 7, r0 = 0.7 + q() * 0.5
-    // Tronco: cilindro ahusado, madera mojada oscura, tumbado.
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(r0 * 0.55, r0, len, 8, 1),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.14, 0.11, 0.085), fog: true }),
-    )
-    trunk.rotation.z = Math.PI / 2
-    g.add(trunk)
-    // Aristas hueso (madera vieja lavada) + un par de muñones de rama.
-    g.add(new THREE.LineSegments(new THREE.WireframeGeometry(trunk.geometry),
-      new THREE.LineBasicMaterial({ color: 0xb9b09a, transparent: true, opacity: 0.5, fog: true })))
-    for (let b = 0; b < 2 + (q() * 2 | 0); b++) {
-      const at = (q() - 0.5) * len * 0.8, ang = q() * 6.2832, bl = 1.2 + q() * 2
-      const bx = Math.cos(ang) * bl, by = Math.abs(Math.sin(ang)) * bl
-      const stub = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(at, 0, 0), new THREE.Vector3(at + bx * 0.3, by, bx)]),
-        new THREE.LineBasicMaterial({ color: 0xa89a80, fog: true }))
-      g.add(stub)
-    }
-    const a = q() * 6.2832, rr = 6 + q() * (mt * 0.7)
-    g.position.set(Math.cos(a) * rr, ht + 0.15, Math.sin(a) * rr)
+    // Mismo tronco caído orgánico del bosque (tubo ahusado + ramas), flotando.
+    const g = buildFallenLog({ length: 13 + q() * 9, radius: 1.5 + q() * 0.9 })
+    const a = q() * 6.2832, rr = 4 + q() * (mt * 0.5)
+    g.position.set(Math.cos(a) * rr, ht + 0.35, Math.sin(a) * rr)
     g.rotation.y = q() * 6.2832
     scene.add(g)
     floatLogs.push({ g, drift: q() * 6.2832, spin: (q() - 0.5) * 0.06, phase: q() * 6.2832 })
@@ -543,7 +526,7 @@ export function createPond(container, cfg, agentNames = []) {
       L.g.position.z += Math.sin(L.drift) * sp * step
       const rr = Math.hypot(L.g.position.x, L.g.position.z)
       if (rr > mt * 0.85) L.drift += Math.PI + (q() - 0.5)
-      L.g.position.y = ht + 0.15 + Math.sin(t * 0.9 + L.phase) * 0.12
+      L.g.position.y = ht + 0.35 + Math.sin(t * 0.9 + L.phase) * 0.12
       L.g.rotation.y += L.spin * step
       L.g.rotation.x = Math.sin(t * 0.7 + L.phase) * 0.05
     }
