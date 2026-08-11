@@ -183,9 +183,18 @@ export function createKoiSchool(scene, count, rand, { radius, surfaceY, floorY, 
       // Estela: sólo los koi cerca de la superficie mueven el agua.
       if (wake && k.depth < 0.28) {
         k.wakeT -= dt
-        if (k.wakeT <= 0) { wake(k.x, k.z, 0.28 + (0.28 - k.depth) * 0.6); k.wakeT = 0.25 + rand() * 0.25 }
+        if (k.wakeT <= 0) { wake(k.x, k.z, 0.3 + (0.28 - k.depth) * 0.5); k.wakeT = 0.5 + rand() * 0.6 }
       }
     }
   }
-  return { koi, update }
+  // AGITAR: los koi se dispersan (dardo hacia afuera) y suben hacia la superficie.
+  function scatter(strength = 1) {
+    for (const k of koi) {
+      const m = Math.hypot(k.x, k.z) || 1e-3
+      k.vx += (k.x / m) * (0.6 + rand() * 0.8) * strength
+      k.vz += (k.z / m) * (0.6 + rand() * 0.8) * strength
+      k.depth = Math.min(k.depth, 0.1 * rand()); k.depthT = 1 + rand() * 2
+    }
+  }
+  return { koi, update, scatter }
 }
