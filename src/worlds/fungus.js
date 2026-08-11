@@ -188,14 +188,18 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const A = lr * (1 - sink) * R * LOG_HEIGHT_SCALE + centerY(u)  // eje sobre el suelo
     const RR = lr * R * LOG_HEIGHT_SCALE
     const t = rad / lr
-    // Ángulo, medido desde el lomo (o desde la panza), al que el tubo toca el
-    // suelo. Si el tronco está entero sobre la tierra, el arco da la vuelta.
-    const acosClamped = (k) => Math.acos(k < -1 ? -1 : k > 1 ? 1 : k)
-    if (side < 0) {
-      // Panza: arranca en el punto más bajo del tubo y sube hasta tocar tierra.
-      return Math.max(0, A - RR * Math.cos(t * acosClamped(A / RR)))
-    }
-    return Math.max(0, A + RR * Math.cos(t * acosClamped(-A / RR)))
+    // Hasta FLANK el lomo es el lomo DE VERDAD (la sección circular): repartir
+    // el radio en planta sobre todo el arco de forma pareja mandaba un nodo a
+    // media anchura del tronco casi al ecuador, y en pantalla la colonia se
+    // apretaba en una franja finita sobre la cresta. El descenso por el flanco
+    // —que visto desde arriba es una banda angosta, escorzada— se comprime en
+    // la franja exterior, que es donde de verdad se ve.
+    const FLANK = 0.86
+    const dome = Math.sqrt(Math.max(0, 1 - Math.min(t, FLANK) * Math.min(t, FLANK)))
+    const h = side < 0 ? A - RR * dome : A + RR * dome
+    if (t <= FLANK) return Math.max(0, h)
+    const s = (t - FLANK) / (1 - FLANK)
+    return Math.max(0, h * (1 - s * s))          // baja al suelo justo en el borde
   }
 
   // ─── MAPA DE ALTURAS (LUT). Evaluar el drape muchas veces por arista exige

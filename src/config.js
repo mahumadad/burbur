@@ -243,7 +243,13 @@ export const CONFIG = {
     mycelium: {
       maxNodes: 12000, maxEdges: 15000, maxTips: 700,
       stepLen: 0.020, tipSpeed: 0.038, turnRate: 1.6, noise: 0.55,
-      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.8,
+      // `radial` BAJO sobre la madera. El tronco es largo y angosto, así que
+      // "hacia afuera del inóculo" es casi siempre "a lo largo del eje": con el
+      // sesgo radial alto la colonia se estiraba en una LÍNEA sobre la cresta en
+      // vez de tomarse la cara de arriba. Sobre el tronco manda el autotropismo
+      // (se aparta de sí misma y cubre); el rosetón radial se reserva para la
+      // tierra, vía `soil.radial`.
+      tropism: 0.55, autotropism: 1.3, radial: 0.7, branchRate: 1.8,
       fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.10, flowDecay: 0.35,
       // `bound` acotado: con el tope lejos las puntas se amontonaban contra él y
       // el abanico se leía como un ANILLO despegado del tronco en vez de una
@@ -258,7 +264,9 @@ export const CONFIG = {
       wrapChance: 0.45,
       // En TIERRA el micelio crece distinto: más rápido, mucho más ramificado y
       // más radial — el abanico algodonoso que se abre alrededor del tronco.
-      soil: { speed: 1.4, branch: 1.3, radial: 1.1, noise: 1.3 },
+      // `speed` por debajo de 1: en la tierra el avance radial va MÁS LENTO que
+      // sobre la madera, para que el abanico se abra despacio y se lo vea crecer.
+      soil: { speed: 0.85, branch: 1.3, radial: 2.2, noise: 1.3 },
     },
     // Cuánto esfuerzo de forrajeo aplica cada punta por segundo. Es lo que
     // agota el sustrato y, por lo tanto, lo que hace que la red se remodele.
