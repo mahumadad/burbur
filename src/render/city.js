@@ -6,9 +6,12 @@ import { createDraw } from './engine/points.js'
 import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
 import { cityGrid } from './cityGrid.js'
-import { fbm } from './noise.js'
+import { fbm, noise2 } from './noise.js'
 import { createBoxBuilder, rgbToHex, shadeGeometry } from './boxbuilder.js'
 import { PALETTE } from '../config.js'
+import { CITY_CENSUS } from '../sim/agents.js'
+import { createRoamers, updateRoamers } from '../sim/wander.js'
+import { createPerchers, updatePerchers } from '../sim/perch.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -915,6 +918,333 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   kn()
 
+  // ─── SAKURA: copia mínima del sistema de árbol+follaje del bosque (Task S1)
+  // ─────────────────────────────────────────────────────────────────────────
+  // `src/render/scene.js` tiene un sistema completo de árbol (tubos ahusados
+  // recursivos, `tube`/`branch`) + follaje estacional (hojas/flores como
+  // PUNTOS que brotan/abren con `uSeason`/`uLeaf`/`uFlower`/`uAutumn`, mismo
+  // shader) + lluvia de pétalos reciclable (`updateFallingLeaves`). Se copia
+  // aquí el MÍNIMO necesario para plantar sakuras en la ciudad (sin la rama
+  // de árboles "normales"/troncos caídos del bosque, que la ciudad no usa):
+  // mismo look, mismo shader, sin reinventar nada.
+  const TREE_FILL = 0x130d09, TREE_EDGE = 0xd9d9ba
+  const treePos = [], treeIdx = []
+  const folPos = [], folCol = [], folSize = [], folPhase = [], folKind = [], folBirth = []
+  const folFall = [], folRot = []
+  const petalAnchors = [] // posiciones+color de las flores → lluvia de pétalos
+  const SAKURA_COL = [[1.0, 0.72, 0.82], [1.0, 0.80, 0.90], [1.0, 0.60, 0.74], [0.98, 0.90, 0.96]]
+  const SAKURA_LEAF_LO = [0.09, 0.20, 0.05], SAKURA_LEAF_HI = [0.30, 0.52, 0.13]
+  const SAKURA_AUTUMN = [[0.85, 0.20, 0.06], [0.92, 0.44, 0.05], [0.90, 0.66, 0.10], [0.60, 0.26, 0.08], [0.78, 0.33, 0.10]]
+  const _fperp = new THREE.Vector3()
+  function addSakuraLeaf(p, tan) {
+    _fperp.set(-tan.z, (rnd() - 0.5) * 0.7, tan.x).normalize().multiplyScalar(0.3 + rnd() * 0.8)
+    const g = rnd()
+    folPos.push(p.x + _fperp.x + (rnd() - 0.5) * 0.5, p.y + _fperp.y + (rnd() - 0.5) * 0.5, p.z + _fperp.z + (rnd() - 0.5) * 0.5)
+    folCol.push(
+      SAKURA_LEAF_LO[0] + (SAKURA_LEAF_HI[0] - SAKURA_LEAF_LO[0]) * g,
+      SAKURA_LEAF_LO[1] + (SAKURA_LEAF_HI[1] - SAKURA_LEAF_LO[1]) * g,
+      SAKURA_LEAF_LO[2] + (SAKURA_LEAF_HI[2] - SAKURA_LEAF_LO[2]) * g,
+    )
+    const fc = SAKURA_AUTUMN[(rnd() * SAKURA_AUTUMN.length) | 0]
+    folFall.push(fc[0], fc[1], fc[2]); folRot.push(rnd() * 6.2832)
+    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(0)
+    folBirth.push(rnd() * 0.12) // brotan temprano en primavera, escalonados
+  }
+  function addSakuraBlossom(p) {
+    const c = SAKURA_COL[(rnd() * SAKURA_COL.length) | 0]
+    const x = p.x + (rnd() - 0.5) * 1.4, y = p.y + (rnd() - 0.5) * 1.4, z = p.z + (rnd() - 0.5) * 1.4
+    folPos.push(x, y, z); folCol.push(c[0], c[1], c[2])
+    folFall.push(c[0], c[1], c[2]); folRot.push(0)
+    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(1)
+    folBirth.push(0.02 + rnd() * 0.12)
+    petalAnchors.push(x, y, z, c[0], c[1], c[2])
+  }
+  /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido (puerto de `tube` del bosque). */
+  function sakuraTube(spine, r0, r1, segs, seed) {
+    const base = treePos.length / 3
+    const nseg = spine.length
+    const tan = new THREE.Vector3(), up = new THREE.Vector3()
+    const bx = new THREE.Vector3(), by = new THREE.Vector3()
+    for (let c = 0; c < nseg; c++) {
+      tan.subVectors(spine[Math.min(nseg - 1, c + 1)], spine[Math.max(0, c - 1)]).normalize()
+      up.set(0, 1, 0)
+      if (Math.abs(tan.y) > 0.9) up.set(1, 0, 0)
+      bx.crossVectors(tan, up).normalize()
+      by.crossVectors(tan, bx)
+      const h = c / (nseg - 1)
+      const g = r0 + (r1 - r0) * Math.pow(h, 0.85)
+      const p = spine[c]
+      for (let l = 0; l < segs; l++) {
+        const a = (l / segs) * 6.2832
+        const cv = Math.cos(a), sv = Math.sin(a)
+        const rad = g * (1 + (noise2(p.x * 1.4 + seed + l * 3.7, p.z * 1.4 + p.y * 0.9) - 0.5) * 0.34)
+        treePos.push(
+          p.x + (bx.x * cv + by.x * sv) * rad,
+          p.y + (bx.y * cv + by.y * sv) * rad,
+          p.z + (bx.z * cv + by.z * sv) * rad,
+        )
+      }
+    }
+    for (let c = 0; c < nseg - 1; c++) {
+      for (let l = 0; l < segs; l++) {
+        const x = base + c * segs + l
+        const s2 = base + c * segs + ((l + 1) % segs)
+        const C = x + segs, w = s2 + segs
+        treeIdx.push(x, C, s2, s2, C, w)
+      }
+    }
+  }
+  /** Rama recursiva del sakura: siempre florece (sin la rama de árbol "normal"/tronco caído del bosque). */
+  function sakuraBranch(start, dir, len, radius, depth, maxDepth, seed) {
+    const SEG = 4
+    const spine = [start.clone()]
+    const cur = start.clone()
+    const d = dir.clone()
+    for (let p = 0; p < SEG; p++) {
+      d.x += (rnd() - 0.5) * 0.55
+      d.y += (rnd() - 0.5) * 0.38 + 0.16
+      d.z += (rnd() - 0.5) * 0.55
+      d.normalize()
+      cur.addScaledVector(d, len / SEG)
+      spine.push(cur.clone())
+    }
+    const tip = depth >= maxDepth
+    const rEnd = tip ? 0.03 : radius * (0.52 + rnd() * 0.16)
+    sakuraTube(spine, radius, rEnd, radius > 0.8 ? 9 : radius > 0.35 ? 7 : 5, seed)
+    if (tip) {
+      // Sakura: pocas hojas verdes, canopy DENSO de flores rosadas.
+      const leafN = 2 + ((rnd() * 3) | 0)
+      for (let k = 0; k < leafN; k++) addSakuraLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
+      const nb = 8 + ((rnd() * 10) | 0)
+      for (let k = 0; k < nb; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
+      return
+    }
+    const kids = depth === 0 ? 2 + ((rnd() * 2) | 0)
+      : (rnd() < 0.7 ? 1 : 2) + (rnd() < 0.25 ? 1 : 0)
+    const up = new THREE.Vector3()
+    for (let i = 0; i < kids; i++) {
+      const v = d.clone()
+      up.set(0, 1, 0)
+      if (Math.abs(v.y) > 0.9) up.set(1, 0, 0)
+      const bx = new THREE.Vector3().crossVectors(v, up).normalize()
+      const by = new THREE.Vector3().crossVectors(v, bx)
+      const az = rnd() * 6.2832
+      const spread = 0.35 + rnd() * 0.65
+      const w = bx.multiplyScalar(Math.cos(az)).addScaledVector(by, Math.sin(az))
+      v.multiplyScalar(Math.cos(spread)).addScaledVector(w, Math.sin(spread)).normalize()
+      const from = i === 0 ? spine[spine.length - 1] : spine[1 + ((rnd() * (spine.length - 1)) | 0)]
+      sakuraBranch(from.clone(), v, len * (0.6 + rnd() * 0.22),
+        rEnd * (0.85 + rnd() * 0.2), depth + 1, maxDepth, seed)
+    }
+  }
+
+  // Siembra 1–3 sakuras en interiores de manzana: bien adentro (`nn`≤-6, lejos
+  // de la calle) y lejos de cualquier edificio ya colocado (`un`), separadas
+  // entre sí. `En()` (definido arriba) pondera por área, igual que el resto
+  // de la vegetación de la ciudad (`kn`).
+  const sakuraTrees = []
+  {
+    const want = 1 + ((rnd() * 3) | 0) // 1..3
+    for (let guard = 0; sakuraTrees.length < want && guard < 200 && blocks.length; guard++) {
+      const block = En()
+      const tx = block.cx + (rnd() * 2 - 1) * Math.max(0, block.hx - 9)
+      const tz = block.cz + (rnd() * 2 - 1) * Math.max(0, block.hz - 9)
+      if (nn(block, tx, tz) > -6) continue
+      if (un(tx, tz, 9)) continue
+      if (sakuraTrees.some((s) => Math.hypot(tx - s.x, tz - s.z) < 16)) continue
+      const treeLen = 9 + rnd() * 6
+      const gy = ln(tx, tz)
+      sakuraBranch(new THREE.Vector3(tx, gy - 0.6, tz),
+        new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
+        treeLen, 0.9 + rnd() * 0.55, 0, 3, rnd() * 97)
+      // Copa como posado (mismo formato que las cimas de edificio, línea ~444:
+      // normalizado por R_CITY, `h` = altura absoluta sobre `we`) + nieve.
+      poiPerch.push({ x: tx / R_CITY, z: tz / R_CITY, h: (gy + treeLen * 0.55) - we })
+      sakuraTrees.push({ x: tx, z: tz })
+    }
+  }
+  if (treeIdx.length) {
+    for (let i = 0; i < treePos.length; i += 3 * 5) {
+      capPos.push(treePos[i], treePos[i + 1] + 0.1, treePos[i + 2])
+    }
+    const tg = new THREE.BufferGeometry()
+    tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
+    tg.setIndex(treeIdx)
+    scene.add(new THREE.Mesh(tg, new THREE.MeshBasicMaterial({
+      color: TREE_FILL, side: THREE.DoubleSide, fog: true,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+    })))
+    scene.add(new THREE.LineSegments(
+      new THREE.WireframeGeometry(tg),
+      new THREE.LineBasicMaterial({ color: TREE_EDGE, transparent: true, opacity: 0.55, fog: true }),
+    ))
+  }
+
+  // ─── FOLLAJE del sakura: hojas/flores que brotan y abren con la estación,
+  // MISMO shader que el bosque (`scene.js`), compartiendo uProj/uT con `draw`.
+  const foliageUniforms = {
+    uProj: draw.uniforms.uProj, uT: draw.uniforms.uT,
+    uSeason: { value: 0 }, uLeaf: { value: 0 }, uFlower: { value: 0 }, uAutumn: { value: 0 },
+  }
+  if (folPos.length) {
+    const fg = new THREE.BufferGeometry()
+    fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(folPos), 3))
+    fg.setAttribute('hcol', new THREE.BufferAttribute(new Float32Array(folCol), 3))
+    fg.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(folSize), 1))
+    fg.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(folPhase), 1))
+    fg.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array(folKind), 1))
+    fg.setAttribute('aBirth', new THREE.BufferAttribute(new Float32Array(folBirth), 1))
+    fg.setAttribute('aFall', new THREE.BufferAttribute(new Float32Array(folFall), 3))
+    fg.setAttribute('aRot', new THREE.BufferAttribute(new Float32Array(folRot), 1))
+    const foliageMat = new THREE.ShaderMaterial({
+      uniforms: foliageUniforms, transparent: true, depthWrite: false,
+      vertexShader: `
+        attribute vec3 hcol; attribute float hsize; attribute float hphs;
+        attribute float aKind; attribute float aBirth; attribute vec3 aFall; attribute float aRot;
+        uniform float uProj, uT, uSeason, uLeaf, uFlower, uAutumn;
+        varying vec3 vC; varying float vKind; varying float vRot;
+        void main() {
+          vec3 p = position;
+          float ph = hphs * 6.2831;
+          p.x += sin(uT * 0.7 + ph) * 0.5;
+          p.z += cos(uT * 0.6 + ph * 1.7) * 0.5;
+          p.y += sin(uT * 1.1 + ph * 2.3) * 0.18;
+          float grow = clamp((uSeason - aBirth) / 0.18, 0.0, 1.0);
+          grow = grow * grow * (3.0 - 2.0 * grow);
+          float amount = (aKind < 0.5) ? uLeaf : uFlower;
+          float g = grow * amount;
+          vec3 col = (aKind < 0.5) ? mix(hcol, aFall, uAutumn) : hcol;
+          col *= 0.9 + 0.14 * sin(uT * 2.0 + ph * 5.0);
+          vC = col; vKind = aKind; vRot = aRot + uT * 0.15;
+          vec4 mv = modelViewMatrix * vec4(p, 1.0);
+          float vd = max(-mv.z, 0.001);
+          float sz = hsize * (0.12 + 0.88 * g);
+          gl_PointSize = (g < 0.02) ? 0.0 : clamp(sz * uProj / vd, 1.0, 48.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `
+        precision mediump float;
+        varying vec3 vC; varying float vKind; varying float vRot;
+        void main() {
+          vec2 uv = gl_PointCoord - 0.5;
+          if (vKind > 0.5) {
+            float d = length(uv) * 2.0;
+            if (d > 1.0) discard;
+            gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
+            return;
+          }
+          float s = sin(vRot), c = cos(vRot);
+          vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+          float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
+          if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
+          float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
+          float rib = smoothstep(0.06, 0.0, abs(q.x));
+          gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
+        }`,
+    })
+    const fmesh = new THREE.Points(fg, foliageMat)
+    fmesh.frustumCulled = false
+    scene.add(fmesh)
+  }
+
+  // ─── PÉTALOS QUE CAEN: pool reciclable, mismo patrón que el bosque.
+  const leafAnchors = []
+  for (let i = 0; i < folKind.length; i++) {
+    if (folKind[i] === 0) leafAnchors.push(
+      folPos[i * 3], folPos[i * 3 + 1], folPos[i * 3 + 2],
+      folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
+      folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
+  }
+  const FALL_N = 220
+  const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
+  const fallCol = new Float32Array(FALL_N * 3)
+  const fallVy = new Float32Array(FALL_N)
+  const fallPh = new Float32Array(FALL_N)
+  const fallKind = new Float32Array(FALL_N)
+  const fallRot = new Float32Array(FALL_N)
+  const fallActive = new Uint8Array(FALL_N)
+  let fallHead = 0, fallBudget = 0, petalBudget = 0
+  const fallGeo = new THREE.BufferGeometry()
+  fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
+  fallGeo.setAttribute('hcol', new THREE.BufferAttribute(fallCol, 3))
+  fallGeo.setAttribute('aKind', new THREE.BufferAttribute(fallKind, 1))
+  fallGeo.setAttribute('aRot', new THREE.BufferAttribute(fallRot, 1))
+  const fallMesh = new THREE.Points(fallGeo, new THREE.ShaderMaterial({
+    uniforms: { uProj: draw.uniforms.uProj, uT: draw.uniforms.uT },
+    transparent: true, depthWrite: false,
+    vertexShader: `
+      attribute vec3 hcol; attribute float aKind; attribute float aRot;
+      uniform float uProj, uT;
+      varying vec3 vC; varying float vKind; varying float vRot;
+      void main() {
+        vC = hcol; vKind = aKind; vRot = aRot + uT * 2.0;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        float vd = max(-mv.z, 0.001);
+        gl_PointSize = clamp(0.85 * uProj / vd, 1.0, 48.0);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      varying vec3 vC; varying float vKind; varying float vRot;
+      void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        if (vKind > 0.5) {
+          float d = length(uv) * 2.0;
+          if (d > 1.0) discard;
+          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
+          return;
+        }
+        float s = sin(vRot), c = cos(vRot);
+        vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+        float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
+        if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
+        float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
+        float rib = smoothstep(0.06, 0.0, abs(q.x));
+        gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
+      }`,
+  }))
+  fallMesh.frustumCulled = false
+  scene.add(fallMesh)
+  function updateFallingLeaves(step, rate, autumn, petalRate) {
+    if (leafAnchors.length && rate > 0) {
+      fallBudget += rate * step
+      while (fallBudget >= 1) {
+        fallBudget -= 1
+        const a = ((Math.random() * (leafAnchors.length / 9)) | 0) * 9
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = leafAnchors[a]; fallPos[i * 3 + 1] = leafAnchors[a + 1]; fallPos[i * 3 + 2] = leafAnchors[a + 2]
+        fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
+        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
+        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
+        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28
+        fallKind[i] = 0; fallRot[i] = Math.random() * 6.28; fallActive[i] = 1
+      }
+    }
+    if (petalAnchors.length && petalRate > 0) {
+      petalBudget += petalRate * step
+      while (petalBudget >= 1) {
+        petalBudget -= 1
+        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
+        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
+        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
+        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
+        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28
+        fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1
+      }
+    }
+    for (let i = 0; i < FALL_N; i++) {
+      if (!fallActive[i]) continue
+      fallPos[i * 3 + 1] -= fallVy[i] * step
+      fallPos[i * 3] += Math.sin(clock * 2.0 + fallPh[i]) * 1.5 * step
+      fallPos[i * 3 + 2] += Math.cos(clock * 1.7 + fallPh[i] * 1.3) * 1.5 * step
+      if (fallPos[i * 3 + 1] < we - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 }
+    }
+    fallGeo.attributes.position.needsUpdate = true
+    fallGeo.attributes.hcol.needsUpdate = true
+    fallGeo.attributes.aKind.needsUpdate = true
+    fallGeo.attributes.aRot.needsUpdate = true
+  }
+
   // ─── An: POLVO/BRUMA — puerto fiel ──────────────────────────────────────
   // 2400 puntos naranjas, más densos cerca del borde de manzana (`an` =
   // distancia con signo a la manzana más cercana; `rnd() > exp(-s/3)`
@@ -1082,6 +1412,29 @@ export function createCityScene(container, cfg, agentNames = []) {
   const density = cfg.wander.density
   const n = cfg.fireflies.count
   const roster = buildRoster(n)
+
+  // AVES (Task S1): contrato con `worlds/registry.js` — `aerial(i,cfg)` marca
+  // aéreos los primeros `round(count*ratio)` slots, `ratio` = proporción de
+  // `flying_animal` sobre los agentes MÓVILES de CITY_CENSUS (sin
+  // static_object). Se replica el MISMO cálculo acá para que sean EXACTAMENTE
+  // los mismos índices los que reciben nombre de ave y los que vuelan de
+  // verdad — si algún día ambos cálculos divergen, un pájaro con nombre
+  // dejaría de volar (o viceversa), así que cualquier cambio a este bloque
+  // debe reflejarse también en `CITY_FLIER_RATIO` de registry.js.
+  const CITY_MOVERS = CITY_CENSUS.filter((c) => c.type !== 'static_object')
+  const CITY_FLIER_RATIO = CITY_MOVERS.length
+    ? CITY_MOVERS.filter((c) => c.type === 'flying_animal').length / CITY_MOVERS.length
+    : 0
+  const birdCount = Math.min(n, Math.round(n * CITY_FLIER_RATIO))
+  // OJO: `src/sim/perch.js` resta un 3.1 fijo (no parametrizable) al calcular
+  // `yOff` de un posado (`t.h - 3.1`, ver `updatePerchers`). Para que ese 3.1
+  // se cancele exactamente y un ave posada quede a `we + h` (la altura
+  // absoluta con la que se registró su `poiPerch`, ni más arriba ni más
+  // abajo), la altura base tiene que ser ESE MISMO 3.1 — igual que el bosque,
+  // que usa `G + terreno + 3.1 + yOff`. Si perch.js cambia esa constante,
+  // hay que actualizar también este valor.
+  const BIRD_H0 = 3.1
+
   const agents = []
   for (let i = 0; i < n; i++) {
     const kind = roster[i]
@@ -1093,6 +1446,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       speedScale: 0.6 + rnd() * 0.85,
       wanderAng: rnd() * 6.2832,
       state: 'move', stateT: 1 + rnd() * 4,
+      isBird: i < birdCount,
     }
     const c = (0.9 + rnd() * 0.55) * 0.67
     a.group.scale.setScalar(c)
@@ -1101,45 +1455,65 @@ export function createCityScene(container, cfg, agentNames = []) {
     a.colR *= c
     a.trafH = (TRAF_H[kind] || 2.4) * c + 0.18
 
-    a.dweller = (kind === 'flag' || kind === 'dbl') && rnd() < 0.45 && blocks.length > 0
-    if (a.dweller) {
-      let found = -1, bx = 0, bz = 0
-      for (let tries = 0; tries < 40 && found < 0; tries++) {
-        const bi = (rnd() * blocks.length) | 0
-        const block = blocks[bi]
-        const x = block.cx + (rnd() * 2 - 1) * (block.hx - 3)
-        const z = block.cz + (rnd() * 2 - 1) * (block.hz - 3)
-        if (nn(block, x, z) < -3 && !un(x, z, 1.5)) { found = bi; bx = x; bz = z }
-      }
-      if (found >= 0) {
-        a.dwB = found
-        a.group.position.set(bx, ln(bx, bz) + a.trafH, bz)
-        a.speedScale *= 0.4
-      } else {
-        a.dweller = false
-      }
-    }
-    if (!a.dweller) {
-      a.tAxis = rnd() < 0.5 ? 0 : 1
-      const roadArr = a.tAxis === 0 ? cutsZ : cutsX
-      a.tRoad = (rnd() * roadArr.length) | 0
-      a.tDir = rnd() < 0.5 ? -1 : 1
-      a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
-      a.tCool = 1 + rnd() * 2
+    if (a.isBird) {
+      // Ave: no vive en manzana ni sigue calzada — su posición y altura las
+      // gobierna el sistema de percha (`updateBirds`, más abajo). Posición
+      // inicial provisoria; el primer frame ya la reubica.
+      a.dweller = false
       a.offroad = false
-      a.offT = 0
-      let along = (rnd() * 2 - 1) * qt * 0.85
-      const cross = roadArr[a.tRoad] + a.tLane
-      for (let tries = 0; tries < 30 && !(an(a.tAxis === 0 ? along : cross, a.tAxis === 0 ? cross : along) > 2); tries++) {
-        along = (rnd() * 2 - 1) * qt * 0.85
+      a.group.position.set(0, we + BIRD_H0, 0)
+    } else {
+      a.dweller = (kind === 'flag' || kind === 'dbl') && rnd() < 0.45 && blocks.length > 0
+      if (a.dweller) {
+        let found = -1, bx = 0, bz = 0
+        for (let tries = 0; tries < 40 && found < 0; tries++) {
+          const bi = (rnd() * blocks.length) | 0
+          const block = blocks[bi]
+          const x = block.cx + (rnd() * 2 - 1) * (block.hx - 3)
+          const z = block.cz + (rnd() * 2 - 1) * (block.hz - 3)
+          if (nn(block, x, z) < -3 && !un(x, z, 1.5)) { found = bi; bx = x; bz = z }
+        }
+        if (found >= 0) {
+          a.dwB = found
+          a.group.position.set(bx, ln(bx, bz) + a.trafH, bz)
+          a.speedScale *= 0.4
+        } else {
+          a.dweller = false
+        }
       }
-      if (a.tAxis === 0) a.group.position.set(along, we + a.trafH, cross)
-      else a.group.position.set(cross, we + a.trafH, along)
-      a.vel.set(a.tAxis === 0 ? a.tDir * 3 : 0, 0, a.tAxis === 1 ? a.tDir * 3 : 0)
+      if (!a.dweller) {
+        a.tAxis = rnd() < 0.5 ? 0 : 1
+        const roadArr = a.tAxis === 0 ? cutsZ : cutsX
+        a.tRoad = (rnd() * roadArr.length) | 0
+        a.tDir = rnd() < 0.5 ? -1 : 1
+        a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
+        a.tCool = 1 + rnd() * 2
+        a.offroad = false
+        a.offT = 0
+        let along = (rnd() * 2 - 1) * qt * 0.85
+        const cross = roadArr[a.tRoad] + a.tLane
+        for (let tries = 0; tries < 30 && !(an(a.tAxis === 0 ? along : cross, a.tAxis === 0 ? cross : along) > 2); tries++) {
+          along = (rnd() * 2 - 1) * qt * 0.85
+        }
+        if (a.tAxis === 0) a.group.position.set(along, we + a.trafH, cross)
+        else a.group.position.set(cross, we + a.trafH, along)
+        a.vel.set(a.tAxis === 0 ? a.tDir * 3 : 0, 0, a.tAxis === 1 ? a.tDir * 3 : 0)
+      }
     }
     scene.add(a.group)
     agents.push(a)
   }
+
+  // Vuelo/percha de las aves: reusa `src/sim/perch.js` (mismo sistema que el
+  // bosque) sobre "roamers" propios normalizados por R_CITY, igual convención
+  // que `poiPerch`. El reparto percher/sky es proporcional al del bosque
+  // (5:2) pero escalado a `birdCount`, para que NINGÚN pájaro se quede en
+  // modo "roam" para siempre sin nunca volar a posarse ni cruzar el cielo.
+  const birdPerchers = Math.min(birdCount, Math.round(birdCount * (5 / 7)))
+  const birdSky = birdCount - birdPerchers
+  const birdBehaviors = { ...cfg.behaviors, perchers: birdPerchers, sky: birdSky }
+  const birdRoamers = createRoamers(cfg.wander, birdCount, rnd)
+  const perchAgents = createPerchers(birdCount, { startIndex: 0, perchers: birdPerchers, sky: birdSky }, rnd)
 
   // `Rn` (rama ciudad): separación mutua, deambular por curl-noise (atenuado
   // a 0.3× en tráfico que sigue calzada), contención por SDF de dwellers
@@ -1157,10 +1531,14 @@ export function createCityScene(container, cfg, agentNames = []) {
     out.z = Math.sin(p.x * r * 1.1 + ii * 0.9) - Math.cos(p.z * r + ii * 1.1)
   }
   function separate(step) {
+    // Las aves no pisan calle/manzana: se excluyen para que no empujen (ni
+    // sean empujadas) por el tráfico de a ras de suelo con su sombra 2D.
     const rad = 24
     for (let s = 0; s < agents.length; s++) {
+      if (agents[s].isBird) continue
       const pA = agents[s].group.position
       for (let c = s + 1; c < agents.length; c++) {
+        if (agents[c].isBird) continue
         const pB = agents[c].group.position
         const dx = pA.x - pB.x, dz = pA.z - pB.z
         const distSq = dx * dx + dz * dz
@@ -1173,10 +1551,50 @@ export function createCityScene(container, cfg, agentNames = []) {
       }
     }
   }
+  // Orientación: mismo patrón que `updateAgentMotion` del bosque
+  // (agents3d.js), adaptado a velocidad directa en unidades de mundo (los
+  // agentes de ciudad no usan roamers normalizados). Se comparte entre el
+  // tráfico/dwellers (`moveAgents`) y las aves (`updateBirds`).
+  function orientAgent(a, step) {
+    const wspeed = Math.hypot(a.vel.x, a.vel.z)
+    if (a.glide) {
+      if (wspeed > 0.05) a.group.rotation.y = Math.atan2(a.vel.x, a.vel.z)
+    } else if (a.rollMul > 0 && a.cage && wspeed > 1e-4) {
+      motionTmp.dir.set(a.vel.x, 0, a.vel.z).normalize()
+      motionTmp.axis.crossVectors(motionTmp.up, motionTmp.dir)
+      if (motionTmp.axis.lengthSq() < 1e-5) motionTmp.axis.set(1, 0, 0)
+      motionTmp.axis.normalize()
+      motionTmp.q.setFromAxisAngle(motionTmp.axis, (wspeed * step) / a.effR * a.rollMul)
+      a.cage.quaternion.premultiply(motionTmp.q)
+    } else if (a.spinY) {
+      a.group.rotation.y += a.spinY * step
+    }
+  }
+  // Vuelo de las aves: roamers normalizados propios (`birdRoamers`) + el
+  // sistema de percha del bosque (`src/sim/perch.js`), sobre `poiPerch`
+  // (copas de sakura + techos de edificio). `we + BIRD_H0 + yOff` replica
+  // la fórmula del bosque (`G + terreno + 3.1 + yOff`): al posarse, `yOff`
+  // vale `h - BIRD_H0`, y el `BIRD_H0` se cancela → altura final = `we + h`,
+  // exactamente la altura absoluta con la que se registró cada `poiPerch`.
+  function updateBirds(step, time) {
+    if (!birdCount) return
+    updateRoamers(birdRoamers, cfg.wander, step, rnd, time, null, null, null)
+    updatePerchers(perchAgents, birdRoamers, poiPerch, birdBehaviors, step, rnd)
+    for (let i = 0; i < birdCount; i++) {
+      const a = agents[i]
+      const r = birdRoamers[i]
+      const wx = r.x * R_CITY, wz = r.z * R_CITY
+      a.group.position.set(wx, we + BIRD_H0 + perchAgents[i].yOff, wz)
+      a.vel.x = r.vx * R_CITY
+      a.vel.z = r.vz * R_CITY
+      orientAgent(a, step)
+    }
+  }
   function moveAgents(step, time) {
     separate(step)
     for (let idx = 0; idx < agents.length; idx++) {
       const a = agents[idx]
+      if (a.isBird) continue // las aves las mueve `updateBirds`
       const pos = a.group.position
 
       a.stateT -= step
@@ -1356,29 +1774,15 @@ export function createCityScene(container, cfg, agentNames = []) {
       pos.y += a.vel.y * step
       pos.z += a.vel.z * step
 
-      // Orientación: mismo patrón que `updateAgentMotion` del bosque
-      // (agents3d.js), adaptado a velocidad directa en unidades de mundo
-      // (los agentes de ciudad no usan roamers normalizados).
-      const wspeed = Math.hypot(a.vel.x, a.vel.z)
-      if (a.glide) {
-        if (wspeed > 0.05) a.group.rotation.y = Math.atan2(a.vel.x, a.vel.z)
-      } else if (a.rollMul > 0 && a.cage && wspeed > 1e-4) {
-        motionTmp.dir.set(a.vel.x, 0, a.vel.z).normalize()
-        motionTmp.axis.crossVectors(motionTmp.up, motionTmp.dir)
-        if (motionTmp.axis.lengthSq() < 1e-5) motionTmp.axis.set(1, 0, 0)
-        motionTmp.axis.normalize()
-        motionTmp.q.setFromAxisAngle(motionTmp.axis, (wspeed * step) / a.effR * a.rollMul)
-        a.cage.quaternion.premultiply(motionTmp.q)
-      } else if (a.spinY) {
-        a.group.rotation.y += a.spinY * step
-      }
+      orientAgent(a, step)
     }
   }
 
   // Precalentamiento (como `In`): 320 pasos de 1/60s antes del primer
-  // frame, para que el tráfico y los dwellers no arranquen "congelados".
+  // frame, para que el tráfico, los dwellers y las aves no arranquen
+  // "congelados" (las aves ya alcanzan a despegar y posarse una vez).
   let clock = 0
-  for (let f = 0; f < 320; f++) { clock += 1 / 60; moveAgents(1 / 60, clock) }
+  for (let f = 0; f < 320; f++) { clock += 1 / 60; moveAgents(1 / 60, clock); updateBirds(1 / 60, clock) }
 
   // Estelas: un único tono rojo/rosa (`en` = #FF3B59), igual para todas las
   // especies — a diferencia del bosque, la ciudad no varía el color de
@@ -1461,9 +1865,27 @@ export function createCityScene(container, cfg, agentNames = []) {
 
       // Con lluvia/nieve el tráfico y los peatones se calman.
       moveScale = snowing ? 0.4 : (1 - eco.rain * 0.45) * (eco.temperature <= 1 ? 0.85 : 1)
+
+      // Estaciones del sakura: mismo reloj que el resto del mundo (`eco.seasonT`,
+      // con el mismo fallback local que usa el bosque) → brote → hoja plena →
+      // caída, y una ventana de flor donde el canopy se pone rosado. Mismo
+      // sistema de follaje/pétalos que `scene.js` (ver bloque "SAKURA" arriba).
+      const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
+      const leafAmt = seasonT < 0.5 ? smoothstep(0, 0.2, seasonT) : 1 - smoothstep(0.62, 0.8, seasonT)
+      const flowerAmt = smoothstep(0.02, 0.1, seasonT) * (1 - smoothstep(0.2, 0.32, seasonT))
+      foliageUniforms.uSeason.value = seasonT
+      foliageUniforms.uLeaf.value = leafAmt * (1 - eco.rain * 0.3)
+      foliageUniforms.uFlower.value = flowerAmt * (1 - eco.rain * 0.7)
+      const autumn = smoothstep(0.5, 0.7, seasonT) * (1 - smoothstep(0.8, 0.92, seasonT))
+      foliageUniforms.uAutumn.value = autumn
+      const gust = eco.rain + (eco.wind || 0) * 0.7
+      const shedRate = leafAmt > 0.05 ? (autumn * 34 + gust * 46 * leafAmt) : 0
+      const petalRate = foliageUniforms.uFlower.value * (16 + eco.rain * 40 + (eco.wind || 0) * 34)
+      updateFallingLeaves(step, shedRate, autumn, petalRate)
     }
 
     moveAgents(step * moveScale, clock)
+    updateBirds(step * moveScale, clock)
 
     for (let i = 0; i < n; i++) {
       const p = agents[i].group.position
@@ -1512,6 +1934,7 @@ export function createCityScene(container, cfg, agentNames = []) {
   // noise, no a las unidades normalizadas de los roamers del bosque).
   function scare(strength = 1) {
     for (const a of agents) {
+      if (a.isBird) continue
       const pos = a.group.position
       const m = Math.hypot(pos.x, pos.z) || 1e-3
       const kf = (6 + rnd() * 10) * strength
@@ -1519,6 +1942,14 @@ export function createCityScene(container, cfg, agentNames = []) {
       a.vel.z += (pos.z / m) * kf + (rnd() - 0.5) * kf * 1.5
       a.state = 'move'
       a.stateT = 1.2 + rnd() * 1.5
+    }
+    // Las aves reaccionan en su propio sistema de roamers (igual que el
+    // bosque, donde `scare` también sacude a los roamers de percher/sky).
+    for (const r of birdRoamers) {
+      const m = Math.hypot(r.x, r.z) || 1e-3
+      const kf = (0.7 + rnd() * 1.1) * strength
+      r.vx += (r.x / m) * kf + (rnd() - 0.5) * kf * 1.5
+      r.vz += (r.z / m) * kf + (rnd() - 0.5) * kf * 1.5
     }
   }
 
