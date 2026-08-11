@@ -29,7 +29,10 @@ let running = false
 async function start() {
   if (running) return
   running = true
-  overlay.classList.add('hidden')
+  // La semilla se abre y el velo se disuelve mientras el mundo aparece detrás;
+  // el overlay se saca del DOM al terminar la animación (~1.3s).
+  overlay.classList.add('leaving')
+  setTimeout(() => overlay.classList.add('hidden'), 1300)
 
   // iOS silencia el Web Audio con el switch de silencio; esto lo desbloquea
   // DENTRO del gesto del tap (debe ir antes del primer await).

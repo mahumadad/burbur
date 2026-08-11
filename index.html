@@ -7,17 +7,66 @@
     <style>
       html, body { margin: 0; height: 100%; background: #05070a; overflow: hidden; }
       #app { position: fixed; inset: 0; }
+
+      /* ── Puerta de entrada: una semilla que respira ──────────────────────── */
       #overlay {
         position: fixed; inset: 0; display: grid; place-items: center;
-        background: #05070a; color: #cfe8d8; font: 500 18px/1.4 system-ui, sans-serif;
-        cursor: pointer; z-index: 10; letter-spacing: .02em;
+        background: #05070a; cursor: pointer; z-index: 10;
+        transition: opacity 1s ease .25s;   /* al entrar, el velo se disuelve */
       }
       #overlay.hidden { display: none; }
+      #overlay.leaving { opacity: 0; }
+
+      .gate { display: flex; flex-direction: column; align-items: center; gap: 34px; }
+
+      /* La semilla: un punto de luz que late lento (como una luciérnaga lejana). */
+      .seed {
+        width: 11px; height: 11px; border-radius: 50%;
+        background: radial-gradient(circle, #f2fff4 0%, #b6f0c8 55%, rgba(150,230,180,0) 100%);
+        box-shadow: 0 0 24px 8px rgba(150,235,185,.42);
+        animation: breathe 5.5s ease-in-out infinite;
+      }
+      @keyframes breathe {
+        0%, 100% { transform: scale(.8);  box-shadow: 0 0 18px 5px rgba(150,235,185,.28); }
+        50%      { transform: scale(1.3); box-shadow: 0 0 40px 14px rgba(150,235,185,.6); }
+      }
+
+      /* El susurro + la invitación (aparece al acercarse). */
+      .lines {
+        display: flex; flex-direction: column; align-items: center; gap: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .whisper { font-size: 12px; letter-spacing: .1em; color: rgba(207,232,216,.42); }
+      .cta {
+        font-size: 11px; text-transform: uppercase; letter-spacing: .4em; text-indent: .4em;
+        color: rgba(207,232,216,.3); transition: color .45s ease, letter-spacing .45s ease;
+      }
+      #overlay:hover .cta { color: rgba(234,255,240,.92); letter-spacing: .56em; }
+      #overlay:hover .seed { animation-duration: 3.4s; }
+
+      /* Al hacer click: la semilla se ABRE y nos atraviesa; el velo se disuelve. */
+      #overlay.leaving .seed {
+        animation: none;
+        transition: transform 1.1s cubic-bezier(.2,.75,.2,1), box-shadow 1.1s ease, opacity 1.1s ease;
+        transform: scale(64); opacity: 0;
+        box-shadow: 0 0 120px 60px rgba(150,235,185,.5);
+      }
+      #overlay.leaving .lines { opacity: 0; transition: opacity .35s ease; }
+
+      @media (prefers-reduced-motion: reduce) { .seed { animation: none; } }
     </style>
   </head>
   <body>
     <div id="app"></div>
-    <div id="overlay">click para entrar</div>
+    <div id="overlay">
+      <div class="gate">
+        <div class="seed"></div>
+        <div class="lines">
+          <span class="whisper">algo respira aquí</span>
+          <span class="cta">entra</span>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
