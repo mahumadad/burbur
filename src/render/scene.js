@@ -15,7 +15,7 @@ import { createPerchers, updatePerchers } from '../sim/perch.js'
 import { phenology } from '../sim/phenology.js'
 import { createLitter, tintLeafAnchors } from './tree/litter.js'
 import { createTreeFactory } from './tree/index.js'
-import { createTreeLife, updateTreeLife } from '../sim/treeLife.js'
+import { createTreeLife, updateTreeLife, seedMature } from '../sim/treeLife.js'
 // Alias: el bosque ya usa el nombre `SPECIES` para las 6 especies de
 // criaturas-luciérnaga (ver más abajo); la tabla de especies de árbol se
 // importa con otro nombre para no chocar.
@@ -1080,6 +1080,7 @@ export function createScene(container, cfg, agentNames = []) {
   // Mismos años que el sakura de la ciudad (Task 4): plantón→joven→maduro→
   // senescente→caído→rebrote.
   const VIDA_CFG_LUSH = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+  const DEBUG_GROWN = new URLSearchParams(location.search).has('grown')
 
   // Punto de siembra para un árbol lush: dentro de la isla, lejos de los
   // árboles de puntos (`treeObstacles`) y de los otros lush ya plantados.
@@ -1115,6 +1116,9 @@ export function createScene(container, cfg, agentNames = []) {
     // la usa como punto de partida); para reubicar el árbol al rebrotar,
     // `group.position` se usa como un DESPLAZAMIENTO relativo a este punto.
     t.vida = createTreeLife(VIDA_CFG_LUSH, rnd)
+    // Depuración: ?grown deja los árboles adultos de entrada, porque con ?season
+    // fija el año no da la vuelta y si no se quedarían de plantón para siempre.
+    if (DEBUG_GROWN) seedMature(t.vida, VIDA_CFG_LUSH)
     t.setGrowth(t.vida.growth)
     t.origin = origin
     t.perch = null   // un plantón no ofrece posadero (se registra al crecer)

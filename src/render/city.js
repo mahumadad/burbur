@@ -16,7 +16,7 @@ import { phenology } from '../sim/phenology.js'
 import { SPECIES } from './tree/species.js'
 import { createLitter, tintLeafAnchors } from './tree/litter.js'
 import { createTreeFactory } from './tree/index.js'
-import { createTreeLife, updateTreeLife } from '../sim/treeLife.js'
+import { createTreeLife, updateTreeLife, seedMature } from '../sim/treeLife.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -1001,6 +1001,7 @@ export function createCityScene(container, cfg, agentNames = []) {
   // Ciclo de vida (Task 4): años en los que un sakura pasa de plantón a
   // adulto, envejece, cae y rebrota. Mismos años que usará el bosque.
   const VIDA_CFG = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+  const DEBUG_GROWN = new URLSearchParams(location.search).has('grown')
 
   // Busca un punto válido para un sakura: bien adentro de una manzana
   // (`nn`≤-6, lejos de la calle) y lejos de cualquier edificio ya colocado
@@ -1038,6 +1039,9 @@ export function createCityScene(container, cfg, agentNames = []) {
       // la usa como punto de partida); para reubicar el árbol al rebrotar,
       // `group.position` se usa como un DESPLAZAMIENTO relativo a este punto.
       t.vida = createTreeLife(VIDA_CFG, rnd)
+      // Depuración: ?grown deja los árboles adultos de entrada (con ?season fija
+      // el año no da la vuelta y si no se quedarían de plantón para siempre).
+      if (DEBUG_GROWN) seedMature(t.vida, VIDA_CFG)
       t.setGrowth(t.vida.growth)
       t.origin = origin
       t.perch = null   // un plantón no ofrece posadero (se registra al crecer)

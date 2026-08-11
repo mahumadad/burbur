@@ -21,6 +21,21 @@ export function createTreeLife(cfg, rand = Math.random) {
 }
 
 /**
+ * Adelanta un árbol a maduro de un salto. Solo para depuración: con `?season`
+ * fija el año no da la vuelta nunca, así que un árbol recién plantado se
+ * quedaría de plantón para siempre y no habría forma de revisar su copa. Sembrar
+ * la edad en `matureAt` lo deja adulto y estable mientras la estación esté fija.
+ */
+export function seedMature(st, cfg) {
+  st.anos = cfg.matureAt
+  st.age = cfg.matureAt
+  st.growth = cfg.maxYear
+  st.vigor = 1
+  st.stage = 'mature'
+  return st
+}
+
+/**
  * @returns {{cayo: boolean, rebroto: boolean}} eventos de ESTE paso
  */
 export function updateTreeLife(st, cfg, dt, seasonT) {

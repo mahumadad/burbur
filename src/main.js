@@ -40,7 +40,9 @@ async function start() {
   const ambient = createAmbient(CONFIG.ambient)
   const ecosystem = createEcosystem(CONFIG.ecosystem)
   // Depuración: ?season=0.6&wind=1 congela la estación y el viento para poder
-  // revisar las cuatro estaciones sin esperar los 210 s de un año.
+  // revisar las cuatro estaciones sin esperar los 210 s de un año. ?grown (leído
+  // en cada mundo) además nace los árboles adultos: con la estación fija el año
+  // no da la vuelta, así que sin esto se quedarían de plantón y no verías la copa.
   const qs = new URLSearchParams(location.search)
   const fijoSeason = qs.has('season') ? parseFloat(qs.get('season')) : null
   const fijoWind = qs.has('wind') ? parseFloat(qs.get('wind')) : null

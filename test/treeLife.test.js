@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createTreeLife, updateTreeLife } from '../src/sim/treeLife.js'
+import { createTreeLife, updateTreeLife, seedMature } from '../src/sim/treeLife.js'
 
 const CFG = {
   youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12,
@@ -83,5 +83,22 @@ describe('ciclo de vida del árbol', () => {
     expect(st.stage).toBe('fallen')
     expect(st.tilt).toBeGreaterThan(0)
     expect(st.vigor).toBe(0)
+  })
+})
+
+describe('seedMature (atajo de depuración)', () => {
+  it('deja el árbol adulto, con copa plena y sin caer', () => {
+    const st = seedMature(createTreeLife(CFG, () => 0.5), CFG)
+    expect(st.stage).toBe('mature')
+    expect(st.growth).toBe(CFG.maxYear)
+    expect(st.vigor).toBe(1)
+  })
+
+  it('con la estación fija se queda maduro: el año nunca da la vuelta', () => {
+    const st = seedMature(createTreeLife(CFG, () => 0.5), CFG)
+    // Muchos pasos con el MISMO seasonT (no hay wraparound): no debe envejecer.
+    for (let i = 0; i < 300; i++) updateTreeLife(st, CFG, 1 / 60, 0.45)
+    expect(st.stage).toBe('mature')
+    expect(st.growth).toBe(CFG.maxYear)
   })
 })
