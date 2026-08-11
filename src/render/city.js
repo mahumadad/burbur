@@ -1386,7 +1386,23 @@ export function createCityScene(container, cfg, agentNames = []) {
   const worldPos = new Float32Array(n * 3)
   const trails = createTrails(scene, n, [0xff3b59], rc, draw.pointMaterial)
   const _proj = new THREE.Vector3()
-  let lx = 0, ly = 0
+  let _lx = 0, _ly = 0
+  let ptrX = null, ptrY = null // posición del mouse en NDC (null = fuera del canvas)
+  function setPointer(x, y) { ptrX = x; ptrY = y }
+  // El lente fisheye del post-proceso desplaza la posición VISUAL del agente
+  // respecto a su NDC lógico (nulo al centro, fuerte al borde). Para que el hover
+  // matchee lo que se ve, distorsiono la proyección igual que el shader del lente
+  // (mismo puerto que el bosque/estanque/célula, ver `scene.js`).
+  const _fk = Math.min(rc.fisheye, 0.62)
+  function lensNDC(px, py) {
+    let sx = px, sy = py
+    for (let it = 0; it < 3; it++) {
+      const rn = Math.hypot(sx, sy) / 0.7071
+      const f = (1 - _fk) + _fk * rn * rn
+      sx = px / f; sy = py / f
+    }
+    return [sx, sy]
+  }
 
   // ─── CLIMA: lluvia, nieve y nieve acumulada en techos (`capPos`, llenado
   // por `spawnTower` con la cima de cada edificio colocado) ─────────────────
@@ -1462,18 +1478,22 @@ export function createCityScene(container, cfg, agentNames = []) {
       else a.group.scale.setScalar(a.baseScale * pulse)
     }
 
-    // Etiqueta: el agente visible más cercano al centro de pantalla.
-    let bestI = -1, bestD = 0.16
-    for (let i = 0; i < n; i++) {
-      _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
-      if (_proj.z > 1) continue // detrás de la cámara
-      const d = Math.hypot(_proj.x, _proj.y)
-      if (d < bestD) { bestD = d; bestI = i; lx = _proj.x; ly = _proj.y }
+    // Etiqueta: SOLO al pasar el mouse por encima de un agente (no en el centro).
+    let bestI = -1
+    if (ptrX !== null) {
+      let bestD = 0.14 // umbral de "encima" en NDC (agentes chicos y en movimiento)
+      for (let i = 0; i < n; i++) {
+        _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
+        if (_proj.z > 1) continue // detrás de la cámara
+        const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
+        const d = Math.hypot(vx - ptrX, vy - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = vx; _ly = vy }
+      }
     }
     if (bestI >= 0 && agentNames[bestI]) {
       const { w, h, ox, oy } = stage.metrics
-      labelEl.style.left = ox + (lx * 0.5 + 0.5) * w + 'px'
-      labelEl.style.top = oy + (-ly * 0.5 + 0.5) * h + 'px'
+      labelEl.style.left = ox + (_lx * 0.5 + 0.5) * w + 'px'
+      labelEl.style.top = oy + (-_ly * 0.5 + 0.5) * h + 'px'
       labelEl.textContent = agentNames[bestI]
       labelEl.style.opacity = '1'
     } else {
@@ -1507,6 +1527,7 @@ export function createCityScene(container, cfg, agentNames = []) {
     resize: stage.resize,
     flash: stage.flash,
     scare,
+    setPointer,
     dispose: stage.dispose,
   }
 }
