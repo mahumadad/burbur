@@ -163,11 +163,54 @@ export function createFungusScene(container, cfg, agentNames = []) {
     return [logAx * u + logPx * v, logAz * u + logPz * v]
   }
 
-  // ─── TRONCO: se ve como un tronco CAÍDO, no como un corte transversal. Desde
-  // arriba la superficie es CORTEZA (parda, texturada, con grietas a lo largo);
-  // los anillos de crecimiento solo asoman en los EXTREMOS cortados. (Antes las
-  // capas de decay.js se pintaban como bandas radiales a lo largo de todo el
-  // lomo — leía como mirar por el hueco del tronco.) ────────────────────────
+  // ─── TRONCO: CUERPO SÓLIDO. Antes era solo dither de puntos, así que se veía
+  // el negro entre los puntos y el tronco no tenía masa. Una malla triangulada
+  // que sigue el domo le da SOLIDEZ (como la referencia: un montículo macizo);
+  // el dither de corteza y la pelusa de musgo van encima. Rejilla en (u,v),
+  // triángulos solo donde las 4 esquinas caen dentro del tronco. ────────────
+  {
+    const NU = 96, NV = 30
+    const u0 = -halfLen - logR, u1 = halfLen + logR
+    const pos = [], col = []
+    const idx = []
+    const cols = NV + 1
+    const vertOf = new Int32Array((NU + 1) * (NV + 1)).fill(-1)
+    let vc = 0
+    for (let i = 0; i <= NU; i++) {
+      const u = u0 + (u1 - u0) * (i / NU)
+      const lr = logRAt(Math.max(-halfLen, Math.min(halfLen, u)))
+      for (let j = 0; j <= NV; j++) {
+        const v = (-1 + 2 * (j / NV)) * (logR + 0.02)
+        if (!insideLog(u, v)) continue
+        const [x, z] = uvToWorld(u, v)
+        vertOf[i * cols + j] = vc++
+        pos.push(x * R, surfaceYUV(u, v), z * R)
+        // Pardo tierra, más oscuro en el borde y con moteado; el musgo lo tapa
+        // casi todo, esto es el suelo que se ve entre las matas.
+        const f = edgeFade(x, z)
+        const shade = (0.55 + 0.45 * (Math.abs(v) / lr < 0.6 ? 1 : 0.6)) * (0.8 + 0.4 * noise2(u * 5 + 3, v * 5))
+        col.push(C_HEARTWOOD[0] * shade * f, C_HEARTWOOD[1] * shade * f, C_HEARTWOOD[2] * shade * f)
+      }
+    }
+    for (let i = 0; i < NU; i++) {
+      for (let j = 0; j < NV; j++) {
+        const a = vertOf[i * cols + j], b = vertOf[(i + 1) * cols + j]
+        const c = vertOf[i * cols + j + 1], d = vertOf[(i + 1) * cols + j + 1]
+        if (a >= 0 && b >= 0 && c >= 0) idx.push(a, b, c)
+        if (b >= 0 && d >= 0 && c >= 0) idx.push(b, d, c)
+      }
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
+    geo.setIndex(idx)
+    geo.computeVertexNormals()
+    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true })))
+  }
+
+  // ─── TRONCO (textura): la superficie sólida de arriba le da masa; esto le
+  // pone la CORTEZA (parda, con grietas a lo largo) y la pelusa de musgo encima.
+  // Los anillos de crecimiento solo asoman en los EXTREMOS cortados. ─────────
   {
     // (a) Piel de corteza: dither denso y fino de puntos pardos sobre el lomo
     // AHUSADO, con vetas más oscuras en los surcos + parches de MUSGO (verde, en
