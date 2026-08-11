@@ -125,8 +125,19 @@ export const CONFIG = {
       relax: 0.16,
     },
     motility: {
-      turnRate: 0.5, bias: 1.0, noise: 0.9,
-      maxSpeed: 0.10, protrusionGain: 1.6, atpFloor: 0.3,
+      turnRate: 0.7, bias: 1.2, noise: 0.8,
+      maxSpeed: 0.14, protrusionGain: 1.6, atpFloor: 0.3,
+    },
+    // Sustrato: se dibuja como un TILE periódico que se repite y hace wrap, así
+    // nunca se acaba por mucho que la célula avance (antes se deslizaba fuera de
+    // cuadro y todo parecía estático). Las fibras de matriz (ECM) dan la
+    // dirección que un campo de puntos suelto no da: sin ellas no se ve el avance.
+    substrate: {
+      tile: 70,               // lado del tile (unidades de mundo)
+      dotsPerTile: 150,
+      fibersPerTile: 22,
+      fiberDir: 0.6,          // orientación dominante de las fibras (rad)
+      fiberSpread: 0.5,       // variación angular
     },
     // ~44 microtúbulos visibles (una célula real tiene cientos; ver spec §4.2bis).
     rails: {

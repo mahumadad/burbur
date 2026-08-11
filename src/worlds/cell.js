@@ -46,7 +46,11 @@ export function createCellScene(container, cfg, agentNames = []) {
   const H = cc.height
 
   const stage = createStage(container, cfg)
-  const { scene, camera } = stage
+  const { scene, camera, controls } = stage
+  // Un microscopio no orbita la muestra: sin auto-rotación, el deslizamiento del
+  // sustrato SE VE (con la órbita encima, el avance lateral quedaba tapado). El
+  // usuario igual puede arrastrar para mirar en 3/4.
+  controls.autoRotate = false
   const draw = createDraw(rc)
   const kit = createAgentKit(rc)
 
@@ -58,23 +62,65 @@ export function createCellScene(container, cfg, agentNames = []) {
   const invaders = createInvaders(cc.invaders)
   const n = cfg.fireflies.count
   const roamers = createRoamers(cc.wander, n, rnd)
-  // Fuente de quimioatrayente: la célula la persigue. Al alcanzarla, aparece otra.
+  // Fuente de quimioatrayente (coords normalizadas, fijas al sustrato): la
+  // célula la persigue. Al alcanzarla, aparece otra lejos. `prevSub` sirve para
+  // arrastrar la fuente con el sustrato cada frame.
   let source = { x: Math.cos(1.1) * 1.2, z: Math.sin(1.1) * 1.2 }
+  let prevSubX = 0, prevSubZ = 0
   let invaderClock = 0
 
   // ─── SUSTRATO: lo único que se mueve bajo la célula ───────────────────────
-  // Va en su propio grupo; deslizarlo es mover el grupo, no reescribir buffers.
+  // El sustrato es un TILE periódico repetido en una grilla 5×5. Como el patrón
+  // se repite cada `P`, basta con mover el grupo módulo `P` para que el suelo
+  // parezca infinito: nunca se acaba por más que la célula avance. (Antes era un
+  // disco finito que se deslizaba fuera de cuadro → parecía estático.)
+  const sub = cc.substrate
+  const P = sub.tile
   const substrate = new THREE.Group()
   scene.add(substrate)
   {
+    // Patrón de UN tile en [-P/2, P/2]²: puntos de matriz + fibras direccionales.
+    const tileDots = []
+    for (let i = 0; i < sub.dotsPerTile; i++) {
+      tileDots.push((rnd() - 0.5) * P, (rnd() - 0.5) * P, 0.5 + rnd() * 0.5, 0.22 + rnd() * 0.35)
+    }
+    const tileFibers = [] // [x0,z0, x1,z1, ...] polilíneas de 3 puntos
+    for (let i = 0; i < sub.fibersPerTile; i++) {
+      const cx = (rnd() - 0.5) * P, cz = (rnd() - 0.5) * P
+      const ang = sub.fiberDir + (rnd() - 0.5) * 2 * sub.fiberSpread
+      const len = P * (0.25 + rnd() * 0.4)
+      const wob = (rnd() - 0.5) * 0.5
+      const seg = []
+      for (let s = 0; s <= 2; s++) {
+        const t = (s / 2 - 0.5) * len
+        const px = cx + Math.cos(ang) * t - Math.sin(ang) * Math.sin(s * 3) * wob
+        const pz = cz + Math.sin(ang) * t + Math.cos(ang) * Math.sin(s * 3) * wob
+        seg.push(px, pz)
+      }
+      tileFibers.push(seg)
+    }
+    // Replicar el tile en 5×5 (cubre ±2.5P, más que el radio visible).
     const pos = [], col = [], size = []
-    for (let i = 0; i < cc.substrateDots; i++) {
-      const a = rnd() * Math.PI * 2
-      const r = Math.sqrt(rnd()) * 1.75 * R
-      pos.push(Math.cos(a) * r, -H, Math.sin(a) * r)
-      const k = 0.5 + rnd() * 0.5
-      col.push(C_SUBSTRATE[0] * k, C_SUBSTRATE[1] * k, C_SUBSTRATE[2] * k)
-      size.push(0.25 + rnd() * 0.4)
+    const fpos = [], fcol = []
+    const dim = (k) => [C_SUBSTRATE[0] * k, C_SUBSTRATE[1] * k, C_SUBSTRATE[2] * k]
+    for (let gx = -2; gx <= 2; gx++) {
+      for (let gz = -2; gz <= 2; gz++) {
+        const ox = gx * P, oz = gz * P
+        for (let d = 0; d < tileDots.length; d += 4) {
+          pos.push(tileDots[d] + ox, -H, tileDots[d + 1] + oz)
+          const c = dim(tileDots[d + 2]); col.push(c[0], c[1], c[2])
+          size.push(tileDots[d + 3])
+        }
+        for (const seg of tileFibers) {
+          // Fibras un poco más brillantes que los puntos: son las que marcan el avance.
+          const c = dim(0.9)
+          for (let s = 0; s < 2; s++) {
+            fpos.push(seg[s * 2] + ox, -H + 0.2, seg[s * 2 + 1] + oz,
+              seg[s * 2 + 2] + ox, -H + 0.2, seg[s * 2 + 3] + oz)
+            fcol.push(c[0], c[1], c[2], c[0], c[1], c[2])
+          }
+        }
+      }
     }
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
@@ -84,14 +130,22 @@ export function createCellScene(container, cfg, agentNames = []) {
     const pts = new THREE.Points(geo, draw.pointMaterial)
     pts.frustumCulled = false
     substrate.add(pts)
+    const fgeo = new THREE.BufferGeometry()
+    fgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(fpos), 3))
+    fgeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(fcol), 3))
+    const fmesh = new THREE.LineSegments(fgeo,
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.7 }))
+    fmesh.frustumCulled = false
+    substrate.add(fmesh)
   }
 
-  // ─── ADHESIONES FOCALES: nacen bajo el frente y quedan CLAVADAS al sustrato ─
-  // Por eso viven en el grupo del sustrato: desfilan hacia atrás solas, que es
-  // el indicador de velocidad más honesto que tiene el mundo.
+  // ─── ADHESIONES FOCALES: nacen bajo el frente, quedan CLAVADAS al sustrato ─
+  // y desfilan hacia atrás relativas a la célula — el indicador de velocidad más
+  // honesto. Se guardan en coords de nacimiento + el offset del sustrato de ese
+  // momento; su vida corta (ttl) las mantiene cerca, no se van de cuadro.
   const adhesionMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true })
-  const adhesionBuf = createLineBuffer(cc.adhesions, adhesionMat)
-  substrate.add(adhesionBuf.mesh)
+  const adhesionBuf = createLineBuffer(cc.adhesions * 2, adhesionMat)
+  scene.add(adhesionBuf.mesh)
   const adhesions = []
 
   // ─── NÚCLEO, NUCLEOLO, ER Y GOLGI: el paisaje interior, estático ──────────
@@ -99,6 +153,19 @@ export function createCellScene(container, cfg, agentNames = []) {
   {
     const NR = cc.nucleusR * R
     const NY = H * 0.25
+    // Domo SÓLIDO translúcido: le da cuerpo al núcleo bajo el wireframe (el
+    // usuario pidió elementos más sólidos, no solo líneas). Blend normal, muy
+    // tenue, para que se lea como un volumen vidrioso sin tapar lo de dentro.
+    {
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(NR * 0.98, 24, 16),
+        new THREE.MeshBasicMaterial({
+          color: PALETTE.bond, transparent: true, opacity: 0.14,
+          depthWrite: false, side: THREE.BackSide,
+        }))
+      dome.position.y = NY
+      scene.add(dome)
+    }
     // Núcleo: DOBLE envoltura (la membrana nuclear real es una bicapa doble
     // continua con el ER). Dos esferas wireframe casi pegadas.
     for (const [rr, op] of [[NR, 0.22], [NR * 1.045, 0.12]]) {
@@ -321,6 +388,25 @@ export function createCellScene(container, cfg, agentNames = []) {
   const memDots = createPointCloud(MV, draw.pointMaterial)
   scene.add(memDots.mesh)
 
+  // RELLENO SÓLIDO de la célula: un abanico (fan) translúcido que se deforma con
+  // el contorno cada frame. Le da CUERPO — sin él la célula era solo un borde y
+  // no se leía como un blob que repta. Centro + MV vértices de borde.
+  const fillPos = new Float32Array((MV + 1) * 3)
+  const fillGeo = new THREE.BufferGeometry()
+  fillGeo.setAttribute('position', new THREE.BufferAttribute(fillPos, 3))
+  {
+    const idx = []
+    for (let i = 0; i < MV; i++) idx.push(0, i + 1, ((i + 1) % MV) + 1)
+    fillGeo.setIndex(idx)
+  }
+  const fillMesh = new THREE.Mesh(fillGeo, new THREE.MeshBasicMaterial({
+    color: PALETTE.cyan, transparent: true, opacity: 0.09,
+    depthWrite: false, side: THREE.DoubleSide,
+  }))
+  fillMesh.frustumCulled = false
+  fillMesh.position.y = -0.4
+  scene.add(fillMesh)
+
   // ─── CORTEZA DE ACTINA: hebras cortas tangenciales al borde interno ───────
   const cortexMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 })
   // Trenza (2 seg por hebra) + malla dendrítica del lamelipodio.
@@ -358,7 +444,32 @@ export function createCellScene(container, cfg, agentNames = []) {
   const invBuf = createLineBuffer(cc.invaders.capacity * 7, invMat)
   scene.add(invBuf.mesh)
 
+  // Marcador tenue del quimioatrayente: un anillo que late sobre el sustrato.
+  // Da a la migración un objetivo visible (si no, la célula "va" sin motivo).
+  const sourceMark = new THREE.Mesh(
+    new THREE.TorusGeometry(4, 0.5, 8, 24),
+    new THREE.MeshBasicMaterial({ color: PALETTE.cyanEye, transparent: true, opacity: 0.4, depthWrite: false }))
+  sourceMark.rotation.x = Math.PI / 2
+  scene.add(sourceMark)
+
   // ─── ORGANELOS: los individuos con jaula, nombre y estela ─────────────────
+  // Cada uno lleva CARGA MOLECULAR adentro: racimos de esferas sólidas, la
+  // densidad "espacio-lleno" del estilo Goodsell/Digizyme que el usuario pidió.
+  // Sin esto eran jaulas wireframe vacías; ahora se leen como cuerpos llenos.
+  function molecularFill(group, count, radius, spread, colors) {
+    for (let i = 0; i < count; i++) {
+      const a = rnd() * Math.PI * 2, b = Math.acos(rnd() * 2 - 1)
+      const rr = Math.pow(rnd(), 0.5) * spread
+      const s = new THREE.Mesh(
+        new THREE.SphereGeometry(radius * (0.6 + rnd() * 0.8), 8, 6),
+        new THREE.MeshBasicMaterial({ color: colors[(rnd() * colors.length) | 0] }))
+      s.position.set(
+        Math.sin(b) * Math.cos(a) * rr,
+        Math.cos(b) * rr,
+        Math.sin(b) * Math.sin(a) * rr)
+      group.add(s)
+    }
+  }
   const KINDS = ['mitochondrion', 'vesicle', 'lysosome', 'endosome']
   const agents = []
   for (let i = 0; i < n; i++) {
@@ -408,16 +519,27 @@ export function createCellScene(container, cfg, agentNames = []) {
         }
       }
       group.add(kit.fatLine(cristae, PALETTE.yellow))
+      // Gránulos de la matriz: proteínas del ciclo de Krebs apretadas dentro.
+      molecularFill(group, 10, 0.34, W * 0.42, [PALETTE.orange, PALETTE.yellow, PALETTE.bond])
     } else if (kind === 'vesicle') {
-      // La cubierta real de clatrina se llama "cage" en la literatura.
+      // Jaula icosaédrica de clatrina (así se llama "cage" en la literatura) +
+      // una carga sólida translúcida adentro: la vesícula lleva algo.
       group.add(kit.edgesOf(new THREE.IcosahedronGeometry(2.2, 0), PALETTE.pink))
+      const cargo = new THREE.Mesh(new THREE.SphereGeometry(1.2, 14, 10),
+        new THREE.MeshBasicMaterial({ color: PALETTE.magenta, transparent: true, opacity: 0.5 }))
+      group.add(cargo)
+      molecularFill(group, 5, 0.28, 1.3, [PALETTE.white, PALETTE.pink])
     } else if (kind === 'lysosome') {
+      // Esfera ácida rellena de enzimas hidrolíticas (racimo denso).
       group.add(kit.edgesOf(new THREE.DodecahedronGeometry(2.4, 0), PALETTE.magenta))
-      group.add(new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 10),
-        new THREE.MeshBasicMaterial({ color: PALETTE.pink })))
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(1.4, 14, 10),
+        new THREE.MeshBasicMaterial({ color: PALETTE.pink, transparent: true, opacity: 0.35, depthWrite: false })))
+      molecularFill(group, 14, 0.32, 1.9, [PALETTE.pink, PALETTE.magenta, PALETTE.white])
     } else {
+      // Endosoma: cuerpo multivesicular — vesículas internas de verdad.
       group.add(kit.edgesOf(new THREE.OctahedronGeometry(2.6), PALETTE.cyanSat))
       group.add(kit.ringLoop(1.4, 22, PALETTE.cyanEye))
+      molecularFill(group, 7, 0.4, 1.7, [PALETTE.cyanSat, PALETTE.white, PALETTE.cyan])
     }
     const baseScale = 0.85 + rnd() * 0.5
     group.scale.setScalar(baseScale)
@@ -484,7 +606,13 @@ export function createCellScene(container, cfg, agentNames = []) {
       memDots.pos[i * 3 + 2] = z1
       memDots.col[i * 3] = col[0]; memDots.col[i * 3 + 1] = col[1]; memDots.col[i * 3 + 2] = col[2]
       memDots.size[i] = 0.5 + lead * 0.5
+      // Borde del relleno sólido: el vértice i+1 del abanico (el 0 es el centro).
+      fillPos[(i + 1) * 3] = x1
+      fillPos[(i + 1) * 3 + 1] = 0
+      fillPos[(i + 1) * 3 + 2] = z1
     }
+    fillGeo.getAttribute('position').needsUpdate = true
+    fillGeo.computeBoundingSphere()
     // Proteínas transmembrana (receta del FBX de membrana, spec §4.2bis):
     // canales = rombo montado a caballo del contorno; glicoproteínas =
     // espiral corta hacia afuera (el glicocálix). Ángulos fijos: viajan con
@@ -618,13 +746,21 @@ export function createCellScene(container, cfg, agentNames = []) {
     invBuf.commit()
   }
 
-  function drawAdhesions() {
+  function drawAdhesions(subX, subZ) {
     adhesionBuf.begin()
     for (const ad of adhesions) {
+      // Fija al sustrato: desde que nació, el sustrato corrió (subX - sbx), así
+      // que respecto de la célula la adhesión se fue hacia atrás esa cantidad.
+      const x = ad.bx + (subX - ad.sbx) * R
+      const z = ad.bz + (subZ - ad.sbz) * R
       const f = Math.min(1, ad.age * 1.6) * Math.max(0, 1 - ad.age / ad.ttl)
       const c = [C_ADHESION[0] * f, C_ADHESION[1] * f, C_ADHESION[2] * f]
-      const dx = Math.cos(ad.ang) * 2.4, dz = Math.sin(ad.ang) * 2.4
-      adhesionBuf.push(ad.x - dx, -H + 0.2, ad.z - dz, ad.x + dx, -H + 0.2, ad.z + dz, c, c)
+      // Streak alargado en el eje de tracción (radial) + una barra corta cruzada:
+      // se lee como un punto focal maduro, no como una rayita.
+      const dx = Math.cos(ad.ang) * 3.0, dz = Math.sin(ad.ang) * 3.0
+      const px = -Math.sin(ad.ang) * 1.1, pz = Math.cos(ad.ang) * 1.1
+      adhesionBuf.push(x - dx, -H + 0.25, z - dz, x + dx, -H + 0.25, z + dz, c, c)
+      adhesionBuf.push(x - px, -H + 0.25, z - pz, x + px, -H + 0.25, z + pz, c, c)
     }
     adhesionBuf.commit()
   }
@@ -678,29 +814,38 @@ export function createCellScene(container, cfg, agentNames = []) {
     // queda lleno de pegados y no llega nadie más.
     for (const inv of invaders) if (inv.bound) inv.alive = false
 
-    // Al alcanzar la fuente, aparece otra en otro punto: la célula sigue migrando.
-    if (Math.hypot(source.x, source.z) < 0.9) {
+    // ── El sustrato corre bajo una célula centrada ──────────────────────────
+    // El grupo se posiciona con wrap módulo P: como el patrón es periódico, el
+    // suelo parece infinito y nunca se agota.
+    const wrap = (v) => { const m = ((v % P) + P) % P; return m - P / 2 }
+    substrate.position.set(wrap(motility.subX * R), 0, wrap(motility.subZ * R))
+
+    // La fuente está clavada al sustrato: se arrastra con él (delta del offset).
+    source.x += motility.subX - prevSubX
+    source.z += motility.subZ - prevSubZ
+    prevSubX = motility.subX; prevSubZ = motility.subZ
+    // Al alcanzarla, aparece otra lejos: la célula reorienta y sigue migrando.
+    if (Math.hypot(source.x, source.z) < 0.5) {
       const a = rnd() * Math.PI * 2
       source = { x: Math.cos(a) * 1.3, z: Math.sin(a) * 1.3 }
     }
+    // El marcador del quimioatrayente late sobre el sustrato en la posición fuente.
+    sourceMark.position.set(source.x * R, -H + 0.6, source.z * R)
+    const pulse = 1 + Math.sin(clock * 3) * 0.25
+    sourceMark.scale.setScalar(pulse)
 
-    // ── El sustrato corre bajo una célula centrada ──────────────────────────
-    substrate.position.set(motility.subX * R, 0, motility.subZ * R)
-    // La fuente está clavada al sustrato: se acerca sola a medida que avanzamos.
-    source = { x: source.x + motility.subX * 0 - Math.cos(motility.frontAngle) * motility.speed * step,
-      z: source.z - Math.sin(motility.frontAngle) * motility.speed * step }
-
-    // Adhesiones: nacen bajo el lamelipodio, envejecen y se sueltan en la cola.
+    // Adhesiones: nacen bajo el lamelipodio, guardan el offset del sustrato de
+    // ese instante, y al dibujarse desfilan hacia atrás relativas a la célula.
     for (const ad of adhesions) ad.age += step
     for (let i = adhesions.length - 1; i >= 0; i--) {
       if (adhesions[i].age > adhesions[i].ttl) adhesions.splice(i, 1)
     }
-    if (adhesions.length < cc.adhesions && rnd() < motility.protrusion * 3 * step) {
+    if (adhesions.length < cc.adhesions && rnd() < motility.protrusion * 4 * step) {
       const a = motility.frontAngle + (rnd() - 0.5) * 1.2
-      const r = radiusAt(membrane, a) * R * (0.75 + rnd() * 0.2)
+      const r = radiusAt(membrane, a) * R * (0.72 + rnd() * 0.2)
       adhesions.push({
-        x: Math.cos(a) * r - motility.subX * R,
-        z: Math.sin(a) * r - motility.subZ * R,
+        bx: Math.cos(a) * r, bz: Math.sin(a) * r,   // posición de nacimiento (mundo)
+        sbx: motility.subX, sbz: motility.subZ,      // offset del sustrato entonces
         ang: a, age: 0, ttl: 4 + rnd() * 4,
       })
     }
@@ -735,7 +880,7 @@ export function createCellScene(container, cfg, agentNames = []) {
     drawCortex(motility.frontAngle, motility.protrusion * (1 - rounding))
     drawRails()
     drawInvaders()
-    drawAdhesions()
+    drawAdhesions(motility.subX, motility.subZ)
     for (let i = 0; i < cc.atp.capacity; i++) {
       const q = atp.quanta[i]
       atpCloud.pos[i * 3] = q.alive ? q.x * R : 0
@@ -782,6 +927,9 @@ export function createCellScene(container, cfg, agentNames = []) {
       }
     }
 
+    // El timer de inactividad del stage re-activa la órbita tras arrastrar; en
+    // este mundo la queremos siempre apagada.
+    controls.autoRotate = false
     stage.render(step)
     return []
   }
