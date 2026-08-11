@@ -299,6 +299,7 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   let clock = 0
   let lastThrobHz = null // última banda emitida al drone (para no repetir por frame)
   let lastSwarm = null   // referencia al swarm (para el shock del botón agitar)
+  let shockT = 0         // tiempo restante del fogonazo del shock (0 = sin shock)
 
   // Escribe un pulso en el buffer aditivo desde `base`: un halo grande y tenue
   // (bloom) + una cabeza caliente casi blanca + una estela que se apaga detrás.
@@ -329,6 +330,19 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     glow.uniforms.uT.value = clock
     lastSwarm = swarm
     const events = []
+
+    // ── SHOCK del botón agitar: TODO el sistema encendido, luego reset ────────
+    // Mientras dura, `blaze` (1→0) enciende somas, flujo y nodos y mantiene el
+    // fogonazo de pantalla. Al terminar, la red se resetea y cae en calma.
+    const blaze = shockT > 0 ? Math.max(0, Math.min(1, shockT / cc.shock.dur)) : 0
+    if (shockT > 0) {
+      shockT -= step
+      stage.flash(blaze * 0.6)
+      if (shockT <= 0 && swarm) {
+        brain.mode = 'postictal'; brain.timer = 0; brain.risk = 0; brain.down = false
+        for (let i = 0; i < swarm.phases.length; i++) { swarm.phases[i] = Math.random() * Math.PI * 2; swarm.flash[i] = 0 }
+      }
+    }
 
     // ── Estado cerebral: el eje del mundo (sim/brainstate.js) ─────────────────
     // Traduce el estado de sueño + el neuromodulador en cómo se comporta la red:
@@ -404,13 +418,16 @@ export function createNeuronScene(container, cfg, agentNames = []) {
       // Parpadeo × gate de actividad: en estado DOWN o postictal el flujo se
       // apaga casi del todo, y la red se ve callar entera.
       const tw = (0.6 + 0.4 * (0.5 + 0.5 * Math.sin(clock * 3 + i * 1.7))) * (0.25 + 0.75 * activity)
-      // La energía sale con el color de la neurona que la manda (cian/rosa).
+      // La energía sale con el color de la neurona que la manda (cian/rosa); en
+      // el shock, todo el flujo blanquea y se enciende a pleno.
       const col = net.synapses[fp.syn].sign > 0 ? C_EXC : C_INH
+      const cr = col[0] + (1 - col[0]) * blaze, cg = col[1] + (1 - col[1]) * blaze, cb = col[2] + (1 - col[2]) * blaze
+      const bw = Math.max(tw, blaze)
       flowCloud.pos[i * 3] = p.x * R; flowCloud.pos[i * 3 + 1] = H; flowCloud.pos[i * 3 + 2] = p.z * R
-      flowCloud.col[i * 3] = col[0] * tw
-      flowCloud.col[i * 3 + 1] = col[1] * tw
-      flowCloud.col[i * 3 + 2] = col[2] * tw
-      flowCloud.size[i] = cc.flow.size
+      flowCloud.col[i * 3] = cr * bw
+      flowCloud.col[i * 3 + 1] = cg * bw
+      flowCloud.col[i * 3 + 2] = cb * bw
+      flowCloud.size[i] = cc.flow.size * (1 + blaze * 0.8)
     }
     flowCloud.commit()
 
@@ -419,7 +436,8 @@ export function createNeuronScene(container, cfg, agentNames = []) {
 
     for (let i = 0; i < n; i++) {
       const a = agents[i]
-      const flash = swarm ? swarm.flash[i] : 0
+      // Durante el shock, todas las neuronas se encienden a la vez (blaze).
+      const flash = Math.max(swarm ? swarm.flash[i] : 0, blaze)
       const pulse = 1 + flash * 0.45
       if (a.fixed) {
         worldPos[i * 3] = a.x * R; worldPos[i * 3 + 1] = H; worldPos[i * 3 + 2] = a.z * R
@@ -469,7 +487,8 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     for (let i = 0; i < nodeList.length; i++) {
       const nd = nodeList[i]
       nd.glow *= nodeDecay
-      const base = 0.25, g = base + nd.glow * 1.4
+      // En el shock todos los nodos se encienden a la vez.
+      const base = 0.25, g = base + Math.max(nd.glow, blaze) * 1.4
       nodeCloud.pos[i * 3] = nd.x * R; nodeCloud.pos[i * 3 + 1] = H; nodeCloud.pos[i * 3 + 2] = nd.z * R
       nodeCloud.col[i * 3] = C_NODE[0] * g; nodeCloud.col[i * 3 + 1] = C_NODE[1] * g; nodeCloud.col[i * 3 + 2] = C_NODE[2] * g
       nodeCloud.size[i] = 0.45 + nd.glow * 0.5
@@ -509,18 +528,21 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     return events
   }
 
-  // El botón AGITAR de este mundo no dispersa: da un SHOCK ENERGÉTICO, como una
-  // terapia — un destello fuerte que RESETEA la red, corta una convulsión si está
-  // en curso, y la deja calmándose (silencio postictal) antes de seguir.
+  // El botón AGITAR de este mundo no dispersa: es una DESCARGA ELÉCTRICA que
+  // enciende TODO el sistema a la vez — como una terapia de shock — y después
+  // resetea y calma la red (el reset ocurre al terminar el fogonazo, en update).
   function scare(strength = 1) {
-    stage.flash(0.85 * strength)                 // el shock
-    brain.mode = 'postictal'                     // reset: la red se calla y se calma
-    brain.timer = 0; brain.risk = 0; brain.down = false
-    // El shock rompe el patrón: desincroniza las fases de golpe. Después, el
-    // estado del sueño vuelve a acomodar la red — el "calme antes de seguir".
-    if (lastSwarm) for (let i = 0; i < lastSwarm.phases.length; i++) {
-      lastSwarm.phases[i] = Math.random() * Math.PI * 2
-      lastSwarm.flash[i] = 0
+    shockT = cc.shock.dur                          // arranca el fogonazo
+    stage.flash(cc.shock.flash * strength)         // pantalla iluminada
+    // Descarga SINCRONIZADA: cada neurona dispara a la vez y suelta un pulso por
+    // todos sus axones — un frente de luz que barre el sistema entero. Se limpia
+    // el refractario para que ninguna quede afuera del choque.
+    if (lastSwarm) {
+      for (let i = 0; i < net.neurons.length; i++) {
+        lastSwarm.flash[i] = 1
+        spikes.refractory[i] = 0
+        fire(spikes, net, cc.spikes, i, outs[i])
+      }
     }
     // Los astrocitos también reaccionan al choque.
     for (const r of gliaRoamers) {
