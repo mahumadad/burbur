@@ -11,6 +11,14 @@ import { createAtpPool, spawnQuantum, updateAtp } from '../sim/atp.js'
 import { createInvaders, spawnInvader, updateInvaders } from '../sim/invaders.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { MITOTIC_PHASES } from '../sim/ecosystem.js'
+import { roleFor, applyRoleBias } from '../sim/traffic.js'
+import { createMotors, updateMotors, motorPosition } from '../sim/motors.js'
+import { mitosisState } from '../sim/mitosis.js'
+import { createMitosisDraw } from './cell/mitosis.js'
+import { createPhagosomes } from './cell/phagocytosis.js'
+import { createMitoFusion } from './cell/mitoFusion.js'
+import { mediumMods, createMediumEffects } from './cell/medium.js'
+import { addTissueNeighbors } from './cell/tissue.js'
 
 // MUNDO CÉLULA — un macrófago reptando sobre un sustrato, visto desde arriba.
 //
@@ -37,13 +45,39 @@ const C_ER = rgb(PALETTE.cyanSat)
 const C_GOLGI = rgb(PALETTE.pink)
 const C_ADHESION = rgb(PALETTE.bond)
 const C_INVADER = rgb(PALETTE.magenta)
+const C_ATP_POP = rgb(PALETTE.yellow)
 const C_SUBSTRATE = [0.30, 0.34, 0.52]
+const C_PHAGOSOME = rgb(PALETTE.pink)
+// M7 (acidic): la membrana se tiñe hacia este magenta, interpolado por `mm.tint`.
+const C_ACID_TINT = rgb(PALETTE.magenta)
+
+// Distancia angular mínima (0..π) entre dos ángulos, dando la vuelta corta.
+function angDist(a, b) {
+  const d = Math.abs(a - b) % (Math.PI * 2)
+  return d > Math.PI ? Math.PI * 2 - d : d
+}
+// Surco de citocinesis (M4): gaussiana centrada en los dos ángulos
+// perpendiculares al eje del huso (que es el eje x local, ver cell/mitosis.js).
+const FURROW_SIGMA = 0.55
+function furrowGauss(a) {
+  const d = Math.min(angDist(a, Math.PI / 2), angDist(a, -Math.PI / 2))
+  return Math.exp(-(d * d) / (2 * FURROW_SIGMA * FURROW_SIGMA))
+}
+
+// Pool FIJO de "pops" de consumo de ATP (M2): un punto que crece y se apaga
+// en ~0.25s en cada entrega. Fijo a propósito, como el resto de los pools del
+// mundo — con más entregas que slots libres, algunas simplemente no destellan.
+const ATP_POP_CAP = 16
+const ATP_POP_TTL = 0.25
 
 export function createCellScene(container, cfg, agentNames = []) {
   const R = cfg.world.radius
   const cc = cfg.cell
   const rc = cfg.render
   const H = cc.height
+  // Radio y altura del núcleo: se usan acá y en el dibujo de la mitosis (M4).
+  const NR = cc.nucleusR * R
+  const NY = H * 0.25
 
   const stage = createStage(container, cfg)
   const { scene, camera, controls } = stage
@@ -58,6 +92,7 @@ export function createCellScene(container, cfg, agentNames = []) {
   const membrane = createMembrane(cc.membrane, rnd)
   const motility = createMotility(cc.motility, rnd)
   const rails = createRails(cc.rails, rnd)
+  const motors = createMotors(cc.motors, rails.rails.length, rnd)
   const atp = createAtpPool(cc.atp)
   const invaders = createInvaders(cc.invaders)
   const n = cfg.fireflies.count
@@ -139,6 +174,10 @@ export function createCellScene(container, cfg, agentNames = []) {
     substrate.add(fmesh)
   }
 
+  // ─── TEJIDO VECINO (M10): contornos parciales de otras células, paisaje ──
+  // Dentro de `substrate` para deslizarse con él: se acercan y alejan al migrar.
+  addTissueNeighbors(substrate, { R, H, rnd, color: PALETTE.cyanSat })
+
   // ─── ADHESIONES FOCALES: nacen bajo el frente, quedan CLAVADAS al sustrato ─
   // y desfilan hacia atrás relativas a la célula — el indicador de velocidad más
   // honesto. Se guardan en coords de nacimiento + el offset del sustrato de ese
@@ -151,8 +190,6 @@ export function createCellScene(container, cfg, agentNames = []) {
   // ─── NÚCLEO, NUCLEOLO, ER Y GOLGI: el paisaje interior, estático ──────────
   // Recetas de spec §4.2bis, extraídas de los modelos 3D de referencia.
   {
-    const NR = cc.nucleusR * R
-    const NY = H * 0.25
     // Domo SÓLIDO translúcido: le da cuerpo al núcleo bajo el wireframe (el
     // usuario pidió elementos más sólidos, no solo líneas). Blend normal, muy
     // tenue, para que se lea como un volumen vidrioso sin tapar lo de dentro.
@@ -205,17 +242,9 @@ export function createCellScene(container, cfg, agentNames = []) {
         )
       }
     }
-    // Cromatina: hebras que serpentean dentro del núcleo, densas.
-    for (let i = 0; i < 40; i++) {
-      let x = (rnd() - 0.5) * NR, y = (rnd() - 0.5) * NR, z = (rnd() - 0.5) * NR
-      for (let k = 0; k < 8; k++) {
-        const nx2 = x + (rnd() - 0.5) * NR * 0.5
-        const ny2 = y + (rnd() - 0.5) * NR * 0.5
-        const nz2 = z + (rnd() - 0.5) * NR * 0.5
-        draw.pushLine(x, NY + y, z, nx2, NY + ny2, nz2, C_CHROMATIN, C_CHROMATIN)
-        x = nx2; y = ny2; z = nz2
-      }
-    }
+    // Cromatina: ver cell/mitosis.js (M4) — pasó a un buffer DINÁMICO propio
+    // (chromatinBuf) porque se condensa y se separa durante la mitosis; una
+    // geometría estática subida una sola vez no puede animarse.
 
     // Filamentos intermedios: jaula de lazos ondulados alrededor del núcleo
     // (el "muelle" del modelo de citoesqueleto). Sostienen el núcleo.
@@ -375,6 +404,11 @@ export function createCellScene(container, cfg, agentNames = []) {
   draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75 }))
   draw.finalizePoints(scene)
 
+  // ─── MITOSIS (M4): cromatina/cromosomas/huso, redibujados cada frame ──────
+  const mitosisDraw = createMitosisDraw({
+    scene, NR, NY, rnd, chromatinColor: C_CHROMATIN, spindleColor: C_CORTEX,
+  })
+
   // ─── MEMBRANA: dos contornos (la bicapa) + un punto por vértice ───────────
   const MV = cc.membrane.verts
   const memMat = new THREE.LineBasicMaterial({ vertexColors: true })
@@ -431,6 +465,12 @@ export function createCellScene(container, cfg, agentNames = []) {
   }
   scene.add(mtBeads.mesh)
 
+  // ─── MOTORES (M5): kinesina/dineína caminando sobre los rieles ───────────
+  // El color se recalcula cada frame porque al reengancharse cambian de rumbo.
+  const motorCloud = createPointCloud(cc.motors.count, draw.pointMaterial)
+  const C_KINESIN = rgb(PALETTE.cyanEye), C_DYNEIN = rgb(PALETTE.bond)
+  scene.add(motorCloud.mesh)
+
   // ─── ATP: los cuantos, que son también el latido sonoro del mundo ─────────
   const atpCloud = createPointCloud(cc.atp.capacity, draw.pointMaterial)
   for (let i = 0; i < cc.atp.capacity; i++) {
@@ -438,6 +478,26 @@ export function createCellScene(container, cfg, agentNames = []) {
     atpCloud.size[i] = 0.8
   }
   scene.add(atpCloud.mesh)
+
+  // ─── POPS de entrega de ATP (M2): el consumo, antes silencioso, ahora se ve.
+  const atpPops = createPointCloud(ATP_POP_CAP, draw.pointMaterial)
+  // Estado propio del pool: cada slot lleva su edad; `age >= ATP_POP_TTL` = libre.
+  const atpPopState = Array.from({ length: ATP_POP_CAP }, () => ({ age: ATP_POP_TTL, x: 0, z: 0 }))
+  for (let i = 0; i < ATP_POP_CAP; i++) {
+    atpPops.col[i * 3] = C_ATP_POP[0]; atpPops.col[i * 3 + 1] = C_ATP_POP[1]; atpPops.col[i * 3 + 2] = C_ATP_POP[2]
+  }
+  scene.add(atpPops.mesh)
+
+  // ─── FAGOSOMAS (M6): tras la fagocitosis, viajan hacia el centro. ────────
+  const phago = createPhagosomes({
+    scene, pointMaterial: draw.pointMaterial, R, H, color: C_PHAGOSOME, cap: 4, ttl: 6,
+  })
+
+  // ─── MEDIO (M7): ROS y autofagosomas propios; el resto de los efectos por
+  // medio son modificadores puros que se aplican más abajo, en update().
+  const medium = createMediumEffects({
+    scene, pointMaterial: draw.pointMaterial, R, H, membrane, radiusAt, rnd,
+  })
 
   // ─── INVASORES ────────────────────────────────────────────────────────────
   const invMat = new THREE.LineBasicMaterial({ vertexColors: true })
@@ -471,9 +531,12 @@ export function createCellScene(container, cfg, agentNames = []) {
     }
   }
   const KINDS = ['mitochondrion', 'vesicle', 'lysosome', 'endosome']
+  // Rol de tráfico por organelo (M3): qué motor lo lleva y hacia dónde.
+  const roles = []
   const agents = []
   for (let i = 0; i < n; i++) {
     const kind = KINDS[i % KINDS.length]
+    roles.push(roleFor(kind))
     const group = new THREE.Group()
     if (kind === 'mitochondrion') {
       // Cápsula con CRESTAS transversales onduladas (receta del modelo usdz,
@@ -548,6 +611,10 @@ export function createCellScene(container, cfg, agentNames = []) {
     agents.push({ group, kind, baseScale, glide: true, spinY: kind === 'endosome' ? 0.5 : 0 })
   }
 
+  // ─── FUSIÓN/FISIÓN MITOCONDRIAL (M9) ──────────────────────────────────────
+  // Opera sobre `agents`/`roamers` por índice: nunca los borra ni reordena.
+  const mitoFusion = createMitoFusion(agents, roamers, cc.mito, rnd)
+
   const AGENT_COLORS = [PALETTE.orange, PALETTE.pink, PALETTE.magenta, PALETTE.cyanSat]
   const trails = createTrails(scene, n, AGENT_COLORS, rc, draw.pointMaterial)
   const worldPos = new Float32Array(n * 3)
@@ -579,13 +646,22 @@ export function createCellScene(container, cfg, agentNames = []) {
   let clock = 0
   let rounding = 0, roundTarget = 0
   let calciumCooldown = 5
+  // Flag del evento de división (M4): se emite una sola vez por ciclo, al
+  // cruzar furrow >= 0.95, y se rearma cuando furrow vuelve a 0.
+  let divisionFired = false
 
-  function drawMembrane(front) {
+  function drawMembrane(front, furrow = 0, tint = 0) {
     memBuf.begin()
     const step = (Math.PI * 2) / MV
     for (let i = 0; i < MV; i++) {
       const a = i * step, b = ((i + 1) % MV) * step
-      const r1 = radiusAt(membrane, a) * R, r2 = radiusAt(membrane, b) * R
+      let r1 = radiusAt(membrane, a) * R, r2 = radiusAt(membrane, b) * R
+      // Surco de citocinesis: se estrangula en la banda perpendicular al eje
+      // del huso, hasta ~55% del radio con furrow=1.
+      if (furrow > 0) {
+        r1 *= 1 - furrow * 0.55 * furrowGauss(a)
+        r2 *= 1 - furrow * 0.55 * furrowGauss(b)
+      }
       const x1 = Math.cos(a) * r1, z1 = Math.sin(a) * r1
       const x2 = Math.cos(b) * r2, z2 = Math.sin(b) * r2
       // El frente activo se pinta cian; el resto, blanco.
@@ -596,6 +672,12 @@ export function createCellScene(container, cfg, agentNames = []) {
         C_MEMBRANE[1] + (C_FRONT[1] - C_MEMBRANE[1]) * lead,
         C_MEMBRANE[2] + (C_FRONT[2] - C_MEMBRANE[2]) * lead,
       ]
+      // M7 (acidic): el contorno vira hacia magenta, proporcional a `tint`.
+      if (tint > 0) {
+        col[0] += (C_ACID_TINT[0] - col[0]) * tint
+        col[1] += (C_ACID_TINT[1] - col[1]) * tint
+        col[2] += (C_ACID_TINT[2] - col[2]) * tint
+      }
       memBuf.push(x1, 0, z1, x2, 0, z2, col, col)
       // Segunda lámina de la bicapa, un pelo más adentro.
       const k = 0.982
@@ -715,6 +797,23 @@ export function createCellScene(container, cfg, agentNames = []) {
     mtBeads.commit()
   }
 
+  /** Motores (M5): un punto por motor sobre su riel, coloreado según sentido. */
+  function drawMotors() {
+    for (let i = 0; i < motors.length; i++) {
+      const m = motors[i]
+      const p = motorPosition(m, rails) // ya incluye el origen, en coords normalizadas
+      motorCloud.pos[i * 3] = p.x * R
+      motorCloud.pos[i * 3 + 1] = H * 0.15
+      motorCloud.pos[i * 3 + 2] = p.z * R
+      // Dos tonos según sentido: kinesina (+1, hacia afuera) vs dineína (-1,
+      // hacia adentro). Se recalcula cada frame porque al reengancharse cambian.
+      const c = m.dir === 1 ? C_KINESIN : C_DYNEIN
+      motorCloud.col[i * 3] = c[0]; motorCloud.col[i * 3 + 1] = c[1]; motorCloud.col[i * 3 + 2] = c[2]
+      motorCloud.size[i] = m.cargo ? 0.5 : 0.35
+    }
+    motorCloud.commit()
+  }
+
   function drawInvaders() {
     invBuf.begin()
     for (const inv of invaders) {
@@ -746,6 +845,36 @@ export function createCellScene(container, cfg, agentNames = []) {
     invBuf.commit()
   }
 
+  /** Deja un pop de consumo de ATP en (x,z) normalizados: ocupa el slot más libre. */
+  function spawnAtpPop(x, z) {
+    for (let i = 0; i < ATP_POP_CAP; i++) {
+      if (atpPopState[i].age >= ATP_POP_TTL) {
+        atpPopState[i].age = 0; atpPopState[i].x = x; atpPopState[i].z = z
+        return
+      }
+    }
+    // Pool lleno: esta entrega, en particular, no destella — no pasa nada.
+  }
+
+  /** Anima el pool de pops: crecen y se apagan en ATP_POP_TTL; libres se aparcan. */
+  function drawAtpPops(step) {
+    for (let i = 0; i < ATP_POP_CAP; i++) {
+      const p = atpPopState[i]
+      if (p.age < ATP_POP_TTL) {
+        p.age += step
+        const u = Math.min(1, p.age / ATP_POP_TTL)
+        atpPops.pos[i * 3] = p.x * R
+        atpPops.pos[i * 3 + 1] = H * 0.45
+        atpPops.pos[i * 3 + 2] = p.z * R
+        atpPops.size[i] = Math.sin(Math.PI * u) * 1.6 // crece y se apaga
+      } else {
+        atpPops.pos[i * 3 + 1] = -9999 // aparcado: convención del repo para "muerto"
+        atpPops.size[i] = 0
+      }
+    }
+    atpPops.commit()
+  }
+
   function drawAdhesions(subX, subZ) {
     adhesionBuf.begin()
     for (const ad of adhesions) {
@@ -769,14 +898,29 @@ export function createCellScene(container, cfg, agentNames = []) {
     const step = dt || 0.016
     clock += step
     draw.uniforms.uT.value = clock
+    // Eventos grandes del mundo (M1): se acumulan durante el frame y se
+    // devuelven al host al final, para el log y/o el sonido.
+    const events = []
 
     // El medio pinta la célula: el "clima" modula energía y tensión.
     const demand = 0.25 + (eco ? eco.tension : 0) * 0.8
+    // M7 — que el medio se vea: modificadores puros derivados de eco.weather
+    // (más blebbing, menos ATP, invasores más seguido, mitocondrias apagadas).
+    const mm = mediumMods(eco ? eco.weather : undefined, eco ? eco.rain : 0)
     // En mitosis la célula suelta las adherencias, se redondea y deja de reptar.
     // Entra y sale con rampa: el redondeo real tarda, no es un interruptor.
     const inMitosis = eco ? MITOTIC_PHASES.has(eco.phase) : false
     roundTarget = inMitosis ? 1 : 0
     rounding += (roundTarget - rounding) * (1 - Math.exp(-step / 2.5))
+
+    // Mitosis (M4): condensación de cromatina, alineación, separación y
+    // surco del ciclo actual, traducidos por el módulo puro sim/mitosis.js.
+    const mit = mitosisState(eco ? eco.phase : undefined, eco ? eco.phaseT : 0)
+    if (mit.furrow >= 0.95 && !divisionFired) {
+      divisionFired = true
+      events.push({ type: 'moment', agent: 'el núcleo', agentType: 'structure', kind: 'division' })
+    }
+    if (mit.furrow < 0.02) divisionFired = false
 
     // ── Simulación ──────────────────────────────────────────────────────────
     updateMotility(motility, cc.motility, step, rnd, {
@@ -785,34 +929,69 @@ export function createCellScene(container, cfg, agentNames = []) {
     updateMembrane(membrane, cc.membrane, step, rnd, clock, {
       frontAngle: motility.frontAngle,
       protrusion: motility.protrusion,
-      blebbing: motility.blebbing,
+      // M7 (acidic): un empujón visual extra al blebbing, solo en el render
+      // (motility.blebbing "real" queda intacto para el resto del mundo).
+      blebbing: Math.min(1, motility.blebbing + mm.blebBoost),
       rounding,
     })
     updateRails(rails, cc.rails, step, rnd)
+    updateMotors(motors, rails, cc.motors, step, rnd)
 
     // Las mitocondrias sueltan ATP; el destello del swarm marca el pulso.
+    // M7 (hypoxic/serum starved): `atpProdMul` recorta la probabilidad de que
+    // el destello realmente suelte un cuanto — las mitocondrias "rinden menos".
     if (swarm) {
       for (let i = 0; i < n; i++) {
-        if (swarm.flash[i] > 0.85 && agents[i].kind === 'mitochondrion') {
+        if (swarm.flash[i] > 0.85 && agents[i].kind === 'mitochondrion' && rnd() < mm.atpProdMul) {
           const t = rnd() * Math.PI * 2, tr = rnd() * 0.5
           spawnQuantum(atp, roamers[i].x, roamers[i].z, Math.cos(t) * tr, Math.sin(t) * tr)
         }
       }
     }
-    updateAtp(atp, cc.atp, step, demand)
+    // Cada entrega deja un pop visual (siempre) y una ráfaga sonora (M2, vía M1).
+    // El host limita cuántos pulsos SUENAN por segundo; acá se emiten todos.
+    const delivered = updateAtp(atp, cc.atp, step, demand)
+    for (const d of delivered) {
+      spawnAtpPop(d.x, d.z)
+      events.push({ type: 'pulse', y: H * 0.45 })
+    }
 
     // Invasores: llegan cada tanto y buscan la membrana.
+    // M7 (inflamed): `spawnEveryMul` < 1 acorta el intervalo → llegan más seguido.
     invaderClock -= step
     if (invaderClock <= 0) {
-      invaderClock = cc.invaders.spawnEvery
+      invaderClock = cc.invaders.spawnEvery * mm.spawnEveryMul
       spawnInvader(invaders, cc.invaders, rnd() < 0.5 ? 'bacterium' : 'virion', rnd)
     }
-    updateInvaders(invaders, cc.invaders, step, rnd, (x, z) => containsPoint(membrane, x, z))
+    const invEvents = updateInvaders(invaders, cc.invaders, step, rnd, (x, z) => containsPoint(membrane, x, z))
+    // La infección ya la detecta invaders.js; acá se traduce al contrato de M1
+    // (con `dir` según la posición del virión, misma convención que scene.js).
+    for (const ev of invEvents) {
+      if (ev.type !== 'infection') continue
+      const dir = Math.abs(ev.x) > Math.abs(ev.z)
+        ? (ev.x > 0 ? 'right' : 'left') : (ev.z > 0 ? 'ahead' : 'behind')
+      events.push({ type: 'conflict', agent: 'virión', agentType: 'invader', kind: 'infection', dir })
+    }
     // Un virión que entró deja de ser un invasor DEL SUSTRATO: se lo saca para
     // que su slot vuelva a circular. Qué le pasa adentro (replicar o acabar en
     // un lisosoma) es materia de F5; sin esto, a las pocas infecciones el pool
     // queda lleno de pegados y no llega nadie más.
     for (const inv of invaders) if (inv.bound) inv.alive = false
+
+    // Fagocitosis (M6): decisión del MUNDO, no de invaders.js. Una bacteria
+    // viva que ya cruzó la membrana Y cae dentro del sector del lamelipodio
+    // queda engullida; nace un fagosoma que viaja hacia el centro.
+    for (const inv of invaders) {
+      if (!inv.alive || inv.kind !== 'bacterium') continue
+      const ang = Math.atan2(inv.z, inv.x)
+      if (angDist(ang, motility.frontAngle) < 0.9 && containsPoint(membrane, inv.x, inv.z)) {
+        inv.alive = false
+        const dir = Math.abs(inv.x) > Math.abs(inv.z)
+          ? (inv.x > 0 ? 'right' : 'left') : (inv.z > 0 ? 'ahead' : 'behind')
+        events.push({ type: 'conflict', agent: 'bacteria', agentType: 'invader', kind: 'phagocytosis', dir })
+        phago.spawn(inv.x, inv.z)
+      }
+    }
 
     // ── El sustrato corre bajo una célula centrada ──────────────────────────
     // El grupo se posiciona con wrap módulo P: como el patrón es periódico, el
@@ -852,6 +1031,12 @@ export function createCellScene(container, cfg, agentNames = []) {
 
     // ── Organelos: deambulan SOBRE los rieles, contenidos por la membrana ───
     updateRoamers(roamers, cc.wander, step, rnd, clock, rails, nearestOnRails)
+    // Sesgo direccional (M3): lo secretor deriva hacia la membrana, lo
+    // digestivo hacia el centro — el tráfico se lee sin etiquetas.
+    applyRoleBias(roamers, roles, cc.traffic, step)
+    // Fusión/fisión mitocondrial (M9): se resuelve ANTES de posicionar los
+    // organelos, así una fisión ya se ve en su lugar nuevo este mismo frame.
+    for (const ev of mitoFusion.update(step, clock)) events.push(ev)
     for (let i = 0; i < n; i++) {
       const r = roamers[i]
       // La contención no es un círculo: es el contorno vivo de la membrana.
@@ -863,22 +1048,29 @@ export function createCellScene(container, cfg, agentNames = []) {
         r.vx *= 0.3; r.vz *= 0.3
       }
       const x = r.x * R, z = r.z * R
-      worldPos[i * 3] = x
-      worldPos[i * 3 + 1] = H * 0.35
-      worldPos[i * 3 + 2] = z
       const a = agents[i]
+      // Mitocondria fusionada (M9): oculta, y su trayecto no deja estela
+      // fantasma — se aparca igual que un cuanto de ATP muerto.
+      worldPos[i * 3] = x
+      worldPos[i * 3 + 1] = a.group.visible === false ? -9999 : H * 0.35
+      worldPos[i * 3 + 2] = z
       a.group.position.set(x, H * 0.35, z)
       const sp = Math.hypot(r.vx, r.vz)
       if (sp > 1e-4) a.group.rotation.y = Math.atan2(r.vx * R, r.vz * R)
       if (a.spinY) a.group.rotation.y += a.spinY * step
-      const pulse = 1 + (swarm ? swarm.flash[i] : 0) * 0.3
-      a.group.scale.setScalar(a.baseScale * pulse)
+      // M7 (hypoxic): las mitocondrias reaccionan menos al pulso de ATP —
+      // se ven "apagadas". M9: la fusionada absorbente crece (fusedScale).
+      const dim = a.kind === 'mitochondrion' ? mm.mitoDim : 0
+      const pulse = 1 + (swarm ? swarm.flash[i] : 0) * 0.3 * (1 - dim)
+      a.group.scale.setScalar(a.baseScale * pulse * (a.fusedScale || 1))
     }
 
     // ── Dibujo ──────────────────────────────────────────────────────────────
-    drawMembrane(motility.frontAngle)
+    drawMembrane(motility.frontAngle, mit.furrow, mm.tint)
     drawCortex(motility.frontAngle, motility.protrusion * (1 - rounding))
     drawRails()
+    drawMotors()
+    mitosisDraw.update(mit)
     drawInvaders()
     drawAdhesions(motility.subX, motility.subZ)
     for (let i = 0; i < cc.atp.capacity; i++) {
@@ -888,13 +1080,20 @@ export function createCellScene(container, cfg, agentNames = []) {
       atpCloud.pos[i * 3 + 2] = q.alive ? q.z * R : 0
     }
     atpCloud.commit()
+    drawAtpPops(step)
+    // M6: los fagosomas se funden con "un lisosoma" al llegar al centro.
+    for (const ev of phago.update(step)) events.push(ev)
+    // M7: ROS y autofagosomas, según el medio (mm ya trae la densidad/flag).
+    medium.update(step, mm)
     trails.update(worldPos)
 
     // Etiqueta: SOLO al pasar el mouse por encima de un organelo (no en el centro).
+    // M9: una mitocondria fusionada (oculta) nunca es candidata al hover.
     let bestI = -1
     if (ptrX !== null) {
       let bestD = 0.14 // umbral de "encima" en NDC (organelos chicos y en movimiento)
       for (let i = 0; i < n; i++) {
+        if (agents[i].group.visible === false) continue
         _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
         if (_proj.z > 1) continue
         const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
@@ -931,7 +1130,7 @@ export function createCellScene(container, cfg, agentNames = []) {
     // este mundo la queremos siempre apagada.
     controls.autoRotate = false
     stage.render(step)
-    return []
+    return events
   }
 
   /** Shake: sacude el citoesqueleto y dispersa a los organelos. */
