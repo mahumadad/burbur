@@ -63,6 +63,8 @@ async function start() {
     // Cada mundo narra con su propio vocabulario; sin léxico, el del bosque.
     const events = createEventEngine(pop, { ...CONFIG.events, lexicon: def.lexicon })
     applyAccent(def.accent)
+    // El panel ECOSISTEMA se adapta al mundo (la célula oculta la estación, etc.).
+    hud.setWorld(def.hud)
     return { def, swarm, pop, scene, events }
   }
   function switchWorld(id) {
