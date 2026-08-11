@@ -64,6 +64,8 @@ export function createTreeFactory(THREE, noise2) {
       // foliage.js sobre por qué no van mezcladas en un solo array).
       leafAnchors: fol ? fol.leafAnchors : new Float32Array(0),
       flowerAnchors: fol ? fol.flowerAnchors : new Float32Array(0),
+      // Vacío en toda especie que no fructifique (solo el manzano lo hace).
+      fruitAnchors: fol ? fol.fruitAnchors : new Float32Array(0),
       setGrowth(y) {
         bark.uniforms.uGrowth.value = y
         if (fol) fol.uniforms.uGrowth.value = y
@@ -76,6 +78,7 @@ export function createTreeFactory(THREE, noise2) {
         // mismo campo que usan el bosque y el resto de la ciudad.
         fol.uniforms.uLeaf.value = phen.leafShown ?? phen.leaf
         fol.uniforms.uFlower.value = phen.flowerShown ?? phen.flower
+        fol.uniforms.uFruit.value = phen.fruit ?? 0
         fol.uniforms.uAutumn.value = phen.autumn
       },
     }

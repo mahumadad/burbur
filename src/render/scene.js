@@ -14,6 +14,12 @@ import { createBugs, updateBugs, nearestBug } from '../sim/behaviors.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
 import { phenology } from '../sim/phenology.js'
 import { createLitter, tintLeafAnchors } from './tree/litter.js'
+import { createTreeFactory } from './tree/index.js'
+import { createTreeLife, updateTreeLife } from '../sim/treeLife.js'
+// Alias: el bosque ya usa el nombre `SPECIES` para las 6 especies de
+// criaturas-luciérnaga (ver más abajo); la tabla de especies de árbol se
+// importa con otro nombre para no chocar.
+import { SPECIES as TREE_SPECIES } from './tree/species.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -1061,6 +1067,66 @@ export function createScene(container, cfg, agentNames = []) {
       folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
       folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
   }
+
+  // ─── ÁRBOLES LUSH: abedul y manzano (Task 5) ────────────────────────────
+  // Se suman a los árboles de puntos que ya existen (arriba): NO los
+  // reemplazan. Se plantan lejos de ellos y entre sí usando `treeObstacles`,
+  // para que las dos estéticas no se encimen. El manzano es la única especie
+  // con fruto — el resto tiene `colors.fruit = null` y no aporta nada a
+  // `fruitAnchors`.
+  const arboles = createTreeFactory(THREE, noise2)
+  const lush = []
+  const fruitAnchors = [] // por fruto: x,y,z, color(3) = 6 floats
+  // Mismos años que el sakura de la ciudad (Task 4): plantón→joven→maduro→
+  // senescente→caído→rebrote.
+  const VIDA_CFG_LUSH = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+
+  // Punto de siembra para un árbol lush: dentro de la isla, lejos de los
+  // árboles de puntos (`treeObstacles`) y de los otros lush ya plantados.
+  // Se usa al sembrar y, más adelante, cuando uno rebrota.
+  function puntoLush() {
+    for (let guard = 0; guard < 120; guard++) {
+      const ta = rnd() * 6.2832
+      const tr = R * (0.22 + rnd() * 0.5)
+      const tx = Math.cos(ta) * tr, tz = Math.sin(ta) * tr
+      if (islandMask(tx, tz, R) < 0.3) continue
+      if (treeObstacles.some((o) => Math.hypot(tx / R - o.x, tz / R - o.z) < 0.18)) continue
+      if (lush.some((l) => Math.hypot(tx - l.x, tz - l.z) < 14)) continue
+      return { tx, tz, gy: G + terrainHeight(tx, tz) }
+    }
+    return null
+  }
+
+  const ESPECIES_BOSQUE = ['abedul', 'abedul', 'manzano']
+  for (const especie of ESPECIES_BOSQUE) {
+    const p = puntoLush()
+    if (!p) continue
+    const { tx, tz, gy } = p
+    const origin = new THREE.Vector3(tx, gy - 0.8, tz)
+    const t = arboles.createTree({
+      species: especie,
+      origin,
+      dir: new THREE.Vector3((rnd() - 0.5) * 0.4, 1, (rnd() - 0.5) * 0.4).normalize(),
+      rnd,
+    })
+    t.especie = especie
+    // Ciclo de vida (Task 4): arranca como plantón. `origin` queda guardado
+    // porque la posición real vive HORNEADA en la geometría (`growSkeleton`
+    // la usa como punto de partida); para reubicar el árbol al rebrotar,
+    // `group.position` se usa como un DESPLAZAMIENTO relativo a este punto.
+    t.vida = createTreeLife(VIDA_CFG_LUSH, rnd)
+    t.setGrowth(t.vida.growth)
+    t.origin = origin
+    t.perch = null   // un plantón no ofrece posadero (se registra al crecer)
+    t.x = tx; t.z = tz; t.gy = gy
+    scene.add(t.group)
+    lush.push(t)
+    treeObstacles.push({ x: tx / R, z: tz / R, r: 2.6 / R })
+    for (let i = 0; i < t.leafAnchors.length; i++) leafAnchors.push(t.leafAnchors[i])
+    for (let i = 0; i < t.flowerAnchors.length; i++) petalAnchors.push(t.flowerAnchors[i])
+    for (let i = 0; i < t.fruitAnchors.length; i++) fruitAnchors.push(t.fruitAnchors[i])
+  }
+
   const litter = createLitter({
     THREE, count: 320, ground: G, pointUniforms,
   })
@@ -1068,7 +1134,7 @@ export function createScene(container, cfg, agentNames = []) {
   const anclas = {
     leaf: new Float32Array((leafAnchors.length / 9) * 6),
     petal: new Float32Array(petalAnchors),
-    fruit: new Float32Array(0),
+    fruit: new Float32Array(fruitAnchors),
   }
   // Las anclas de hoja llevan el color YA VIRADO (verde→otoño). Se recalculan
   // cuando el otoño avanza de forma apreciable — no cada frame, que sería
@@ -1308,6 +1374,9 @@ export function createScene(container, cfg, agentNames = []) {
     const step = dt || 0.016
     clock += step
     pointUniforms.uT.value = clock
+    // Eventos del ciclo de vida de los árboles lush (caída), para el
+    // registro. Se combinan con `predations` justo antes de retornar.
+    const treeEvents = []
 
     // El ecosistema pinta el mundo: luz de la hora, niebla y neblina del clima.
     if (eco) {
@@ -1411,10 +1480,74 @@ export function createScene(container, cfg, agentNames = []) {
       foliageUniforms.uFlower.value = phen.flowerShown
       foliageUniforms.uAutumn.value = phen.autumn
       pointUniforms.uBloom.value = phen.meadow
+
+      // Árboles lush (Task 5): cada especie con su propia curva de fenología,
+      // cacheada por nombre para no recalcularla varias veces por frame. El
+      // follaje de puntos de los árboles viejos (arriba) sigue con
+      // DEFAULT_CURVE — no cambia.
+      const phenPorEspecie = {}
+      const phenDe = (e) => (phenPorEspecie[e] ||=
+        phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, TREE_SPECIES[e].curve))
+      const gust = (eco.rain || 0) + (eco.wind || 0) * 0.7
+      let lushLeafShed = 0, lushPetalShed = 0, fruitShed = 0, lushFruitPhen = 0
+      for (const t of lush) {
+        const ph = phenDe(t.especie)
+        const ev = updateTreeLife(t.vida, VIDA_CFG_LUSH, step, seasonT)
+        t.setGrowth(t.vida.growth)
+        // El vigor recorta la copa: un árbol viejo o recién nacido sostiene
+        // menos hoja/flor/fruto que uno maduro.
+        t.update({
+          ...ph,
+          leaf: ph.leaf * t.vida.vigor,
+          leafShown: ph.leafShown * t.vida.vigor,
+        }, clock)
+        if (t.vida.stage === 'fallen') t.group.rotation.z = t.vida.tilt * Math.PI * 0.42
+
+        lushLeafShed += ph.shed * t.vida.vigor
+        lushPetalShed += ph.petals * t.vida.vigor
+        // Solo el manzano fructifica (las demás tienen curve.fruit = null y
+        // ph.fruit da 0 siempre): el fruto cae A PLOMO (perfil `fruit` de
+        // litter.js), a diferencia de la hoja, que deriva de lado.
+        if (ph.fruit > 0) {
+          fruitShed += ph.fruit * (0.6 + gust * 4) * t.vida.vigor
+          lushFruitPhen += ph.fruit * t.vida.vigor
+        }
+
+        // Un plantón no ofrece posadero: se registra recién al dejar de serlo.
+        if (!t.perch && t.vida.stage !== 'sapling' && t.vida.stage !== 'fallen') {
+          t.perch = { x: t.x / R, z: t.z / R, h: TREE_SPECIES[t.especie].form.len * 0.55 }
+          poiPerch.push(t.perch)
+        }
+
+        if (ev.cayo) {
+          // Se va el posadero del árbol que cayó, y las aves que estaban ahí
+          // se sueltan: si no, quedan flotando en el vacío.
+          const k = poiPerch.indexOf(t.perch)
+          if (k >= 0) poiPerch.splice(k, 1)
+          for (const a of perchAgents) {
+            if (a.target === t.perch) { a.target = null; a.mode = 'roam'; a.timer = 0 }
+          }
+          t.perch = null
+          treeEvents.push({ type: 'treeLife', kind: 'fall' })
+        }
+
+        if (ev.rebroto) {
+          // Rebrota en otro punto del claro: la posición real vive horneada
+          // en la geometría, así que se mueve por DESPLAZAMIENTO relativo al
+          // origen con el que se generó el árbol.
+          const p = puntoLush()
+          if (p) {
+            t.group.position.set(p.tx - t.origin.x, (p.gy - 0.8) - t.origin.y, p.tz - t.origin.z)
+            t.x = p.tx; t.z = p.tz; t.gy = p.gy
+          }
+          t.group.rotation.z = 0
+        }
+      }
+
       anclasHoja(phen.autumn)
       litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
-        { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
-      lastPhen = phen
+        { leaf: phen.shed + lushLeafShed, petal: phen.petals + lushPetalShed, fruit: fruitShed }, anclas)
+      lastPhen = { leaf: phen.leaf, flower: phen.flower, fruit: lushFruitPhen }
     }
 
     mapPositions(step)
@@ -1488,6 +1621,7 @@ export function createScene(container, cfg, agentNames = []) {
     // Relámpago: el overlay se apaga rápido tras el destello.
     // El escenario cierra el frame: destello, respiración de la vista y render.
     stage.render(step)
+    if (treeEvents.length) predations.push(...treeEvents)
     return predations
   }
 
@@ -1513,12 +1647,15 @@ export function createScene(container, cfg, agentNames = []) {
     // árbol tenga puesto. Un árbol pelado en invierno no suelta nada.
     litter.burst('leaf', 40 * strength * lastPhen.leaf, anclas.leaf)
     litter.burst('petal', 50 * strength * lastPhen.flower, anclas.petal)
+    // El manzano suelta el fruto a plomo, no de lado como la hoja.
+    litter.burst('fruit', 24 * strength * lastPhen.fruit, anclas.fruit)
   }
 
-  // El desmontaje: libera la hojarasca y delega el resto (GPU + nodos del DOM)
-  // en el escenario compartido.
+  // El desmontaje: libera la hojarasca y los árboles lush, y delega el resto
+  // (GPU + nodos del DOM) en el escenario compartido.
   function dispose() {
     litter.dispose()
+    arboles.dispose()
     stage.dispose()
   }
 

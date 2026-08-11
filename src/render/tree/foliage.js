@@ -33,14 +33,17 @@ const mezclar = (a, b, t) => [
  * @param {Array} tips        salida de growSkeleton
  * @param {object} def        SPECIES[especie]
  * @param {THREE.Texture} atlas
- * @returns {{mesh, uniforms, geometry, material, leafAnchors, flowerAnchors}}
+ * @returns {{mesh, uniforms, geometry, material, leafAnchors, flowerAnchors, fruitAnchors}}
  *   `leafAnchors`: Float32Array de 9 floats por racimo de hoja — posición(3) +
  *   color verde(3) + color de otoño(3) — mismo formato que consume
  *   `tintLeafAnchors` de litter.js.
  *   `flowerAnchors`: Float32Array de 6 floats por racimo de flor — posición(3)
  *   + color(3) — listo para `litter.update`/`litter.burst`.
+ *   `fruitAnchors`: Float32Array de 6 floats por fruto — mismo formato que
+ *   `flowerAnchors`. Vacío si la especie no fructifica (`def.colors.fruit`
+ *   nulo, como en todas menos el manzano).
  *   Van separadas (y no mezcladas en un solo array) porque `litter` tiene un
- *   pool distinto para hoja y para pétalo, con formas y perfiles de caída
+ *   pool distinto para hoja, pétalo y fruto, con formas y perfiles de caída
  *   distintos: si se mezclaran, a veces caería un "pétalo" con forma de hoja
  *   verde, o una "hoja" rosada.
  */
@@ -56,13 +59,16 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
 
   const leafAnchors = []
   const flowerAnchors = []
+  const fruitAnchors = []
 
-  const celdaHoja = [0, 0], celdaFlor = [0.5, 0]
+  const celdaHoja = [0, 0], celdaFlor = [0.5, 0], celdaFruto = [0, 0.5]
   const cLeafLo = def.colors.leaf[0], cLeafHi = def.colors.leaf[1]
   const autumnPar = def.colors.autumn || def.colors.leaf
   const cAutLo = autumnPar[0], cAutHi = autumnPar[1]
   const florPar = def.colors.flower || [[1, 1, 1], [1, 1, 1]]
   const cFlorLo = florPar[0], cFlorHi = florPar[1] || florPar[0]
+  const frutoPar = def.colors.fruit || [[1, 1, 1], [1, 1, 1]]
+  const cFrutoLo = frutoPar[0], cFrutoHi = frutoPar[1] || frutoPar[0]
 
   for (let i = 0; i < n; i++) {
     const t = tips[(i * 7919) % tips.length]   // barajado determinista
@@ -73,15 +79,22 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     iYear[i] = t.year
     iScale[i] = 1.1 + rnd() * 0.9
     iRot[i] = rnd() * 6.2832
-    // Una fracción de los racimos son de FLOR; el resto de hoja.
-    const esFlor = !!def.colors.flower && rnd() < (def.flowerRatio || 0.35)
-    iCell[i * 2] = esFlor ? celdaFlor[0] : celdaHoja[0]
-    iCell[i * 2 + 1] = esFlor ? celdaFlor[1] : celdaHoja[1]
+    // Reparto: flor, fruto y hoja. La flor y el fruto nunca se dibujan a la
+    // vez porque sus densidades (uFlower/uFruit) no se solapan en el año.
+    const r = rnd()
+    const esFlor = !!def.colors.flower && r < (def.flowerRatio || 0.35)
+    const esFruto = !esFlor && !!def.colors.fruit &&
+      r < (def.flowerRatio || 0.35) + (def.fruitRatio || 0.12)
+    iCell[i * 2] = esFlor ? celdaFlor[0] : esFruto ? celdaFruto[0] : celdaHoja[0]
+    iCell[i * 2 + 1] = esFlor ? celdaFlor[1] : esFruto ? celdaFruto[1] : celdaHoja[1]
 
     const px = iPos[i * 3], py = iPos[i * 3 + 1], pz = iPos[i * 3 + 2]
     if (esFlor) {
       const c = mezclar(cFlorLo, cFlorHi, rnd())
       flowerAnchors.push(px, py, pz, c[0], c[1], c[2])
+    } else if (esFruto) {
+      const c = mezclar(cFrutoLo, cFrutoHi, rnd())
+      fruitAnchors.push(px, py, pz, c[0], c[1], c[2])
     } else {
       const g = rnd()
       const verde = mezclar(cLeafLo, cLeafHi, g)
@@ -103,6 +116,7 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     uGrowth: { value: 0 },
     uLeaf: { value: 0 },
     uFlower: { value: 0 },
+    uFruit: { value: 0 },
     uAutumn: { value: 0 },
     uAutumnCol: { value: new THREE.Color(...cAutLo) },
   }
@@ -112,14 +126,16 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     vertexShader: `
       attribute vec3 iPos; attribute float iYear; attribute float iScale;
       attribute float iRot; attribute vec2 iCell;
-      uniform float uT, uGrowth, uLeaf, uFlower;
-      varying vec2 vUv; varying float vFlor; varying float vFade;
+      uniform float uT, uGrowth, uLeaf, uFlower, uFruit;
+      varying vec2 vUv; varying float vFlor; varying float vFruto; varying float vFade;
       void main() {
         // ¿Ya le tocó a esta rama? (crecimiento acumulativo)
         float vivo = smoothstep(iYear, iYear + 1.0, uGrowth);
         vFlor = step(0.25, iCell.x);
-        // Densidad estacional: la hoja sigue uLeaf, la flor sigue uFlower.
-        float dens = mix(uLeaf, uFlower, vFlor);
+        vFruto = step(0.25, iCell.y);
+        // Densidad estacional: la hoja sigue uLeaf, la flor uFlower, el fruto
+        // uFruit. Flor y fruto no se solapan en el año (ver phenology.js).
+        float dens = vFruto > 0.5 ? uFruit : mix(uLeaf, uFlower, vFlor);
         float k = vivo * dens;
         vFade = k;
         float s = iScale * k;
@@ -136,12 +152,13 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     fragmentShader: `
       precision mediump float;
       uniform sampler2D uTex; uniform float uAutumn; uniform vec3 uAutumnCol;
-      varying vec2 vUv; varying float vFlor; varying float vFade;
+      varying vec2 vUv; varying float vFlor; varying float vFruto; varying float vFade;
       void main() {
         vec4 t = texture2D(uTex, vUv);
         if (t.a < 0.35 || vFade < 0.02) discard;
-        // Solo la HOJA vira en otoño; la flor conserva su color.
-        vec3 c = mix(t.rgb, uAutumnCol * (0.6 + 0.6 * t.g), uAutumn * (1.0 - vFlor));
+        // Solo la HOJA vira en otoño; la flor y el fruto conservan su color.
+        float esHoja = 1.0 - max(vFlor, vFruto);
+        vec3 c = mix(t.rgb, uAutumnCol * (0.6 + 0.6 * t.g), uAutumn * esHoja);
         gl_FragColor = vec4(c, t.a);
       }`,
   })
@@ -152,5 +169,6 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     mesh, uniforms, geometry: geo, material: mat,
     leafAnchors: new Float32Array(leafAnchors),
     flowerAnchors: new Float32Array(flowerAnchors),
+    fruitAnchors: new Float32Array(fruitAnchors),
   }
 }
