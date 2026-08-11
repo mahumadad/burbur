@@ -755,62 +755,115 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   Dn()
 
-  // ─── kn: FLORES — puerto fiel de la ESTRUCTURA; helpers reconstruidos ─────
-  // El bundle real llama `it(x,y,z,size,color,sway)` (flor con tallo, con
-  // mecido si sway=1), `tt(x,y,z,color,size)` (flor/pétalo suelto sin
-  // tallo, un solo punto) y `Ft(x,z,size,y)` (arbusto interior de manzana)
-  // — pero ninguna de las tres, ni `rt()` (color de flor al azar) ni `Be`
-  // (paleta con nombre cream/orange/red/yellow), están definidas en el
-  // fragmento del bundle disponible (`.superpowers/port/dn-kn-an-real.min.js`):
-  // solo se ven sus LLAMADAS. La ESTRUCTURA de `kn` (conteos, radios, gates
-  // de colocación, orden de `rnd()`) es puerto VERBATIM; `it`/`tt`/`Ft`/`rt`/
-  // `Be` son reconstrucciones que enrutan por el sistema compartido `draw`
-  // (tallo=línea, cabeza/pétalo=punto), coherentes con el patrón ya
-  // establecido en el bosque (`flower()` de scene.js) pero sin inventar la
-  // paleta a ciegas: `rt()` reusa el MISMO arreglo de 5 colores que el
-  // bundle sí deja verbatim para el "estallido" de pétalos (`oe([[...]])`
-  // en el bucle de arbustos florecidos); `Be` aproxima cream/orange/red/
-  // yellow con tonos cálidos consistentes con `BUILDING_PALETTE`.
-  const FLOWER_PALETTE = [
-    [0.16, 0.30, 0.98],
-    [1, 0.22, 0.12],
-    [1, 0.85, 0.22],
-    [0.97, 0.97, 1],
-    [1, 0.55, 0.10],
-  ]
+  // ─── kn: FLORES — puerto fiel, helpers REALES ──────────────────────────
+  // `.superpowers/port/flora-helpers-real.min.js` y `Be-colors-real.min.js`
+  // extrajeron el símbolo equivocado (interno de THREE.WebGLRenderer, no la
+  // ciudad). Los `tt`/`nt`/`rt`/`it`/`Be`/`Ve`/`We`/`Ue`/`He` reales están
+  // en el propio bundle (`murmur-bundle.js`, offset ~593587 para `Be`, con
+  // `tt`/`rt`/`it` a continuación inmediata en el MISMO closure de ciudad —
+  // confirmado porque `Wt=62`, `Zt=[]`, `On`/`En`/`kn` viven en el mismo
+  // tramo, offsets 605752–632019). Portados TEXTUAL (mismo orden de
+  // `rnd()`, mismos parámetros):
+  //   Be={orange,orange2,amber,yellow,salmon,pink,dusty,cream,red} (paleta
+  //   de flor), Ve=lista ponderada de nombres de Be, We/Ue/He=degradado de
+  //   tallo (marrón oscuro→tostado→crema — pasto seco urbano, NO el verde
+  //   del bosque). `it(x,y,z,r,paleta,mul)` = tallo (2 líneas We→Ue→He) +
+  //   cabeza (1 punto, 85% color de paleta / 15% Be al azar) o racimo
+  //   (v=2..4, 80/20). `tt(x,y,z,color,size)` = punto suelto. `rt()` =
+  //   paleta de 3 [color,color,color2] (2/3 un color, 1/3 acento), igual
+  //   patrón que `patchPalette()` del bosque (scene.js). `Ft(x,z,size,y)`
+  //   = arbusto de bayas blancas (idéntico a `berryBush`/`berry` de
+  //   scene.js, con nombres propios de ciudad).
   const Be = {
-    cream: [0.99, 0.92, 0.78],
-    orange: [1, 0.55, 0.12],
-    red: [0.95, 0.18, 0.14],
-    yellow: [1, 0.85, 0.15],
+    orange: [1, 0.52, 0.08],
+    orange2: [0.94, 0.4, 0.04],
+    amber: [1, 0.68, 0.2],
+    yellow: [1, 0.83, 0.3],
+    salmon: [1, 0.62, 0.44],
+    pink: [0.96, 0.62, 0.66],
+    dusty: [0.88, 0.5, 0.56],
+    cream: [0.96, 0.92, 0.76],
+    red: [0.93, 0.2, 0.12],
   }
-  function rt() { return pick(FLOWER_PALETTE) }
-  // Flor con tallo: 2 tramos de línea (base→medio→punta, degradado hacia el
-  // color de la cabeza) + cabeza como punto. `sway` habilita el mecido del
-  // shader de puntos (fase aleatoria), igual que el pasto/flora del bosque.
-  function it(x, y, z, size, color, sway) {
-    const h = (1.3 + rnd() * 1.5) * size
-    const ang = rnd() * 6.2832
-    const lean = (0.3 + rnd() * 0.5) * size
-    const lx = Math.cos(ang) * lean, lz = Math.sin(ang) * lean
-    const mx = x + lx * 0.4, my = y + h * 0.55, mz = z + lz * 0.4
-    const tx = x + lx, ty = y + h, tz = z + lz
-    const stemLo = [color[0] * 0.3, color[1] * 0.38, color[2] * 0.22]
-    const stemMid = [color[0] * 0.55, color[1] * 0.6, color[2] * 0.4]
-    draw.pushLine(x, y, z, mx, my, mz, stemLo, stemMid)
-    draw.pushLine(mx, my, mz, tx, ty, tz, stemMid, color)
-    draw.pushPoint(tx, ty + 0.05 * size, tz, color, (0.4 + rnd() * 0.3) * size, sway ? rnd() : 0)
+  const Ve = ['orange', 'orange', 'orange2', 'amber', 'amber', 'yellow', 'salmon', 'pink', 'dusty', 'cream', 'cream']
+  const We = [0.29, 0.26, 0.17]
+  const Ue = [0.62, 0.55, 0.38]
+  const He = [0.88, 0.8, 0.58]
+  function rt() {
+    const c1 = Be[Ve[(rnd() * Ve.length) | 0]]
+    return [c1, c1, Be[Ve[(rnd() * Ve.length) | 0]]]
+  }
+  // Flor con tallo: 2 tramos de línea (base→medio→punta, degradado
+  // We→Ue→He) + cabeza (punto único, 85/15) o racimo (v=2..4, 80/20).
+  // `a` es el multiplicador de inclinación del tallo (no un flag de mecido).
+  function it(x, y, z, r, i, a) {
+    const o = (3 + rnd() * 3.6) * r
+    const s0 = rnd() * 6.2832
+    const c = (0.5 + rnd() * 1.3) * r * (a || 1)
+    const lx = Math.cos(s0) * c, lz = Math.sin(s0) * c
+    const mx = x + lx * 0.32, my = y + o * 0.55, mz = z + lz * 0.32
+    const tx = x + lx, ty = y + o, tz = z + lz
+    draw.pushLine(x, y, z, mx, my, mz, We, Ue)
+    draw.pushLine(mx, my, mz, tx, ty, tz, Ue, He)
+    const base = i[(rnd() * i.length) | 0]
+    const v = rnd() < 0.42 ? 2 + ((rnd() * 3) | 0) : 1
+    if (v === 1) {
+      tt(tx, ty + 0.1 * r, tz, rnd() < 0.85 ? base : Be[Ve[(rnd() * Ve.length) | 0]], (0.45 + rnd() * 0.5) * r)
+    } else {
+      for (let k = 0; k < v; k++) {
+        const b = rnd() * 6.2832
+        const xr = (0.5 + rnd() * 1.2) * r
+        const yr = (0.3 + rnd() * 1.0) * r
+        const cx = tx + Math.cos(b) * xr, cy = ty + yr, cz = tz + Math.sin(b) * xr
+        draw.pushLine(tx, ty, tz, cx, cy, cz, Ue, He)
+        tt(cx, cy, cz, rnd() < 0.8 ? base : Be[Ve[(rnd() * Ve.length) | 0]], (0.35 + rnd() * 0.4) * r)
+      }
+    }
   }
   // Pétalo/flor suelta sin tallo: un único punto.
   function tt(x, y, z, color, size) {
     draw.pushPoint(x, y, z, color, size, 0)
   }
-  // Arbusto interior de manzana: un punto grande con tono de pasto (reusa
-  // `ze`); el bundle no le pasa color propio.
-  function Ft(x, z, size, y) {
-    const c = [0, 0, 0]
-    ze(0.2 + rnd() * 0.35, c)
-    draw.pushPoint(x, y, z, c, size, 0)
+  // Arbusto interior de manzana: bayas blancas — idéntico a
+  // `berryBush`/`berry` del bosque (scene.js), solo renombrado a `Ft`
+  // (nombre del bundle) y enrutado por `draw` de ciudad.
+  function Ft(x, z, n, r) {
+    const y0 = r === undefined ? ln(x, z) - 0.9 : r
+    const a = rnd() * 6.2832
+    const o = 0.1 + rnd() * 0.4
+    const s = Math.sin(o) * Math.cos(a)
+    const c = Math.cos(o)
+    const l = Math.sin(o) * Math.sin(a)
+    const u = (2 + rnd() * 2.8) * n
+    const px = x + s * u * 0.55 + (rnd() - 0.5) * 0.5
+    const py = y0 + c * u * 0.55
+    const pz = z + l * u * 0.55 + (rnd() - 0.5) * 0.5
+    draw.pushLine(x, y0, z, px, py, pz, [1, 1, 1], [1, 1, 1])
+    function g(gx, gy, gz) {
+      const r2 = rnd()
+      tt(gx, gy, gz, r2 < 0.72 ? [1, 0.13 + rnd() * 0.06, 0.08] : r2 < 0.9 ? [1, 0.45, 0.1] : [0.97, 0.97, 1], 0.24 + rnd() * 0.24)
+    }
+    const tx = x + s * u + (rnd() - 0.5) * 0.9
+    const ty = y0 + c * u
+    const tz = z + l * u + (rnd() - 0.5) * 0.9
+    draw.pushLine(px, py, pz, tx, ty, tz, [1, 1, 1], [1, 1, 1])
+    g(tx, ty, tz)
+    const branches = 1 + ((rnd() * 3) | 0)
+    for (let bIdx = 0; bIdx < branches; bIdx++) {
+      const S = 0.45 + rnd() * 0.5
+      const cx = x + (px - x) * S + (tx - px) * Math.max(0, S - 0.5)
+      const cy = y0 + (py - y0) * S + (ty - py) * Math.max(0, S - 0.5)
+      const cz = z + (pz - z) * S + (tz - pz) * Math.max(0, S - 0.5)
+      const E = u * (0.22 + rnd() * 0.26)
+      const D = rnd() * 6.2832
+      const O = 0.5 + rnd() * 0.7
+      const kx = cx + Math.sin(O) * Math.cos(D) * E
+      const ky = cy + Math.cos(O) * E
+      const kz = cz + Math.sin(O) * Math.sin(D) * E
+      draw.pushLine(cx, cy, cz, kx, ky, kz, [1, 1, 1], [1, 1, 1])
+      g(kx, ky, kz)
+      if (rnd() < 0.35) g(cx, cy, cz)
+    }
   }
   // Siembra `n` flores con tallo en un disco de radio `r` alrededor de
   // (cx,cz), evitando calle y edificios.
@@ -874,7 +927,7 @@ export function createCityScene(container, cfg, agentNames = []) {
         const bx = o.cx + Math.cos(g) * (o.hx - 3) * rnd()
         const bz = o.cz + Math.sin(g) * (o.hz - 3) * rnd()
         if (nn(o, bx, bz) > -1.5) continue
-        const y = pick(FLOWER_PALETTE)
+        const y = pick([[0.16, 0.30, 0.98], [1, 0.22, 0.12], [1, 0.85, 0.22], [0.97, 0.97, 1], [1, 0.55, 0.10]])
         const b = Math.round((14 + rnd() * 22) * e)
         for (let x = 0; x < b; x++) {
           const S = rnd() * 6.2832
@@ -1622,6 +1675,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       a.vel.z += Math.sin(a.wanderAng) * 4.5 * step * T * E
 
       const k = 5.2
+      const boundR = Wt * 1.7 // `A` real (city-agents-real.min.js, rama `p.world==='city'`): contención radial de la cola de `Rn`
       let targetY
 
       if (a.dweller) {
@@ -1757,18 +1811,29 @@ export function createCityScene(container, cfg, agentNames = []) {
       a.vel.y *= 1 - 2.2 * step
       if (a.state === 'rest') { a.vel.x *= 1 - 1.8 * step; a.vel.z *= 1 - 1.8 * step }
 
-      // Integración final: la fuente real (`city-agents-real.min.js`) se
-      // corta exactamente aquí (termina a mitad de "p.world===`pond`"). Se
-      // aproxima con arrastre horizontal + tope de velocidad por
-      // `speedScale`, el mismo patrón de arrastre/tope que usa el resto del
-      // proyecto (`sim/wander.js`) — es la ÚNICA parte de `Rn` que no pudo
-      // portarse verbatim por falta de fuente.
-      const drag = 1 - 2 * step
-      a.vel.x *= drag
-      a.vel.z *= drag
-      const sp = Math.hypot(a.vel.x, a.vel.z)
-      const maxSp = 9 * a.speedScale
-      if (sp > maxSp) { const f = maxSp / sp; a.vel.x *= f; a.vel.z *= f }
+      // Cola real de `Rn` (murmur-bundle.js, offset ~643798, justo después de
+      // las ramas por mundo): contención radial contra `boundR` (=`A`, el
+      // límite propio de ciudad `Wt*1.7` fijado junto a `k=5.2`), arrastre
+      // GENERAL 1-0.6*step (se suma al arrastre de "rest" de arriba, y pega
+      // a los TRES ejes vía `vel.multiplyScalar`, no solo x/z), tope de
+      // velocidad `7*p.speed*speedScale` (`p.speed=1.8` es una constante fija
+      // del bundle — no hay control de UI que la reasigne — así que el tope
+      // real es `12.6*speedScale`, sobre el largo 3D del vector) e
+      // integración por `addScaledVector`. Reemplaza la aproximación previa
+      // (arrastre 1-2*step solo horizontal + tope 9*speedScale en 2D).
+      const distC = Math.hypot(pos.x, pos.z)
+      if (distC > boundR) {
+        const pull = (distC - boundR) * 0.6 * step / distC
+        a.vel.x -= pos.x * pull
+        a.vel.z -= pos.z * pull
+      }
+      const genDrag = 1 - 0.6 * step
+      a.vel.x *= genDrag
+      a.vel.y *= genDrag
+      a.vel.z *= genDrag
+      const maxSp = 7 * 1.8 * a.speedScale
+      const sp = Math.hypot(a.vel.x, a.vel.y, a.vel.z)
+      if (sp > maxSp) { const f = maxSp / sp; a.vel.x *= f; a.vel.y *= f; a.vel.z *= f }
 
       pos.x += a.vel.x * step
       pos.y += a.vel.y * step
