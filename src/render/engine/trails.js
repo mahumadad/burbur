@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { createPointCloud } from './points.js'
 
 // Estelas: puntos de tamaño-mundo que persisten y se desvanecen.
-export function createTrails(scene, n, agentColors, rc, pointMaterial) {
+export function createTrails(scene, n, agentColors, rc, pointMaterial, yOffset = 1.2) {
   const TRAIL = rc.trailLen
   const cloud = createPointCloud(n * TRAIL, pointMaterial)
   const { pos: tPos, col: tCol, size: tSize } = cloud
@@ -24,7 +24,7 @@ export function createTrails(scene, n, agentColors, rc, pointMaterial) {
       for (let i = 0; i < n; i++) {
         const slot = (i * TRAIL + tHead) * 3
         tPos[slot] = worldPos[i * 3]
-        tPos[slot + 1] = worldPos[i * 3 + 1] - 1.2
+        tPos[slot + 1] = worldPos[i * 3 + 1] - yOffset
         tPos[slot + 2] = worldPos[i * 3 + 2]
         tSize[i * TRAIL + tHead] = rc.trailSize * 0.17 // puntos un poco más gruesos (paridad murmur)
       }
