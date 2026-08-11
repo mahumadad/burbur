@@ -52,6 +52,14 @@ function shadeVertices(geo, tint, seed) {
   return geo
 }
 
+// _n(geo, tint, seed) del original, expuesto para geometrías THREE crudas
+// (Cylinder/Box/Icosahedron) fuera del acumulador de cajas — lo usa `Tn`
+// (escombros/adoquines) del port de city.js. Misma función que usa `finish`
+// internamente para el estilo sombreado (false).
+export function shadeGeometry(geo, tint, seed) {
+  return shadeVertices(geo, tint, seed)
+}
+
 /**
  * Crea un acumulador de cajas (puerto de gn). `rnd` es inyectable para que
  * el liquen/sombreado sea determinista en tests o por-mundo.

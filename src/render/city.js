@@ -3,7 +3,7 @@ import { createStage } from './stage.js'
 import { createDraw } from './engine/points.js'
 import { cityGrid } from './cityGrid.js'
 import { fbm } from './noise.js'
-import { createBoxBuilder } from './boxbuilder.js'
+import { createBoxBuilder, rgbToHex, shadeGeometry } from './boxbuilder.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -119,6 +119,14 @@ export function createCityScene(container, cfg, agentNames = []) {
       const p = placed[r]
       if (Math.abs(x - p.cx) < p.hx + m && Math.abs(z - p.cz) < p.hz + m) return true
     }
+    return false
+  }
+  // `xn(x,z)` del original: ¿(x,z) está cerca de una calle? (dist a algún
+  // corte de calle Jt/Yt < Gt*.85). La usa el mobiliario (Sn/Cn/wn) para
+  // pegarse al borde de la manzana que da a la calle.
+  function xn(x, z) {
+    for (let n = 0; n < cutsX.length; n++) if (Math.abs(x - cutsX[n]) < Gt * 0.85) return true
+    for (let n = 0; n < cutsZ.length; n++) if (Math.abs(z - cutsZ[n]) < Gt * 0.85) return true
     return false
   }
   // `fn(x,z)` del original: proximidad (0..1) al edificio más cercano de
@@ -440,212 +448,189 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   placeTowers()
 
-  // ─── MOBILIARIO BAJO (Sn/wn, interpretación provisoria; port real en P5) ─
-  {
-    // Cachés por tinte: la paleta tiene solo 6 colores, así que se reusa un
-    // material de losa y uno de wireframe por tinte en vez de crear uno por
-    // losa/torre (con ~12 bloques × hasta 2 torres × varios pisos, crear un
-    // material por losa dispararía el conteo sin cambiar el look).
-    const slabMatCache = new Map()
-    const wireMatCache = new Map()
-    function slabMaterial(tint) {
-      let m = slabMatCache.get(tint)
-      if (!m) {
-        m = new THREE.MeshBasicMaterial({
-          color: new THREE.Color(tint[0], tint[1], tint[2]),
-          transparent: true, opacity: 0.13,
-          blending: THREE.AdditiveBlending, depthWrite: false, fog: true,
-        })
-        slabMatCache.set(tint, m)
+  // ─── Sn: GRÚAS/CANTILEVER — puerto fiel ────────────────────────────────
+  // 3–6 estructuras (poste + mástil + brazo angulado + riostra diagonal +
+  // remates en la punta) pegadas al borde de una manzana que da a la
+  // calle. Se arman con el box builder y se sombrean por vértice
+  // (`finish(tint, false)`), igual que las grúas del bundle real.
+  function Sn() {
+    const count = 3 + ((rnd() * 3) | 0) // 3..6
+    let built = 0, tries = 0
+    while (built < count && tries++ < 90) {
+      const block = blocks[(rnd() * blocks.length) | 0]
+      const i = rnd() < 0.5 ? -1 : 1
+      const a = rnd() < 0.5 ? -1 : 1
+      let ox = block.cx + i * (block.hx - block.cr * 0.55)
+      let oz = block.cz + a * (block.hz - block.cr * 0.55)
+      if (nn(block, ox, oz) > -0.7) {
+        ox = block.cx + i * (block.hx - block.cr * 0.9)
+        oz = block.cz + a * (block.hz - block.cr * 0.9)
       }
-      return m
+      if (!xn(ox, oz) || un(ox, oz, 2.5)) continue
+      const p = createBoxBuilder(rnd)
+      const l = 13 + rnd() * 6      // altura total del poste
+      const u = 8 + rnd() * 5       // alcance horizontal del brazo
+      const d = 4.5 + rnd() * 2.5   // caída del brazo desde la punta del mástil
+      p.box(0.8, l * 0.55, 0.8, 0, l * 0.275, 0)
+      p.box(0.55, l * 0.5, 0.55, 0, l * 0.75, 0)
+      const armLen = Math.hypot(u, d)
+      const armAngle = Math.atan2(d, u)
+      p.box(armLen, 0.32, 0.32, u * 0.5, l - d * 0.5, 0, -armAngle)
+      const bm = u * 0.5, bh = l * 0.45 - d * 0.5
+      p.box(Math.hypot(bm, bh), 0.22, 0.22, u * 0.25, (l * 0.55 + l - d * 0.5) / 2, 0, Math.atan2(bh, bm))
+      p.box(0.9, 1.2, 0.9, u, l - d - 0.55, 0)
+      p.box(0.16, 1.2, 0.16, u, l - d - 1.7, 0)
+      const group = p.finish([0.93, 0.9, 0.84], false)
+      group.rotation.y = Math.atan2(-a, i)
+      group.position.set(ox, ln(ox, oz), oz)
+      scene.add(group)
+      dustAvoid.push({ x: ox, z: oz, r: 1.5 })
+      built++
     }
-    function wireMaterial(tint) {
-      let m = wireMatCache.get(tint)
-      if (!m) {
-        m = new THREE.LineBasicMaterial({
-          color: new THREE.Color(tint[0] * 0.6, tint[1] * 0.6, tint[2] * 0.6),
-          transparent: true, opacity: 0.2, fog: true,
-        })
-        wireMatCache.set(tint, m)
-      }
-      return m
-    }
-
-    // Geometría de losa compartida: un cubo unitario escalado por instancia
-    // (mesh.scale) en vez de una BoxGeometry nueva por losa — mismo look,
-    // muchas menos geometrías en memoria. El wireframe se deriva del mismo
-    // cubo y se escala igual; sus 8 vértices (esquinas del cubo unitario)
-    // son la base de los puntos "matrix" por losa.
-    const unitBox = new THREE.BoxGeometry(1, 1, 1)
-    const unitWire = new THREE.WireframeGeometry(unitBox)
-    const UNIT_CORNERS = [
-      [-0.5, -0.5, -0.5], [0.5, -0.5, -0.5], [0.5, 0.5, -0.5], [-0.5, 0.5, -0.5],
-      [-0.5, -0.5, 0.5], [0.5, -0.5, 0.5], [0.5, 0.5, 0.5], [-0.5, 0.5, 0.5],
-    ]
-
-    const TOWER_INSET = 4.5   // margen desde el borde de la manzana (pasto/flores de B7)
-    const FLOOR_GAP = 3.2     // separación vertical entre pisos (centro a centro)
-    const SLAB_THICK = 1.0    // grosor de cada losa
-    const TAPER_MIN = 0.55    // angostamiento del piso más alto vs. la base (setback)
-
-    // Apila `floors` losas desde `baseY`, todas del mismo tinte, reusando la
-    // caché de materiales y el cubo unitario compartido. Devuelve la altura
-    // del techo (Y del borde superior de la última losa). Factor común entre
-    // las torres (bn/yn) y la estructura secundaria baja (Sn edificios bajos,
-    // wn mobiliario): ninguna de las dos duplica la maquinaria de materiales
-    // ni geometría, solo varían footprint, cantidad de pisos y tinte.
-    function stackSlabs(cx, cz, w, d, floors, baseY, tint, taperMin = TAPER_MIN) {
-      const mat = slabMaterial(tint)
-      const wmat = wireMaterial(tint)
-      let roofY = baseY
-      for (let i = 0; i < floors; i++) {
-        const tFloor = floors > 1 ? i / (floors - 1) : 0
-        const taper = 1 - (1 - taperMin) * tFloor
-        const sw = w * taper
-        const sd = d * taper
-        const y = baseY + SLAB_THICK / 2 + i * FLOOR_GAP
-        // Jitter leve por piso: rompe el aspecto de bloque perfecto, ayuda a
-        // que el volumen se lea orgánico y se "derrita" hacia el suelo.
-        const px = cx + (rnd() * 2 - 1) * 0.3
-        const pz = cz + (rnd() * 2 - 1) * 0.3
-
-        const mesh = new THREE.Mesh(unitBox, mat)
-        mesh.position.set(px, y, pz)
-        mesh.scale.set(sw, SLAB_THICK, sd)
-        scene.add(mesh)
-
-        const wf = new THREE.LineSegments(unitWire, wmat)
-        wf.position.copy(mesh.position)
-        wf.scale.copy(mesh.scale)
-        scene.add(wf)
-
-        for (const [ux, uy, uz] of UNIT_CORNERS) {
-          draw.pushPoint(px + ux * sw, y + uy * SLAB_THICK, pz + uz * sd, tint, 0.28, 0)
-        }
-        roofY = y + SLAB_THICK / 2
-      }
-      return roofY
-    }
-
-    // `Sn` del original: 3–6 volúmenes bajos (1–2 pisos), offset aleatorio
-    // dentro de un bloque al azar. Mismo look de losa/matrix que las torres
-    // pero chicos; no se registran como percha (son mobiliario, no hito).
-    function buildLowBuilding() {
-      const block = pick(blocks)
-      const r = Math.min(block.hx, block.hz) * 2
-      const maxHalfX = Math.max(2, block.hx - TOWER_INSET)
-      const maxHalfZ = Math.max(2, block.hz - TOWER_INSET)
-      const w = Math.min(maxHalfX * 2, r * (0.2 + rnd() * 0.25))
-      const d = Math.min(maxHalfZ * 2, r * (0.2 + rnd() * 0.25))
-      const freeX = Math.max(0, maxHalfX - w / 2)
-      const freeZ = Math.max(0, maxHalfZ - d / 2)
-      const cx = block.cx + (rnd() * 2 - 1) * freeX
-      const cz = block.cz + (rnd() * 2 - 1) * freeZ
-      const floors = 1 + ((rnd() * 2) | 0) // 1–2 pisos
-      const blockTint = pick(BUILDING_PALETTE)
-      const tint = rnd() < 0.66 ? blockTint : pick(BUILDING_PALETTE)
-      stackSlabs(cx, cz, w, d, floors, we + Kt, tint)
-    }
-    function placeLowBuildings() {
-      const n = 3 + ((rnd() * 4) | 0) // 3..6
-      for (let i = 0; i < n; i++) buildLowBuilding()
-    }
-    placeLowBuildings()
-
-    // `wn` del original: 1–3 muebles urbanos, cajas bajas de un solo piso
-    // (sin taper) en tinte apagado — no deben competir en brillo con las
-    // torres, así que usan un gris neutro fijo en vez de la paleta viva.
-    const FURNITURE_TINT = [0.5, 0.52, 0.55]
-    function buildFurniture() {
-      const block = pick(blocks)
-      const w = 5.5 + rnd() * 1.5
-      const d = 3.4 + rnd() * 0.6
-      const maxHalfX = Math.max(2, block.hx - 2)
-      const maxHalfZ = Math.max(2, block.hz - 2)
-      const freeX = Math.max(0, maxHalfX - w / 2)
-      const freeZ = Math.max(0, maxHalfZ - d / 2)
-      const cx = block.cx + (rnd() * 2 - 1) * freeX
-      const cz = block.cz + (rnd() * 2 - 1) * freeZ
-      stackSlabs(cx, cz, w, d, 1, we + Kt, FURNITURE_TINT, 1)
-    }
-    function placeFurniture() {
-      const n = 1 + ((rnd() * 3) | 0) // 1..3
-      for (let i = 0; i < n; i++) buildFurniture()
-    }
-    placeFurniture()
   }
+  Sn()
 
-  // ─── FAROLAS: postes con foco de color cerca del bordillo ─────────────
-  // `Cn` del original: 3–7 por mundo, paleta exacta de 5 colores (§B.2 de
-  // la spec). El poste es una línea (oscura en la base, con el color de la
-  // luz arriba) y el foco es un punto más grande que los de las torres —
-  // visible pero secundario frente al glow apilado de los edificios.
-  {
+  // ─── Cn: FAROLAS — puerto fiel ─────────────────────────────────────────
+  // 3–7 postes ('flat', un solo color) con uno o dos paneles rectangulares
+  // de color (paleta exacta de 5) como MeshBasicMaterial plano, orientados
+  // hacia afuera de la manzana con `on` (gradiente del SDF).
+  function Cn() {
     const LAMP_COLORS = [
-      [0.16, 0.30, 0.98], // #294CFA
-      [1, 0.83, 0.20],    // #FFD433
-      [1, 0.35, 0.55],    // #FF598C
-      [0.35, 0.90, 0.85], // #59E6D9
-      [1, 0.48, 0.09],    // #FF7A17
+      [0.16, 0.30, 0.98],
+      [1, 0.83, 0.20],
+      [1, 0.35, 0.55],
+      [0.35, 0.90, 0.85],
+      [1, 0.48, 0.09],
     ]
-    const POST_H_MIN = 5, POST_H_RANGE = 2
-    const lampMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, fog: true })
-    const n = 3 + ((rnd() * 5) | 0) // 3..7
-    for (let i = 0; i < n; i++) {
-      // Ubicación sobre el borde (bordillo) de un bloque al azar: un lado
-      // elegido al azar, punto a lo largo de ese lado también al azar.
-      const block = pick(blocks)
-      const edge = (rnd() * 4) | 0
-      let x, z
-      if (edge === 0) { x = block.cx + block.hx; z = block.cz + (rnd() * 2 - 1) * block.hz }
-      else if (edge === 1) { x = block.cx - block.hx; z = block.cz + (rnd() * 2 - 1) * block.hz }
-      else if (edge === 2) { z = block.cz + block.hz; x = block.cx + (rnd() * 2 - 1) * block.hx }
-      else { z = block.cz - block.hz; x = block.cx + (rnd() * 2 - 1) * block.hx }
-      const gy = ln(x, z) // exactamente en el borde ⇒ nivel de calle (we)
-      const postH = POST_H_MIN + rnd() * POST_H_RANGE
-      const col = pick(LAMP_COLORS)
-      const dim = [col[0] * 0.35, col[1] * 0.35, col[2] * 0.35]
-      draw.pushLine(x, gy, z, x, gy + postH, z, dim, col)
-      draw.pushPoint(x, gy + postH, z, col, 1.0, 0)
-    }
-    draw.finalizeLines(scene, lampMat)
-  }
-
-  // ─── CHARCOS: parches grises reflectantes en bordes de manzana ────────
-  // `Tn` del original: color exacto #B8BDC9 con vertexColors, apenas sobre
-  // el nivel de calle (`we`). El bundle no reveló una cantidad exacta para
-  // esta función (sin confirmar en la spec) — se eligió un puñado acorde
-  // al resto del mobiliario, no es un número de paridad.
-  {
-    const PUDDLE_COL = [0.72, 0.74, 0.79]
-    const puddleMat = new THREE.MeshBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.3, side: THREE.DoubleSide, fog: true,
-    })
-    const n = 4 + ((rnd() * 5) | 0) // 4..8, elección propia (ver comentario arriba)
-    for (let i = 0; i < n; i++) {
-      const block = pick(blocks)
-      const edge = (rnd() * 4) | 0
-      let cx, cz, alongX
-      if (edge === 0) { cx = block.cx + block.hx; cz = block.cz + (rnd() * 2 - 1) * block.hz * 0.6; alongX = false }
-      else if (edge === 1) { cx = block.cx - block.hx; cz = block.cz + (rnd() * 2 - 1) * block.hz * 0.6; alongX = false }
-      else if (edge === 2) { cz = block.cz + block.hz; cx = block.cx + (rnd() * 2 - 1) * block.hx * 0.6; alongX = true }
-      else { cz = block.cz - block.hz; cx = block.cx + (rnd() * 2 - 1) * block.hx * 0.6; alongX = true }
-      const pw = alongX ? 3 + rnd() * 2 : 1.6 + rnd()
-      const pd = alongX ? 1.6 + rnd() : 3 + rnd() * 2
-      const geo = new THREE.PlaneGeometry(pw, pd)
-      geo.rotateX(-Math.PI / 2)
-      const count = geo.attributes.position.count
-      const cols = new Float32Array(count * 3)
-      for (let v = 0; v < count; v++) {
-        cols[v * 3] = PUDDLE_COL[0]; cols[v * 3 + 1] = PUDDLE_COL[1]; cols[v * 3 + 2] = PUDDLE_COL[2]
+    const grad = { x: 0, z: 0 }
+    const count = 3 + ((rnd() * 4) | 0) // 3..7
+    let built = 0, tries = 0
+    while (built < count && tries++ < 110) {
+      const block = blocks[(rnd() * blocks.length) | 0]
+      const ang = rnd() * 6.2832
+      const x = block.cx + Math.cos(ang) * (block.hx - 1.8)
+      const z = block.cz + Math.sin(ang) * (block.hz - 1.8)
+      const dSdf = nn(block, x, z)
+      if (dSdf > -0.8 || dSdf < -3.6) continue
+      if (!xn(x, z) || un(x, z, 1.8)) continue
+      const p = createBoxBuilder(rnd)
+      const postH = 6 + rnd() * 3
+      p.box(0.3, postH, 0.3, 0, postH / 2, 0)
+      const group = p.finish([0.94, 0.92, 0.88], 'flat')
+      const pw = 2.6 + rnd() * 1.6, ph = 1.4 + rnd() * 0.8
+      const panel = new THREE.Mesh(
+        new THREE.BoxGeometry(pw, ph, 0.16, 3, 3, 1),
+        new THREE.MeshBasicMaterial({ color: rgbToHex(pick(LAMP_COLORS)) }),
+      )
+      panel.position.set(0, postH - ph * 0.5 - 0.1, 0)
+      group.add(panel)
+      if (rnd() < 0.5) {
+        const panel2 = new THREE.Mesh(
+          new THREE.BoxGeometry(pw * 0.6, ph * 0.65, 0.16, 3, 3, 1),
+          new THREE.MeshBasicMaterial({ color: rgbToHex(pick(LAMP_COLORS)) }),
+        )
+        panel2.position.set(0, postH - ph - 0.95, 0)
+        panel2.rotation.y = Math.PI / 2
+        group.add(panel2)
       }
-      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
-      const mesh = new THREE.Mesh(geo, puddleMat)
-      mesh.position.set(cx, we + 0.05, cz)
+      on(x, z, grad)
+      group.rotation.y = Math.atan2(grad.x, grad.z)
+      group.position.set(x, ln(x, z), z)
+      scene.add(group)
+      dustAvoid.push({ x, z, r: 1.35 })
+      built++
+    }
+  }
+  Cn()
+
+  // ─── wn: BANCOS/QUIOSCOS — puerto fiel ─────────────────────────────────
+  // 1–3 estructuras de asiento/quiosco ('flat', tono claro) con un techo
+  // rectangular naranja aparte. Orientadas con `on`, igual que las farolas.
+  function wn() {
+    const grad = { x: 0, z: 0 }
+    const count = 1 + ((rnd() * 2) | 0) // 1..3
+    let built = 0, tries = 0
+    while (built < count && tries++ < 90) {
+      const block = blocks[(rnd() * blocks.length) | 0]
+      const ang = rnd() * 6.2832
+      const x = block.cx + Math.cos(ang) * (block.hx - 3.2)
+      const z = block.cz + Math.sin(ang) * (block.hz - 3.2)
+      const dSdf = nn(block, x, z)
+      if (dSdf > -1.4 || dSdf < -4.2) continue
+      if (!xn(x, z) || un(x, z, 3)) continue
+      const p = createBoxBuilder(rnd)
+      const u = 5.5 + rnd() * 1.5 // ancho
+      const d = 3.4 + rnd() * 0.6 // profundidad
+      const f = 2.2
+      p.box(u, d * 0.82, 0.18, 0, d * 0.47, -f * 0.5)
+      p.box(0.18, d * 0.82, f, -u / 2 + 0.09, d * 0.47, 0)
+      p.box(0.18, d * 0.82, f, u / 2 - 0.09, d * 0.47, 0)
+      p.box(0.22, d, 0.22, -u / 2 + 0.14, d / 2, f * 0.42)
+      p.box(0.22, d, 0.22, u / 2 - 0.14, d / 2, f * 0.42)
+      p.box(u * 0.62, 0.16, 0.62, 0, 1.05, -f * 0.16)
+      const group = p.finish([0.86, 0.93, 0.96], 'flat')
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(u + 0.9, 0.24, f + 0.9, 4, 1, 3),
+        new THREE.MeshBasicMaterial({ color: rgbToHex([1, 0.52, 0.1]) }),
+      )
+      roof.position.set(0, d + 0.12, 0)
+      group.add(roof)
+      on(x, z, grad)
+      group.rotation.y = Math.atan2(grad.x, grad.z)
+      group.position.set(x, ln(x, z), z)
+      scene.add(group)
+      dustAvoid.push({ x, z, r: 3.2 })
+      built++
+    }
+  }
+  wn()
+
+  // ─── Tn: ESCOMBROS/ADOQUINES — puerto fiel ─────────────────────────────
+  // 1–3 solidos grises por manzana (cilindro, caja, o par de icosaedros
+  // apilados) pegados al borde interior, más 1–3 en el centro de calles.
+  // Sombreados por vértice con `shadeGeometry` (extracción de `_n`) y
+  // pintados con vertexColors — mismo mecanismo que las grúas (Sn).
+  function Tn() {
+    function place(geo, x, y, z, rotY) {
+      shadeGeometry(geo, [0.72, 0.74, 0.79], rnd() * 50)
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
+      mesh.position.set(x, y, z)
+      if (rotY) mesh.rotation.y = rotY
       scene.add(mesh)
     }
+    for (let t = 0; t < blocks.length; t++) {
+      const block = blocks[t]
+      const count = 1 + ((rnd() * 3) | 0) // 1..3
+      for (let i = 0; i < count; i++) {
+        const ang = rnd() * 6.2832
+        const x = block.cx + Math.cos(ang) * (block.hx - 2.2)
+        const z = block.cz + Math.sin(ang) * (block.hz - 2.2)
+        if (nn(block, x, z) > -1.2) continue
+        if (un(x, z, 1.2)) continue
+        const gy = ln(x, z)
+        const roll = rnd()
+        if (roll < 0.4) {
+          place(new THREE.CylinderGeometry(0.7, 0.85, 1.9, 9, 3), x, gy + 0.95, z, rnd() * 6.28)
+        } else if (roll < 0.7) {
+          place(new THREE.BoxGeometry(0.9, 2.3, 0.9, 2, 4, 2), x, gy + 1.15, z, rnd() * 6.28)
+        } else {
+          place(new THREE.IcosahedronGeometry(0.75, 1), x, gy + 0.8, z)
+          place(new THREE.IcosahedronGeometry(0.45, 1), x, gy + 1.85, z)
+        }
+        dustAvoid.push({ x, z, r: 1.2 })
+      }
+    }
+    const streetCount = 1 + ((rnd() * 3) | 0) // 1..3
+    for (let i = 0; i < streetCount; i++) {
+      const x = (rnd() * 2 - 1) * Wt * 0.8
+      const z = (rnd() * 2 - 1) * Wt * 0.8
+      const dSdf = an(x, z)
+      if (dSdf < 1 || dSdf > 3.2) continue
+      place(new THREE.CylinderGeometry(0.6, 0.7, 1.7, 9, 3), x, we + 0.85, z, rnd() * 6.28)
+      dustAvoid.push({ x, z, r: 1.3 })
+    }
   }
+  Tn()
 
   stage.setResizeHook((m) => { draw.uniforms.uProj.value = m.proj })
 
