@@ -24,6 +24,33 @@ export const WEATHER_ES = {
   'heavy rain': 'lluvia fuerte',
 }
 
+// Mundo CÉLULA: el "día" es el ciclo celular y el "clima" es el medio.
+export const CELL_PHASE_ES = {
+  'G1 early': 'G1 temprana',
+  'G1': 'G1',
+  'G1/S checkpoint': 'control G1/S',
+  'S phase': 'fase S',
+  'S late': 'S tardía',
+  'G2': 'G2',
+  'G2/M checkpoint': 'control G2/M',
+  'prophase': 'profase',
+  'metaphase': 'metafase',
+  'anaphase': 'anafase',
+  'telophase': 'telofase',
+  'cytokinesis': 'citocinesis',
+}
+
+export const CELL_WEATHER_ES = {
+  'nutrient rich': 'medio rico',
+  'serum starved': 'ayuno de suero',
+  'hypoxic': 'hipoxia',
+  'oxidative stress': 'estrés oxidativo',
+  'inflamed': 'inflamación',
+  'acidic': 'medio ácido',
+}
+Object.assign(PHASE_ES, CELL_PHASE_ES)
+Object.assign(WEATHER_ES, CELL_WEATHER_ES)
+
 export const phaseES = (p) => PHASE_ES[p] || p
 export const weatherES = (w) => WEATHER_ES[w] || w
 

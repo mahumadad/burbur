@@ -97,6 +97,61 @@ export const CONFIG = {
     droneRootHz: 55,
     volumes: { drone: -14, bed: -18, flash: -10 },
   },
+  // Mundo CÉLULA: un macrófago reptando sobre un sustrato, visto desde arriba.
+  // Ver docs/superpowers/specs/2026-08-11-diseno-mundo-celula.md
+  cell: {
+    membrane: {
+      verts: 128, baseR: 0.78, harmonics: 3, harmAmp: 0.05, harmSpeed: 0.12,
+      protrusionAmp: 0.30, protrusionWidth: 0.85, tailPinch: 0.16,
+      filoRate: 1.1, filoAmp: 0.15, filoWidth: 0.09, filoTtl: 2.2,
+      blebRate: 2.2, blebAmp: 0.20, blebWidth: 0.30, blebRise: 0.12, blebFall: 0.9,
+      relax: 0.16,
+    },
+    motility: {
+      turnRate: 0.5, bias: 1.0, noise: 0.9,
+      maxSpeed: 0.10, protrusionGain: 1.6, atpFloor: 0.3,
+    },
+    // ~44 microtúbulos visibles (una célula real tiene cientos; ver spec §4.2bis).
+    rails: {
+      count: 44, originX: 0.06, originZ: -0.04,
+      minLen: 0.28, maxLen: 0.72,
+      growRate: 0.045, shrinkRate: 0.26, catastrophe: 0.12, rescue: 0.4,
+    },
+    atp: { capacity: 26, speed: 0.42, arrive: 0.02, gainPerQuantum: 0.09, drain: 0.32 },
+    invaders: {
+      // cullRadius ajustado: con margen ancho el pool se satura y dejan de
+      // llegar invasores nuevos. Que se vayan pronto mantiene la rotación.
+      capacity: 6, spawnRadius: 1.25, cullRadius: 1.5,
+      bacteriumSpeed: 0.26, virionSpeed: 0.05,
+      runMin: 0.8, runMax: 1.4, tumbleMin: 0.08, tumbleMax: 0.14,
+      spawnEvery: 7,          // segundos entre llegadas
+    },
+    // Los organelos van SOBRE riel: pathPull alto, como las calles de la ciudad.
+    wander: {
+      density: 0.7, wanderTurn: 2.0, wanderPush: 0.022,
+      kickMin: 0.05, kickRange: 0.06, separation: 0.05, sepRadius: 0.07,
+      drag: 0.955, maxSpeed: 0.075, softR: 0.50, centerPull: 0.9, bound: 0.72,
+      obstaclePush: 3.0,
+      flowFreq: 4.2, flowPush: 0.075,   // el streaming domina sobre el paseo
+      // Riel de verdad, pero no soldadura: con pathPull muy alto los organelos
+      // se pegan a la línea exacta y parecen cuentas en un alambre.
+      pathPull: 0.22, pathRadius: 0.20,
+    },
+    // Densidades según los modelos de referencia (spec §4.2bis): el realismo
+    // es densidad molecular, no pocas formas grandes.
+    ribosomes: 6400,
+    substrateDots: 2600,
+    cortexStrands: 190,
+    lamelliMesh: 130,       // malla dendrítica del lamelipodio (segmentos máx)
+    adhesions: 30,
+    nucleusR: 0.30,
+    pores: 46,              // poros nucleares visibles (reales: miles)
+    channels: 22,           // proteínas de canal montadas en la membrana
+    glycans: 16,            // glicoproteínas (espirales del glicocálix)
+    ifLoops: 12,            // filamentos intermedios: jaula alrededor del núcleo
+    mtBeads: 8,             // cuentas de tubulina α/β visibles por microtúbulo
+    height: 3.2,            // altura de la lámina celular sobre el sustrato
+  },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos
     flowerPatches: 95,
