@@ -172,42 +172,51 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // el dither de corteza y la pelusa de musgo van encima. Rejilla en (u,v),
   // triángulos solo donde las 4 esquinas caen dentro del tronco. ────────────
   {
-    const NU = 96, NV = 30
+    const NU = 120, NV = 44
     const u0 = -halfLen - logR, u1 = halfLen + logR
     const pos = [], col = []
     const idx = []
     const cols = NV + 1
-    const vertOf = new Int32Array((NU + 1) * (NV + 1)).fill(-1)
     let vc = 0
+    // Rejilla COMPLETA (sin descartar celdas): fuera del radio del tronco la
+    // superficie no se corta — baja como FALDA por debajo del suelo, oculta por
+    // la hojarasca. Así el tronco cierra contra el suelo y no queda hueco.
     for (let i = 0; i <= NU; i++) {
       const u = u0 + (u1 - u0) * (i / NU)
-      const lr = logRAt(Math.max(-halfLen, Math.min(halfLen, u)))
+      const uc = Math.max(-halfLen, Math.min(halfLen, u))
+      const lr = logRAt(uc)
+      const over = Math.max(0, Math.abs(u) - halfLen)
       for (let j = 0; j <= NV; j++) {
-        const v = (-1 + 2 * (j / NV)) * (logR + 0.02)
-        // Borde SUAVE para el cuerpo sólido (no el irregular con ruido): así la
-        // malla no descarta celdas interiores y no quedan huecos negros. La
-        // silueta mordida queda para el dither/musgo de encima.
-        const over = Math.max(0, Math.abs(u) - halfLen)
-        if (Math.hypot(over, v) > logRAt(Math.max(-halfLen, Math.min(halfLen, u)))) continue
+        const v = (-1 + 2 * (j / NV)) * logR * 1.35
+        const rad = Math.hypot(over, v)
         const [x, z] = uvToWorld(u, v)
-        vertOf[i * cols + j] = vc++
-        pos.push(x * R, surfaceYUV(u, v), z * R)
-        // CORTEZA de verdad: pardo cálido con SURCOS longitudinales (bandas de v
-        // más oscuras, la textura fibrosa de la corteza) + moteado por ruido. Es
-        // la piel que se ve entre las matas de musgo; no un pardo plano.
+        let y
+        if (rad <= lr) {
+          y = Math.sqrt(Math.max(0, lr * lr - rad * rad)) * R * LOG_HEIGHT_SCALE + bump(u, v)
+        } else {
+          y = -(rad - lr) * R * 0.9        // falda: baja bajo el suelo
+        }
+        pos.push(x * R, y, z * R)
+        // CORTEZA texturada (inspirada en corteza real, no plana): RELIEVES
+        // claros y GRIETAS oscuras (dos escalas de ruido) + moteado de intemperie
+        // verdosa. Nada de pardo uniforme.
         const f = edgeFade(x, z)
-        const furrow = 0.6 + 0.4 * Math.abs(Math.sin(v / lr * 9 + noise2(u * 2, v) * 3))
-        const flank = Math.abs(v) / lr < 0.55 ? 1 : 0.7   // el lomo más claro que los costados
-        const shade = furrow * flank * (0.8 + 0.35 * noise2(u * 6 + 3, v * 6)) * f
-        col.push(C_BARK[0] * shade * 3.0, C_BARK[1] * shade * 3.0, C_BARK[2] * shade * 3.0)
+        const ridge = noise2(u * 3.1 - 2, v * 3.4 + 7)        // relieves anchos
+        const crack = noise2(u * 9 + 1, v * 11)               // grietas finas
+        const grain = 0.5 + 0.5 * Math.sin(u * 22 + noise2(u, v * 3) * 4) // fibra a lo largo
+        let shade = (0.35 + 0.75 * ridge) * (0.55 + 0.5 * crack) * (0.8 + 0.25 * grain) * f
+        if (rad > lr) shade *= 0.4                            // la falda, oscura
+        let cr = C_BARK[0] * shade * 3.4, cg = C_BARK[1] * shade * 3.2, cb = C_BARK[2] * shade * 2.8
+        const weather = noise2(u * 1.4 + 40, v * 1.4 - 8)     // manchas de intemperie
+        if (weather > 0.72 && rad <= lr) { cr *= 0.85; cg *= 1.15; cb *= 0.95 }
+        col.push(cr, cg, cb)
       }
     }
     for (let i = 0; i < NU; i++) {
       for (let j = 0; j < NV; j++) {
-        const a = vertOf[i * cols + j], b = vertOf[(i + 1) * cols + j]
-        const c = vertOf[i * cols + j + 1], d = vertOf[(i + 1) * cols + j + 1]
-        if (a >= 0 && b >= 0 && c >= 0) idx.push(a, b, c)
-        if (b >= 0 && d >= 0 && c >= 0) idx.push(b, d, c)
+        const a = i * cols + j, b = (i + 1) * cols + j
+        const c = i * cols + j + 1, d = (i + 1) * cols + j + 1
+        idx.push(a, b, c, b, d, c)
       }
     }
     const geo = new THREE.BufferGeometry()
@@ -241,7 +250,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const y = surfaceYUV(u, v) + 0.15
       const fade = edgeFade(x, z)
       // Musgo: parches en el flanco -v (húmedo), donde el ruido lo permite.
-      const mossN = noise2(u * 1.7 + 20, v * 2.3 + 9)
+      // Musgo en PARCHES, no en todo el tronco (un tronco real tiene manchones
+      // de musgo y zonas de corteza pelada). Ruido de baja frecuencia = manchas
+      // grandes; el flanco húmedo -v tiene más, el lomo seco menos.
+      const mossN = noise2(u * 0.9 + 20, v * 1.4 + 9)
       const lichenN = noise2(u * 3.3 - 12, v * 3.7 - 4)
       // Corteza DESPRENDIDA: parches donde ya se cayó y asoma la albura clara
       // — el rasgo más característico de un tronco en descomposición.
@@ -249,7 +261,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
       let col, size
       // El musgo cubre casi todo el lomo (un tronco caído en sombra húmeda), más
       // tupido en el flanco -v; la corteza y la tierra asoman donde ralea.
-      const mossThresh = v < -lr * 0.1 ? 0.36 : 0.5
+      const mossThresh = v < -lr * 0.1 ? 0.52 : 0.66
       if (mossN > mossThresh) {
         // MUSGO como PELUSA: matitas verticales cortas y densas — un tallo verde
         // oscuro en la base que aclara hacia la punta, con leve inclinación. Es
