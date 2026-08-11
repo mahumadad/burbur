@@ -18,17 +18,27 @@ export function createPerchers(n, cfg, rand = Math.random) {
 
 const lerp = (a, b, t) => a + (b - a) * t
 
-export function updatePerchers(agents, roamers, perches, cfg, dt, rand = Math.random) {
+// `shelter` (0..1, p.ej. intensidad de lluvia): cuando es alto, las aves se
+// REFUGIAN — las 'sky' dejan de cruzar el cielo y se posan como las 'percher', y
+// ninguna abandona el posado. Sin `shelter` (default 0) el comportamiento es el
+// original (el bosque/otros mundos no se ven afectados).
+export function updatePerchers(agents, roamers, perches, cfg, dt, rand = Math.random, shelter = 0) {
+  const sheltering = shelter > 0.5
   for (let i = 0; i < agents.length; i++) {
     const a = agents[i]
     if (a.role === 'roam') { a.yOff = lerp(a.yOff, 0, dt * 2); continue }
     const r = roamers[i]
     a.timer -= dt
 
-    if (a.role === 'percher') {
-      if (a.mode === 'roam') {
+    // Con refugio, un ave 'sky' se comporta como 'percher' (baja y se posa).
+    const role = (sheltering && a.role === 'sky') ? 'percher' : a.role
+
+    if (role === 'percher') {
+      // 'up'/'down' pueden venir de una 'sky' recién convertida por el refugio:
+      // se tratan como 'roam' (bajar y buscar posado).
+      if (a.mode !== 'toPerch' && a.mode !== 'perched') {
         a.yOff = lerp(a.yOff, 0, dt * 2)
-        if (a.timer <= 0 && perches.length) {
+        if ((a.timer <= 0 || sheltering) && perches.length) {
           a.target = perches[(rand() * perches.length) | 0]
           a.mode = 'toPerch'
         }
@@ -49,7 +59,8 @@ export function updatePerchers(agents, roamers, perches, cfg, dt, rand = Math.ra
         const t = a.target
         r.x = t.x; r.z = t.z; r.vx = 0; r.vz = 0
         a.yOff = t.h - 3.1
-        if (a.timer <= 0) { a.mode = 'roam'; a.timer = 5 + rand() * 8; a.target = null }
+        // Con refugio no abandona el posado (se queda mientras llueve).
+        if (a.timer <= 0 && !sheltering) { a.mode = 'roam'; a.timer = 5 + rand() * 8; a.target = null }
       }
     } else if (a.role === 'sky') {
       if (a.mode === 'roam') {

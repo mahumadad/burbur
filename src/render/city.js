@@ -1691,10 +1691,12 @@ export function createCityScene(container, cfg, agentNames = []) {
   // la fórmula del bosque (`G + terreno + 3.1 + yOff`): al posarse, `yOff`
   // vale `h - BIRD_H0`, y el `BIRD_H0` se cancela → altura final = `we + h`,
   // exactamente la altura absoluta con la que se registró cada `poiPerch`.
-  function updateBirds(step, time) {
+  function updateBirds(step, time, shelter = 0) {
     if (!birdCount) return
     updateRoamers(birdRoamers, cfg.wander, step, rnd, time, null, null, null)
-    updatePerchers(perchAgents, birdRoamers, poiPerch, birdBehaviors, step, rnd)
+    // `shelter` (lluvia): las aves se refugian — se posan en árboles/techos y se
+    // quedan quietas, en vez de cruzar el cielo o quedar estáticas en el aire.
+    updatePerchers(perchAgents, birdRoamers, poiPerch, birdBehaviors, step, rnd, shelter)
     for (let i = 0; i < birdCount; i++) {
       const a = agents[i]
       const r = birdRoamers[i]
@@ -1968,7 +1970,7 @@ export function createCityScene(container, cfg, agentNames = []) {
   })
 
   const tintC = new THREE.Color()
-  let snowCover = 0, moveScale = 1, birdCalm = 1
+  let snowCover = 0, moveScale = 1, birdShelter = 0
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
@@ -2013,10 +2015,10 @@ export function createCityScene(container, cfg, agentNames = []) {
       snow.update(step, clock, snowfall)
 
       // Con lluvia la ciudad se aquieta: baja bastante el tráfico/peatones (quedan
-      // pocos moviéndose — alguna rata, algún transeúnte), y las aves casi se
-      // congelan → se posan y se quedan quietas en edificios/árboles.
+      // pocos moviéndose — alguna rata, algún transeúnte). Las aves NO se congelan:
+      // se refugian (bajan y se posan en árboles/techos) vía `birdShelter`.
       moveScale = snowing ? 0.4 : (1 - eco.rain * 0.6) * (eco.temperature <= 1 ? 0.85 : 1)
-      birdCalm = 1 - eco.rain * 0.85
+      birdShelter = eco.rain
 
       // Estaciones del sakura: mismo reloj que el resto del mundo (`eco.seasonT`,
       // con el mismo fallback local que usa el bosque) → brote → hoja plena →
@@ -2040,7 +2042,7 @@ export function createCityScene(container, cfg, agentNames = []) {
     }
 
     moveAgents(step * moveScale, clock)
-    updateBirds(step * moveScale * birdCalm, clock)
+    updateBirds(step * moveScale, clock, birdShelter)
 
     for (let i = 0; i < n; i++) {
       const p = agents[i].group.position
