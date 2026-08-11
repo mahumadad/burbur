@@ -37,7 +37,14 @@ const C_ER = rgb(PALETTE.cyanSat)
 const C_GOLGI = rgb(PALETTE.pink)
 const C_ADHESION = rgb(PALETTE.bond)
 const C_INVADER = rgb(PALETTE.magenta)
+const C_ATP_POP = rgb(PALETTE.yellow)
 const C_SUBSTRATE = [0.30, 0.34, 0.52]
+
+// Pool FIJO de "pops" de consumo de ATP (M2): un punto que crece y se apaga
+// en ~0.25s en cada entrega. Fijo a propósito, como el resto de los pools del
+// mundo — con más entregas que slots libres, algunas simplemente no destellan.
+const ATP_POP_CAP = 16
+const ATP_POP_TTL = 0.25
 
 export function createCellScene(container, cfg, agentNames = []) {
   const R = cfg.world.radius
@@ -439,6 +446,15 @@ export function createCellScene(container, cfg, agentNames = []) {
   }
   scene.add(atpCloud.mesh)
 
+  // ─── POPS de entrega de ATP (M2): el consumo, antes silencioso, ahora se ve.
+  const atpPops = createPointCloud(ATP_POP_CAP, draw.pointMaterial)
+  // Estado propio del pool: cada slot lleva su edad; `age >= ATP_POP_TTL` = libre.
+  const atpPopState = Array.from({ length: ATP_POP_CAP }, () => ({ age: ATP_POP_TTL, x: 0, z: 0 }))
+  for (let i = 0; i < ATP_POP_CAP; i++) {
+    atpPops.col[i * 3] = C_ATP_POP[0]; atpPops.col[i * 3 + 1] = C_ATP_POP[1]; atpPops.col[i * 3 + 2] = C_ATP_POP[2]
+  }
+  scene.add(atpPops.mesh)
+
   // ─── INVASORES ────────────────────────────────────────────────────────────
   const invMat = new THREE.LineBasicMaterial({ vertexColors: true })
   const invBuf = createLineBuffer(cc.invaders.capacity * 7, invMat)
@@ -746,6 +762,36 @@ export function createCellScene(container, cfg, agentNames = []) {
     invBuf.commit()
   }
 
+  /** Deja un pop de consumo de ATP en (x,z) normalizados: ocupa el slot más libre. */
+  function spawnAtpPop(x, z) {
+    for (let i = 0; i < ATP_POP_CAP; i++) {
+      if (atpPopState[i].age >= ATP_POP_TTL) {
+        atpPopState[i].age = 0; atpPopState[i].x = x; atpPopState[i].z = z
+        return
+      }
+    }
+    // Pool lleno: esta entrega, en particular, no destella — no pasa nada.
+  }
+
+  /** Anima el pool de pops: crecen y se apagan en ATP_POP_TTL; libres se aparcan. */
+  function drawAtpPops(step) {
+    for (let i = 0; i < ATP_POP_CAP; i++) {
+      const p = atpPopState[i]
+      if (p.age < ATP_POP_TTL) {
+        p.age += step
+        const u = Math.min(1, p.age / ATP_POP_TTL)
+        atpPops.pos[i * 3] = p.x * R
+        atpPops.pos[i * 3 + 1] = H * 0.45
+        atpPops.pos[i * 3 + 2] = p.z * R
+        atpPops.size[i] = Math.sin(Math.PI * u) * 1.6 // crece y se apaga
+      } else {
+        atpPops.pos[i * 3 + 1] = -9999 // aparcado: convención del repo para "muerto"
+        atpPops.size[i] = 0
+      }
+    }
+    atpPops.commit()
+  }
+
   function drawAdhesions(subX, subZ) {
     adhesionBuf.begin()
     for (const ad of adhesions) {
@@ -769,6 +815,9 @@ export function createCellScene(container, cfg, agentNames = []) {
     const step = dt || 0.016
     clock += step
     draw.uniforms.uT.value = clock
+    // Eventos grandes del mundo (M1): se acumulan durante el frame y se
+    // devuelven al host al final, para el log y/o el sonido.
+    const events = []
 
     // El medio pinta la célula: el "clima" modula energía y tensión.
     const demand = 0.25 + (eco ? eco.tension : 0) * 0.8
@@ -799,7 +848,13 @@ export function createCellScene(container, cfg, agentNames = []) {
         }
       }
     }
-    updateAtp(atp, cc.atp, step, demand)
+    // Cada entrega deja un pop visual (siempre) y una ráfaga sonora (M2, vía M1).
+    // El host limita cuántos pulsos SUENAN por segundo; acá se emiten todos.
+    const delivered = updateAtp(atp, cc.atp, step, demand)
+    for (const d of delivered) {
+      spawnAtpPop(d.x, d.z)
+      events.push({ type: 'pulse', y: H * 0.45 })
+    }
 
     // Invasores: llegan cada tanto y buscan la membrana.
     invaderClock -= step
@@ -807,7 +862,15 @@ export function createCellScene(container, cfg, agentNames = []) {
       invaderClock = cc.invaders.spawnEvery
       spawnInvader(invaders, cc.invaders, rnd() < 0.5 ? 'bacterium' : 'virion', rnd)
     }
-    updateInvaders(invaders, cc.invaders, step, rnd, (x, z) => containsPoint(membrane, x, z))
+    const invEvents = updateInvaders(invaders, cc.invaders, step, rnd, (x, z) => containsPoint(membrane, x, z))
+    // La infección ya la detecta invaders.js; acá se traduce al contrato de M1
+    // (con `dir` según la posición del virión, misma convención que scene.js).
+    for (const ev of invEvents) {
+      if (ev.type !== 'infection') continue
+      const dir = Math.abs(ev.x) > Math.abs(ev.z)
+        ? (ev.x > 0 ? 'right' : 'left') : (ev.z > 0 ? 'ahead' : 'behind')
+      events.push({ type: 'conflict', agent: 'virión', agentType: 'invader', kind: 'infection', dir })
+    }
     // Un virión que entró deja de ser un invasor DEL SUSTRATO: se lo saca para
     // que su slot vuelva a circular. Qué le pasa adentro (replicar o acabar en
     // un lisosoma) es materia de F5; sin esto, a las pocas infecciones el pool
@@ -888,6 +951,7 @@ export function createCellScene(container, cfg, agentNames = []) {
       atpCloud.pos[i * 3 + 2] = q.alive ? q.z * R : 0
     }
     atpCloud.commit()
+    drawAtpPops(step)
     trails.update(worldPos)
 
     // Etiqueta: SOLO al pasar el mouse por encima de un organelo (no en el centro).
@@ -931,7 +995,7 @@ export function createCellScene(container, cfg, agentNames = []) {
     // este mundo la queremos siempre apagada.
     controls.autoRotate = false
     stage.render(step)
-    return []
+    return events
   }
 
   /** Shake: sacude el citoesqueleto y dispersa a los organelos. */
