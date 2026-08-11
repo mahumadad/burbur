@@ -83,6 +83,39 @@ export const CELL_CENSUS = [
   { name: 'la onda de calcio', type: 'signal', static: true },
 ]
 
+/** Censo del estanque, por tipo. Coherente con los SFX del shake de agua del bundle
+ * (heron/swan/geese/coot/moorhen/vole/cetti…). */
+export const POND_CENSUS = [
+  // flying_animal (mayoría en un humedal)
+  { name: 'grey heron', type: 'flying_animal' },
+  { name: 'mute swan', type: 'flying_animal' },
+  { name: 'greylag goose', type: 'flying_animal' },
+  { name: 'coot', type: 'flying_animal' },
+  { name: 'moorhen', type: 'flying_animal' },
+  { name: 'mallard', type: 'flying_animal' },
+  { name: 'kingfisher', type: 'flying_animal' },
+  { name: 'great crested grebe', type: 'flying_animal' },
+  { name: "cetti's warbler", type: 'flying_animal', dawn: true },
+  { name: 'sedge warbler', type: 'flying_animal', dawn: true },
+  { name: 'tufted duck', type: 'flying_animal' },
+  { name: 'cormorant', type: 'flying_animal' },
+  { name: 'reed bunting', type: 'flying_animal' },
+  // walking_animal
+  { name: 'water vole', type: 'walking_animal', night: true },
+  { name: 'otter', type: 'walking_animal', night: true },
+  { name: 'common frog', type: 'walking_animal' },
+  { name: 'grass snake', type: 'walking_animal' },
+  // static_object (no se mueven pero suenan)
+  { name: 'the reedbed', type: 'static_object' },
+  { name: 'still water', type: 'static_object' },
+  { name: 'lily pads', type: 'static_object' },
+  { name: 'midges over water', type: 'static_object' },
+  // human (raros)
+  { name: 'angler', type: 'human' },
+  { name: 'kayaker', type: 'human' },
+  { name: 'birdwatcher', type: 'human' },
+]
+
 /**
  * Construye el censo del mundo y asigna identidad a los agentes VISIBLES.
  * Devuelve { census, visible } donde `visible[i]` = { name, type, idx, memory, state }.
