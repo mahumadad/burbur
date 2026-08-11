@@ -1,130 +1,170 @@
 import * as THREE from 'three'
 import { createLineBuffer } from '../../render/engine/points.js'
 
-// LA HIJA (§6 del spec ciclo-y-division-celula): hasta ahora, dividirse era
-// un evento narrado que no cambiaba nada — seguía habiendo una sola célula.
-// Esto la hace real: al `divide` del ciclo (sim/cellCycle.js) nace una hija.
-// Pool FIJO de 3, como el resto de los pools del mundo: con más divisiones
-// que slots libres, alguna simplemente no nace.
+// LA HIJA (§6 spec ciclo-y-division; ampliada tras revisión visual del usuario:
+// "que se vea partirse, que salga otro macrófago y se vaya para otro lado a
+// repetir el ciclo, hasta salir de pantalla, para que se entienda completo").
 //
-// CONTORNO: armónicos fijos POR SLOT, calculados una sola vez al crear el
-// pool (mismo espíritu que tissue.js) — una hija recién nacida no reptó
-// nunca, así que su forma no debe respirar como la membrana viva de la
-// madre.
+// Ya no es un contorno pasivo que solo deriva: es un MACRÓFAGO HIJO de verdad
+// — cuerpo translúcido + membrana + núcleo + frente de avance — que REPTA por
+// su cuenta en una dirección propia (distinta a la de la madre) y se va de
+// cuadro. Así la división se lee entera: una célula se vuelve dos, y cada una
+// sigue su camino.
 //
-// POSICIÓN: el surco estrangula el ECUADOR, así que las dos mitades se
-// separan A LO LARGO del eje del huso (donde viajaron los cromosomas): la
-// hija nace en un polo, pegada a la madre. Sigue la MISMA matemática que
-// las adhesiones focales (ver `drawAdhesions` en cell.js): se guarda dónde
-// nació (bx/bz) y el offset del sustrato de ESE instante (sbx/sbz, SIN
-// escalar por R). La posición de cada frame es bx + (subX-sbx)*R — así,
-// aunque la madre siga reptando, la hija se queda clavada donde nació y se
-// aleja SOLA, sin animarla. Sin wrap: a diferencia del tile de fondo (que se
-// repite y puede recortar su posición módulo P sin que se note), la hija es
-// un objeto único — un salto modular SÍ se vería. El buffer vive DENTRO de
-// `substrate` (mismo grupo que el tejido vecino de tissue.js), así que cada
-// frame restamos la posición actual del grupo para no aplicar el offset dos
-// veces.
+// Pool fijo de 3 (como el resto de los pools del mundo). Vive DENTRO del grupo
+// `substrate` para que el reptar de la MADRE también las separe; encima, cada
+// hija acumula su PROPIO desplazamiento (`ownX/ownZ`) en su rumbo, que es lo
+// que la manda a otro lado y fuera de pantalla.
 const POOL = 3
-const VERTS = 26
+const VERTS = 30
 const TWO_PI = Math.PI * 2
-// Distancia (en unidades de mundo) a la que empieza a desvanecerse y a la
-// que ya liberó el slot.
-const FADE_START_MUL = 1.7
-const FADE_END_MUL = 2.6
-// Empujón propio: la separación física real, además de que la madre siga
-// reptando. Se apaga a los ~10 s (§6).
-const PUSH_TIME = 10
+// Distancias (relativas a R) a las que se desvanece y libera el slot.
+const FADE_START_MUL = 1.9
+const FADE_END_MUL = 2.7
+// Maduración: recién nacida está redondeada y quieta; en ~4 s toma forma y
+// arranca a reptar (una célula recién dividida tarda en re-polarizarse).
+const MATURE_TIME = 4
 
 /**
  * @param {THREE.Group} substrate  el grupo que se desliza con la célula
  * @param {object} p
- * @param {number} p.R  radio de mundo de la célula (referencia de escala)
+ * @param {number} p.R  radio de mundo de la célula
+ * @param {number} p.H  altura de la lámina celular sobre el sustrato
  * @param {function} p.rnd
- * @param {[number,number,number]} p.color  rgb 0..1
+ * @param {[number,number,number]} p.membraneCol  color del contorno (rgb 0..1)
+ * @param {[number,number,number]} p.frontCol     color del frente de avance
+ * @param {number} p.fillColor  hex del relleno translúcido
  */
-export function createDaughters(substrate, { R, rnd, color }) {
-  const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.8 })
-  const buf = createLineBuffer(POOL * VERTS, mat)
+export function createDaughters(substrate, { R, H, rnd, membraneCol, frontCol, fillColor }) {
+  const lineMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 })
+  const buf = createLineBuffer(POOL * (VERTS + VERTS + 10), lineMat)
   substrate.add(buf.mesh)
 
-  // Un contorno congelado por slot: se genera una sola vez y se reutiliza en
-  // cada renacimiento de ese slot (nunca se anima, a diferencia de la
-  // membrana viva de la madre).
+  // Un relleno sólido por slot: le da CUERPO (igual que la membrana de la
+  // madre). Círculo plano que se escala y posiciona cada frame.
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: fillColor, transparent: true, opacity: 0.1, depthWrite: false, side: THREE.DoubleSide,
+  })
+  const fills = Array.from({ length: POOL }, () => {
+    const m = new THREE.Mesh(new THREE.CircleGeometry(1, VERTS), fillMat.clone())
+    m.rotation.x = -Math.PI / 2
+    m.visible = false
+    substrate.add(m)
+    return m
+  })
+
   const slots = Array.from({ length: POOL }, () => ({
-    alive: false,
-    age: 0,
-    r: 0,
+    alive: false, age: 0, r: 0,
     bx: 0, bz: 0,           // posición de nacimiento (mundo, centro = la madre)
-    sbx: 0, sbz: 0,         // offset del sustrato en el instante de nacer
-    pushAngle: 0, pushSpeed: 0, pushX: 0, pushZ: 0,
-    harm: Array.from({ length: 2 }, () => ({
-      k: 2 + Math.floor(rnd() * 3), amp: 0.06 + rnd() * 0.07, phase: rnd() * TWO_PI,
+    sbx: 0, sbz: 0,         // offset del sustrato al nacer
+    ownX: 0, ownZ: 0,       // desplazamiento PROPIO acumulado (su reptar)
+    heading: 0, speed: 0,   // rumbo y velocidad de su crawl
+    // Contorno congelado: armónicos fijos (no respira, como el tejido vecino).
+    harm: Array.from({ length: 3 }, () => ({
+      k: 2 + Math.floor(rnd() * 3), amp: 0.05 + rnd() * 0.07, phase: rnd() * TWO_PI,
     })),
   }))
 
   /**
-   * Nace una hija en el slot más libre (si los 3 están vivos, esta división
-   * en particular no produce una: el pool es fijo a propósito).
-   * @param {{subX:number, subZ:number, motherR:number}} p
+   * Nace una hija en un polo del huso (spindleAngle) y elige un rumbo propio
+   * que la aleja de la madre — sesgado hacia AFUERA del origen, así se va de
+   * cuadro por su lado.
+   * @param {{subX,subZ,motherR,spindleAngle}} p
    */
-  function spawn({ subX, subZ, motherR }) {
+  function spawn({ subX, subZ, motherR, spindleAngle = 0 }) {
     const slot = slots.find((s) => !s.alive)
     if (!slot) return
     const sign = rnd() < 0.5 ? 1 : -1
     slot.alive = true
     slot.age = 0
-    slot.r = motherR * 0.7
-    // A LO LARGO del eje del huso (eje x local, ver cell/mitosis.js): los
-    // cromosomas viajaron a los dos polos (±x) y el surco estrangula el
-    // ecuador, así que las dos mitades se separan sobre ese eje — no
-    // perpendicular a él. Nace en un polo, pegada a la madre.
-    const dist = motherR + slot.r * 0.55
-    slot.bx = sign * dist
-    slot.bz = 0
-    slot.sbx = subX
-    slot.sbz = subZ
-    slot.pushX = 0
-    slot.pushZ = 0
-    slot.pushAngle = sign > 0 ? 0 : Math.PI
-    slot.pushSpeed = motherR * 0.05
+    slot.r = motherR * 0.62
+    // Nace en un polo del huso, pegada a la madre.
+    const poleAng = spindleAngle + (sign > 0 ? 0 : Math.PI)
+    const dist = motherR + slot.r * 0.5
+    slot.bx = Math.cos(poleAng) * dist
+    slot.bz = Math.sin(poleAng) * dist
+    slot.sbx = subX; slot.sbz = subZ
+    slot.ownX = 0; slot.ownZ = 0
+    // Rumbo: sale por su polo, con algo de dispersión → dirección clara y
+    // distinta a la de la madre.
+    slot.heading = poleAng + (rnd() - 0.5) * 0.8
+    slot.speed = R * (0.035 + rnd() * 0.02)   // reptar propio (unidades/s)
   }
 
-  /** @param {{subX:number, subZ:number}} p  offset ACTUAL del sustrato */
+  /** @param {{subX,subZ}} p  offset ACTUAL del sustrato */
   function update(step, { subX, subZ }) {
     buf.begin()
     const fadeStart = R * FADE_START_MUL
     const fadeEnd = R * FADE_END_MUL
-    for (const s of slots) {
-      if (!s.alive) continue
+    for (let si = 0; si < POOL; si++) {
+      const s = slots[si]
+      if (!s.alive) { fills[si].visible = false; continue }
       s.age += step
-      // Empuje propio: decae linealmente hasta apagarse en PUSH_TIME.
-      if (s.age < PUSH_TIME) {
-        const decay = 1 - s.age / PUSH_TIME
-        s.pushX += Math.cos(s.pushAngle) * s.pushSpeed * decay * step
-        s.pushZ += Math.sin(s.pushAngle) * s.pushSpeed * decay * step
+      const mature = Math.min(1, s.age / MATURE_TIME)
+      // Recién nacida: pequeña y quieta. Madura: crece a su tamaño y repta.
+      if (s.age > MATURE_TIME * 0.5) {
+        s.ownX += Math.cos(s.heading) * s.speed * step
+        s.ownZ += Math.sin(s.heading) * s.speed * step
       }
-      // Posición en el mundo: nacimiento + cuánto corrió el sustrato desde
-      // entonces + el empujón propio acumulado.
-      const wx = s.bx + (subX - s.sbx) * R + s.pushX
-      const wz = s.bz + (subZ - s.sbz) * R + s.pushZ
+      // Posición: nacimiento + cuánto corrió el sustrato (la madre reptando) +
+      // su propio reptar. Los dos primeros la separan de la madre; el tercero
+      // la manda a otro lado.
+      const wx = s.bx + (subX - s.sbx) * R + s.ownX
+      const wz = s.bz + (subZ - s.sbz) * R + s.ownZ
       const dist = Math.hypot(wx, wz)
-      if (dist > fadeEnd) { s.alive = false; continue }
+      if (dist > fadeEnd) { s.alive = false; fills[si].visible = false; continue }
       const fade = dist < fadeStart ? 1 : 1 - (dist - fadeStart) / (fadeEnd - fadeStart)
-      // `substrate` ya tiene su propio desplazamiento (con wrap, invisible
-      // porque su contenido se repite); acá restamos para no aplicarlo dos
-      // veces sobre un objeto único que NO puede wrappear sin que se note.
+      // El grupo `substrate` ya tiene su propio desplazamiento (con wrap); se
+      // resta para no aplicarlo dos veces sobre un objeto único.
       const lx = wx - substrate.position.x
       const lz = wz - substrate.position.z
-      const c = [color[0] * fade, color[1] * fade, color[2] * fade]
-      let prev = null
+      const rNow = s.r * (0.55 + 0.45 * mature)   // crece al madurar
+
+      // ── Relleno translúcido (cuerpo) ──────────────────────────────────────
+      const f = fills[si]
+      f.visible = true
+      f.position.set(lx, -0.3, lz)
+      f.scale.setScalar(rNow)
+      f.material.opacity = 0.1 * fade
+
+      // ── Membrana: doble contorno + frente de avance teñido ────────────────
+      const mc = [membraneCol[0] * fade, membraneCol[1] * fade, membraneCol[2] * fade]
+      const radial = (a) => {
+        let r = rNow
+        for (const h of s.harm) r += rNow * h.amp * Math.sin(h.k * a + h.phase)
+        // Lamelipodio: se abomba un poco hacia el rumbo (lee "va para allá").
+        const d = Math.abs(((a - s.heading + Math.PI * 3) % TWO_PI) - Math.PI)
+        r += rNow * 0.12 * mature * Math.max(0, 1 - d / 1.0)
+        return r
+      }
+      let prev = null, prevIn = null
       for (let i = 0; i <= VERTS; i++) {
         const a = (i / VERTS) * TWO_PI
-        let r = s.r
-        for (const h of s.harm) r += s.r * h.amp * Math.sin(h.k * a + h.phase)
+        const r = radial(a)
         const x = lx + Math.cos(a) * r, z = lz + Math.sin(a) * r
-        if (prev) buf.push(prev[0], 0, prev[1], x, 0, z, c, c)
-        prev = [x, z]
+        // Frente cian, resto membrana.
+        const d = Math.abs(((a - s.heading + Math.PI * 3) % TWO_PI) - Math.PI)
+        const lead = Math.max(0, 1 - d / 1.1) * mature
+        const c = [
+          (mc[0] + (frontCol[0] * fade - mc[0]) * lead),
+          (mc[1] + (frontCol[1] * fade - mc[1]) * lead),
+          (mc[2] + (frontCol[2] * fade - mc[2]) * lead),
+        ]
+        const inx = lx + Math.cos(a) * r * 0.97, inz = lz + Math.sin(a) * r * 0.97
+        if (prev) {
+          buf.push(prev[0], 0, prev[1], x, 0, z, prev[2], c)       // contorno externo
+          buf.push(prevIn[0], 0, prevIn[1], inx, 0, inz, prev[2], c) // lámina interna (bicapa)
+        }
+        prev = [x, z, c]; prevIn = [inx, inz]
+      }
+      // ── Núcleo: un aro pequeño, para que se lea como célula con centro ────
+      const nr = rNow * 0.32
+      let np = null
+      for (let i = 0; i <= 12; i++) {
+        const a = (i / 12) * TWO_PI
+        const x = lx + Math.cos(a) * nr, z = lz + Math.sin(a) * nr
+        if (np) buf.push(np[0], 0, np[1], x, 0, z, mc, mc)
+        np = [x, z]
       }
     }
     buf.commit()

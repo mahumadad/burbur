@@ -193,7 +193,10 @@ export function createCellScene(container, cfg, agentNames = []) {
   addTissueNeighbors(substrate, { R, H, rnd, color: PALETTE.cyanSat })
 
   // ─── LA HIJA (§6): pool de 3, nace al dividirse el ciclo ──────────────────
-  const daughters = createDaughters(substrate, { R, rnd, color: rgb(PALETTE.cyanSat) })
+  const daughters = createDaughters(substrate, {
+    R, H, rnd,
+    membraneCol: C_MEMBRANE, frontCol: C_FRONT, fillColor: PALETTE.cyan,
+  })
 
   // ─── ADHESIONES FOCALES: nacen bajo el frente, quedan CLAVADAS al sustrato ─
   // y desfilan hacia atrás relativas a la célula — el indicador de velocidad más
@@ -930,10 +933,15 @@ export function createCellScene(container, cfg, agentNames = []) {
     for (const ev of cycleEvents) {
       events.push({ type: 'moment', agent: 'el núcleo', agentType: 'structure', kind: ev.kind })
       if (ev.kind === 'divide') {
-        // Nace la hija, pegada a la madre y desplazada perpendicular al eje
-        // del huso; la madre encoge — cada hija se lleva la mitad.
+        // Nace la hija en un polo del huso y se va reptando por su lado; la
+        // madre encoge (cada hija se lleva la mitad) y se re-polariza.
         const motherR = radiusAt(membrane, Math.PI / 2) * R
-        daughters.spawn({ subX: motility.subX, subZ: motility.subZ, motherR })
+        // El huso yace a lo largo del frente de la madre (los cromosomas
+        // viajaron a esos polos): la hija sale por uno de ellos.
+        daughters.spawn({
+          subX: motility.subX, subZ: motility.subZ, motherR,
+          spindleAngle: motility.frontAngle,
+        })
         membraneCfg.baseR = baseRNominal * SHRINK_TO
         shrinkClock = 0
       }
