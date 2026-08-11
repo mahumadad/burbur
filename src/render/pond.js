@@ -180,7 +180,7 @@ export function createPond(container, cfg, agentNames = []) {
   // ─── AGUA (zt): plano con glow azul + shimmer animado + WAKE ──────────────
   // Base fiel a murmur (vertex-color del campo Y/Mt/Nt) + mejoras: brillos que
   // se deslizan (movimiento) y anillos de estela donde cruzan agentes/peces.
-  const RIPPLES = 14
+  const RIPPLES = 22
   const waterUniforms = {
     uTime: { value: 0 },
     // x, z, radio, fuerza — sembrados en la superficie por los elementos que pasan.
@@ -225,12 +225,12 @@ export function createPond(container, cfg, agentNames = []) {
             vec4 r = uRipples[i];
             if (r.w <= 0.001) continue;
             float d = distance(vXZ, r.xy);
-            wake += smoothstep(2.4, 0.0, abs(d - r.z)) * r.w;
+            wake += smoothstep(3.2, 0.0, abs(d - r.z)) * r.w;
           }
-          wake = min(wake, 1.3);
-          vec3 col = vCol + glint * vec3(0.20, 0.42, 0.70) + wake * vec3(0.25, 0.50, 0.85);
+          wake = min(wake, 1.5);
+          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + wake * vec3(0.32, 0.60, 0.98);
           float lum = dot(vCol, vec3(0.5, 0.6, 0.7));
-          float a = clamp(0.22 + lum * 2.2 + glint * 0.12 + wake * 0.42, 0.0, 0.9);
+          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + wake * 0.55, 0.0, 0.92);
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -241,7 +241,7 @@ export function createPond(container, cfg, agentNames = []) {
 
   // ─── ISLAS (It): elipsoide de icosfera deformada + arena + espuma + ramas ──
   for (const L of lobes) {
-    const geo = new THREE.IcosahedronGeometry(1, 3)
+    const geo = new THREE.IcosahedronGeometry(1, 4)
     const pos = geo.attributes.position
     const seed = q() * 100
     for (let i = 0; i < pos.count; i++) {
@@ -259,7 +259,8 @@ export function createPond(container, cfg, agentNames = []) {
       const wy = pos.getY(i) + L.cy
       const S = smooth((wy - (ht - 1.2)) / 1.6) // 0 bajo agua → 1 arena
       const b = clamp01(0.24 + clamp01((wy - bedY) / (gt - 0.5)) * 0.5 + (nrm.getY(i) * 0.5 + 0.5) * 0.2
-        + (fbm(pos.getX(i) * 0.22 + seed, pos.getZ(i) * 0.22, 3) - 0.5) * 0.3)
+        + (fbm(pos.getX(i) * 0.22 + seed, pos.getZ(i) * 0.22, 3) - 0.5) * 0.42
+        + (noise2(pos.getX(i) * 0.9 + seed, pos.getZ(i) * 0.9) - 0.5) * 0.22)
       const C = clamp01((wy - bedY) / (gt - 0.5)), w2 = (1 - C) * (1 - C)
       const under = [0.018 + 0.037 * w2, 0.032 + 0.098 * w2, 0.2 + 0.22 * w2]
       for (let k = 0; k < 3; k++) {
@@ -309,20 +310,20 @@ export function createPond(container, cfg, agentNames = []) {
     }
     if (up.length) {
       const area = L.rx * L.rz
-      const lichenN = Math.min(700, Math.floor(area * 1.8))
+      const lichenN = Math.min(1700, Math.floor(area * 4.6))
       for (let i = 0; i < lichenN; i++) {
         const vi = up[q() * up.length | 0]
-        if (fbm(pos.getX(vi) * 0.5 + seed * 1.7, pos.getZ(vi) * 0.5, 2) < 0.5) continue
+        if (fbm(pos.getX(vi) * 0.5 + seed * 1.7, pos.getZ(vi) * 0.5, 2) < 0.42) continue
         const A = 0.9 + q() * 0.12
-        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.1, L.z + pos.getZ(vi), [1, 0.827 * A, 0.071], 0.1 + q() * 0.14, 0)
+        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.1, L.z + pos.getZ(vi), [1, 0.827 * A, 0.071], 0.09 + q() * 0.14, 0)
       }
-      const mossN = Math.min(260, Math.floor(area * 0.7))
+      const mossN = Math.min(750, Math.floor(area * 2.1))
       for (let i = 0; i < mossN; i++) {
         const vi = up[q() * up.length | 0]
-        if (fbm(pos.getX(vi) * 0.4 + seed * 2.3 + 9, pos.getZ(vi) * 0.4, 2) < 0.62) continue
-        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.08, L.z + pos.getZ(vi), [0.28 + q() * 0.1, 0.44 + q() * 0.12, 0.26], 0.2 + q() * 0.2, 0)
+        if (fbm(pos.getX(vi) * 0.4 + seed * 2.3 + 9, pos.getZ(vi) * 0.4, 2) < 0.55) continue
+        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.08, L.z + pos.getZ(vi), [0.26 + q() * 0.12, 0.42 + q() * 0.14, 0.24], 0.18 + q() * 0.22, 0)
       }
-      let want = 4 + (q() * 6 | 0)
+      let want = 8 + (q() * 10 | 0)
       for (let guard = 0; want > 0 && guard < 400; guard++) {
         const vi = up[q() * up.length | 0]
         if (nrm.getY(vi) < 0.5) continue
@@ -549,6 +550,19 @@ export function createPond(container, cfg, agentNames = []) {
   const _up = new THREE.Vector3(0, 1, 0), _dir = new THREE.Vector3(), _axis = new THREE.Vector3(), _quat = new THREE.Quaternion()
   const _proj = new THREE.Vector3()
   let ptrX = null, ptrY = null, _lx = 0, _ly = 0
+  // El lente fisheye desplaza la posición VISUAL del agente respecto a su NDC
+  // lógico; para que el hover matchee lo que se ve, distorsiono la proyección
+  // igual que el shader del lente (mix(1-k,1,rn²), invertido por iteración).
+  const _fk = Math.min(rc.fisheye, 0.62)
+  function lensNDC(px, py) {
+    let sx = px, sy = py
+    for (let it = 0; it < 3; it++) {
+      const rn = Math.hypot(sx, sy) / 0.7071
+      const f = (1 - _fk) + _fk * rn * rn
+      sx = px / f; sy = py / f
+    }
+    return [sx, sy]
+  }
 
   // Wake: pool de ondas que se expanden y desvanecen; se siembran donde un
   // elemento cruza/roza la superficie (agentes cerca del nivel, peces al tope).
@@ -560,18 +574,20 @@ export function createPond(container, cfg, agentNames = []) {
   function updateRipples(step) {
     for (const r of waterUniforms.uRipples.value) {
       if (r.w <= 0.001) continue
-      r.z += 9 * step       // expandir el radio
-      r.w = Math.max(0, r.w - 0.5 * step) // desvanecer
+      r.z += 8 * step                       // expandir el radio
+      r.w = Math.max(0, r.w - 0.34 * step)  // desvanecer lento → más visible
     }
     rippleTimer -= step
     if (rippleTimer <= 0) {
-      for (let t = 0; t < 5; t++) {
+      // Varios focos por tick: agentes cerca de la superficie + peces al tope.
+      let spawned = 0
+      for (let t = 0; t < 8 && spawned < 3; t++) {
         const i = q() * n | 0
-        if (Math.abs(worldPos[i * 3 + 1] - ht) < 1.6) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 1.0); break }
+        if (Math.abs(worldPos[i * 3 + 1] - ht) < 1.8) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 0.9 + q() * 0.3); spawned++ }
       }
       const f = fish.state.fish
-      if (f.length) { const k = q() * f.length | 0; if (f[k].y > ht - 2.2) spawnRipple(f[k].x * mt, f[k].z * mt, 0.5) }
-      rippleTimer = 0.16 + q() * 0.2
+      for (let t = 0; t < 3; t++) { const k = q() * f.length | 0; if (f[k] && f[k].y > ht - 2.4) spawnRipple(f[k].x * mt, f[k].z * mt, 0.5) }
+      rippleTimer = 0.07 + q() * 0.1
     }
   }
 
@@ -629,12 +645,13 @@ export function createPond(container, cfg, agentNames = []) {
     // Etiqueta flotante al pasar el mouse por encima de un agente.
     let bestI = -1
     if (ptrX !== null) {
-      let bestD = 0.12
+      let bestD = 0.14
       for (let i = 0; i < n; i++) {
         _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 3, worldPos[i * 3 + 2]).project(stage.camera)
         if (_proj.z > 1) continue
-        const d = Math.hypot(_proj.x - ptrX, _proj.y - ptrY)
-        if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+        const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
+        const d = Math.hypot(vx - ptrX, vy - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = vx; _ly = vy }
       }
     }
     if (bestI >= 0 && agentNames[bestI]) {
