@@ -28,6 +28,10 @@ export const WORLDS = [
   {
     id: 'water', label: 'Pond ecosystem', accent: '#aacdff', ready: true,
     census: POND_CENSUS, ecosystem: FOREST_PROFILE,
+    // En el pond casi todo VUELA/planea sobre el agua, y las garzas (slots 0-1,
+    // los cazadores de pond.js) PICAN desde arriba → deben ser aves. Solo 2 slots
+    // (2 y 3) quedan para fauna de ribera (coipo/huillín/rana/culebra).
+    aerial: (i) => i !== 2 && i !== 3,
     build: (container, cfg, names) => createPond(container, cfg, names),
   },
   {
