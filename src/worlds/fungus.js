@@ -116,8 +116,12 @@ export function createFungusScene(container, cfg, agentNames = []) {
    * rota `k` rad por unidad → tronco curvo tipo banana. */
   const k = cc.substrate.logCurve || 0
   const baseA = cc.substrate.logAngle
+  const upAmp = cc.substrate.logCurveUp || 0
   function centerX(u) { return k ? (Math.sin(baseA + k * u) - Math.sin(baseA)) / k : logAx * u }
   function centerZ(u) { return k ? (Math.cos(baseA) - Math.cos(baseA + k * u)) / k : logAz * u }
+  /** Elevación vertical del eje: las puntas suben (arco hacia arriba); el centro
+   * (u=0) queda apoyado. En unidades de MUNDO. */
+  function centerY(u) { const t = u / halfLen; return upAmp * t * t * R * LOG_HEIGHT_SCALE }
   function perpX(u) { return -Math.sin(baseA + k * u) }
   function perpZ(u) { return Math.cos(baseA + k * u) }
   /** El punto más cercano del eje curvo a (x,z): devuelve [u, v] (v = offset
@@ -197,7 +201,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const rr = Math.min(rad, lr)
     const axisY = lr * R * LOG_HEIGHT_SCALE
     const half = Math.sqrt(Math.max(0, lr * lr - rr * rr)) * R * LOG_HEIGHT_SCALE
-    return axisY + half + (rad < lr ? bump(u, v) : 0)
+    return axisY + centerY(u) + half + (rad < lr ? bump(u, v) : 0)
   }
   function uvToWorld(u, v) {
     return [centerX(u) + perpX(u) * v, centerZ(u) + perpZ(u) * v]
@@ -227,23 +231,24 @@ export function createFungusScene(container, cfg, agentNames = []) {
       for (let a = 0; a <= NA; a++) {
         const th = (a % NA) / NA * Math.PI * 2
         const st = Math.sin(th), ct = Math.cos(th) // th=0 arriba, th=π abajo
-        // Rugosidad de corteza: el radio se perturba con dos escalas de ruido
-        // → superficie irregular, con relieves y surcos, no un cilindro liso.
-        const rough = 1 + 0.06 * (noise2(u * 7 + a * 0.6, th * 2) - 0.5) * 2
-          + 0.03 * (noise2(u * 22, th * 5) - 0.5) * 2
+        // TEXTURA DE CORTEZA: PLAQUETAS/SURCOS longitudinales — la firma de la
+        // corteza. Alrededor del tronco hay ~16 crestas separadas por surcos
+        // hondos, onduladas a lo largo del eje. Las crestas SOBRESALEN (radio) y
+        // van claras; los surcos se hunden y van oscuros.
+        const wander = noise2(u * 1.6, th * 0.5) * 3.0
+        const plate = Math.abs(Math.sin(th * 8 + wander + u * 2.5))   // 0 surco, 1 cresta
+        const micro = noise2(u * 26 + a, th * 6)                       // grano fino
+        const rough = 1 + 0.14 * plate + 0.04 * (micro - 0.5) * 2       // crestas afuera
         const rr = worldR * rough
         const x = cx + px * rr * st
         const z = cz + pz * rr * st
-        const y = Math.max(0, axisY + rr * ct)   // no baja del suelo
+        const y = Math.max(0, axisY + centerY(u) + rr * ct)   // no baja del suelo
         pos.push(x, y, z)
-        // Corteza: marrón oscuro sólido con grietas/relieve por ruido; la parte
-        // de arriba (ct>0) un poco más clara para fingir la luz (mundo unlit).
-        const ridge = noise2(u * 3.1 - 2, th * 1.6 + 7)
-        const crack = noise2(u * 9 + 1, th * 3.3)
-        const grain = 0.5 + 0.5 * Math.sin(u * 26 + noise2(u, th) * 5)
-        const topLight = 0.55 + 0.45 * Math.max(0, ct)
-        const shade = (0.4 + 0.7 * ridge) * (0.55 + 0.5 * crack) * (0.85 + 0.2 * grain) * topLight * f
-        let cr = 0.13 + 0.25 * shade, cg = 0.085 + 0.15 * shade, cb = 0.05 + 0.08 * shade
+        // Color: surcos MUY oscuros, crestas más claras; arriba (ct>0) algo más
+        // iluminado (mundo unlit). Contraste alto = se lee la textura.
+        const topLight = 0.5 + 0.5 * Math.max(0, ct)
+        const shade = (0.18 + 0.9 * plate) * (0.7 + 0.4 * micro) * topLight * f
+        let cr = 0.11 + 0.32 * shade, cg = 0.075 + 0.19 * shade, cb = 0.045 + 0.1 * shade
         const weather = noise2(u * 1.4 + 40, th * 1.2)
         if (weather > 0.74 && ct > 0) { cr *= 0.85; cg *= 1.15; cb *= 0.95 } // verdín arriba
         col.push(cr, cg, cb)
@@ -394,7 +399,9 @@ export function createFungusScene(container, cfg, agentNames = []) {
     // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
     // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
     // aparecía todo hecho y no se veía crecer nada.)
-    for (let i = 0; i < 620; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
+    // Arranca con POCO: apenas un puñado de hifas prendidas, para VER cómo la
+    // colonia se agranda de a poco sobre el tronco (antes abría casi hecha).
+    for (let i = 0; i < 120; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
   }
 
   // Dos registros visuales del micelio (spec §10). La red se dibuja con capacidad
@@ -422,7 +429,8 @@ export function createFungusScene(container, cfg, agentNames = []) {
     blending: THREE.AdditiveBlending, depthWrite: false,
   })
   const FAN = 10                       // hifas finas por punta (el borde plumoso)
-  const frontBuf = createLineBuffer(cc.mycelium.maxTips * FAN * 3, frontMat)
+  // FAN*3 líneas de penacho + 1 hifa de penetración por punta.
+  const frontBuf = createLineBuffer(cc.mycelium.maxTips * (FAN * 3 + 1), frontMat)
   scene.add(frontBuf.mesh)
   const tipsCloud = createPointCloud(cc.mycelium.maxTips, draw.pointMaterial)
   scene.add(tipsCloud.mesh)
@@ -508,7 +516,16 @@ export function createFungusScene(container, cfg, agentNames = []) {
         Math.sin(radAng) * 0.7 + Math.sin(t.ang) * 0.3,
         Math.cos(radAng) * 0.7 + Math.cos(t.ang) * 0.3)
       const fade = edgeFade(t.x, t.z)
-      const x0 = t.x * R, z0 = t.z * R, y0 = surfaceY(t.x, t.z) + 1.5
+      const surf = surfaceY(t.x, t.z)
+      const x0 = t.x * R, z0 = t.z * R, y0 = surf + 1.5
+      // PENETRACIÓN: si la punta está sobre el tronco, una hifa se hunde en la
+      // madera — el hongo empieza a COMER el tronco por dentro, no solo por
+      // encima. Se apaga hacia abajo (queda dentro de la corteza).
+      const [uu, vv] = worldToUV(t.x, t.z)
+      if (Math.abs(vv) < logRAt(Math.max(-halfLen, Math.min(halfLen, uu))) * 0.9) {
+        frontBuf.push(x0, surf, z0, x0 + (rnd() - 0.5) * 2, Math.max(0, surf - 8 - rnd() * 10), z0 + (rnd() - 0.5) * 2,
+          tint(base, fade * 0.5), tint(base, fade * 0.06))
+      }
       for (let k = 0; k < FAN; k++) {
         const spread = (k / (FAN - 1) - 0.5) * 1.3   // abanico estrecho, no 360°
         const a = baseAng + spread + (rnd() - 0.5) * 0.25
