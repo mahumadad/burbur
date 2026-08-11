@@ -45,8 +45,11 @@ export function createShake(onShake) {
   })
 
   // Gesto desktop: sacudir el mouse rápido = varios cambios de dirección seguidos.
+  // Solo mouse: en táctil, el pinch-zoom mueve dos punteros y sus X alternadas se
+  // leerían como reversos falsos (en móvil el shake ya lo cubre el acelerómetro).
   let dir = 0, lastX = null, reversals = 0, lastRevT = 0
   window.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse') return
     if (lastX !== null) {
       const dx = e.clientX - lastX
       if (Math.abs(dx) > 12 && Math.sign(dx) !== dir && dir !== 0) {
