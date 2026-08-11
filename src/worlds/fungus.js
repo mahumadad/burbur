@@ -973,6 +973,59 @@ export function createFungusScene(container, cfg, agentNames = []) {
     frontBuf.commit()
   }
 
+  // ─── EL SUSTRATO SE COME EN VOLUMEN. El micelio que llega a la tierra no se
+  // queda en la superficie: se hunde. Se dibuja una capa de hifas que bajan en
+  // el suelo, más profundas donde la colonia lleva más tiempo (cerca del
+  // inóculo) y someras en el frente que recién llega — así la masa colonizada
+  // se lee como un CASQUETE que crece hacia abajo, no como una película. Es la
+  // parte del hongo que en el bosque no se ve nunca; acá se ve porque el mundo
+  // es un disco flotando en negro. ──────────────────────────────────────────
+  const SOIL_STRIDE = 2          // 1 de cada N nodos de tierra emite hifa honda
+  const SOIL_DEPTH = 24          // profundidad máxima, en unidades de mundo
+  const soilBuf = createLineBuffer(Math.ceil(cc.mycelium.maxNodes / SOIL_STRIDE) * 3, frontMat)
+  scene.add(soilBuf.mesh)
+
+  function drawSoilDepth() {
+    soilBuf.begin()
+    const nodes = net.nodes
+    for (let i = 0; i < nodes.length; i += SOIL_STRIDE) {
+      const n = nodes[i]
+      if (!n.alive) continue
+      const surf = netY(n.x, n.z, n.side)
+      if (surf > 1.2) continue                  // sigue sobre madera, no en tierra
+      const org = net.origins && net.origins[n.colony]
+      if (!org) continue
+      // Cuanto más cerca del inóculo, más vieja es la colonia ahí y más hondo
+      // llegó a comer. En el borde que recién llega, apenas raspa la superficie.
+      const d = Math.hypot(n.x - org.x, n.z - org.z)
+      const madurez = clamp01(1 - d / (cc.mycelium.bound || 1))
+      // Todo derivado del índice: con rnd() la masa entera temblaría por frame.
+      const h1 = noise2(i * 0.37, 2.1), h2 = noise2(i * 0.71, 5.3), h3 = noise2(i * 1.13, 9.7)
+      // Lóbulos: sin esto todas las hifas bajan lo mismo y la masa se lee como
+      // una cortina pareja. Un ruido de baja frecuencia sobre (x,z) le da bultos
+      // redondeados — bolsones donde el hongo se comió el sustrato en volumen.
+      const lobe = 0.4 + 1.0 * noise2(n.x * 6 + 3, n.z * 6 - 7)
+      // Hasta el frente que recién llega raspa algo: si la profundidad cayera a
+      // cero en el borde, la masa se cortaría en seco en vez de redondearse.
+      const depth = SOIL_DEPTH * (0.22 + 0.78 * madurez) * lobe * (0.35 + 0.65 * h1)
+      if (depth < 0.6) continue
+      const x = n.x * R, z = n.z * R
+      const dx = (h2 - 0.5) * depth * 1.2, dz = (h3 - 0.5) * depth * 1.2
+      const base = C_COLONY[n.colony] || C_COLONY[0]
+      const bx = x + dx, by = surf - depth, bz = z + dz
+      const f = edgeFade(n.x, n.z)
+      soilBuf.push(x, surf, z, bx, by, bz, tint(base, f * 0.5), tint(base, f * 0.12))
+      // Bifurcación al fondo: la masa se abre, no termina en una punta seca.
+      const fl = depth * 0.4
+      for (const s of [-1, 1]) {
+        soilBuf.push(bx, by, bz,
+          bx + s * fl * (0.4 + h3 * 0.6), by - fl * 0.5, bz + s * fl * (0.4 + h2 * 0.6),
+          tint(base, f * 0.12), tint(base, 0))
+      }
+    }
+    soilBuf.commit()
+  }
+
   // ─── LÍNEA DE DEMARCACIÓN (zone line). Donde dos colonias incompatibles se
   // traban, ninguna avanza y las dos depositan pigmento: en la madera podrida
   // eso es la raya oscura que separa un hongo del otro. Es una MANCHA, no una
@@ -1274,6 +1327,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     }
     drawNetwork()
     drawFront()
+    drawSoilDepth()
     updateFace(step)
     drawFace()
     drawZone()
