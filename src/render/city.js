@@ -1,9 +1,12 @@
 import * as THREE from 'three'
 import { createStage } from './stage.js'
 import { createDraw } from './engine/points.js'
+import { createAgentKit } from './engine/agents3d.js'
+import { createTrails } from './engine/trails.js'
 import { cityGrid } from './cityGrid.js'
 import { fbm } from './noise.js'
 import { createBoxBuilder, rgbToHex, shadeGeometry } from './boxbuilder.js'
+import { PALETTE } from '../config.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -14,6 +17,8 @@ function pick(arr) { return arr[(rnd() * arr.length) | 0] }
 //   we = nivel de suelo de la calle. R_CITY = radio aproximado del bloque.
 const Wt = 62, Gt = 13, Kt = 2.4, we = -4
 const R_CITY = Wt * 1.18
+// `qt` del original: mitad de calzada útil para tráfico (spawn/rejoin de agentes).
+const qt = Wt * 0.85
 // `p.streets` en el bundle original vale 2 (no está en CONFIG del proyecto):
 // valor de paridad fijo, no expuesto todavía como opción.
 const STREETS = 2
@@ -43,7 +48,7 @@ const FLOWERS = 1
 export function createCityScene(container, cfg, agentNames = []) {
   const rc = cfg.render
   const stage = createStage(container, cfg)
-  const { scene } = stage
+  const { scene, camera, labelEl } = stage
   const draw = createDraw(rc)
 
   // Puntos de interés registrados para tareas siguientes (coordenadas
@@ -957,8 +962,6 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   An()
 
-  stage.setResizeHook((m) => { draw.uniforms.uProj.value = m.proj })
-
   // IMPORTANTE: finalizePoints/finalizeLines suben los buffers de `draw` a
   // la GPU una sola vez. Todo `draw.pushPoint`/`draw.pushLine` (los tallos y
   // cabezas de flor de `kn`) debe empujarse ANTES de esta llamada — no
@@ -967,13 +970,469 @@ export function createCityScene(container, cfg, agentNames = []) {
   draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true }))
   draw.finalizePoints(scene)
 
+  // ─── AGENTES DE CIUDAD: roster (`Pn`), init (`In`) y física (`Rn`) ────────
+  // Puerto fiel de la rama CIUDAD del bundle real
+  // (`.superpowers/port/city-agents-real.min.js`): mismo kit de geometría
+  // que el bosque (`createAgentKit`/`scene.js`), pero con reparto de
+  // especies, escala, asignación dweller/tráfico y física de movimiento
+  // propias de la ciudad. Todo está gobernado por FLAGS del agente
+  // (`dweller`, `offroad`, `kind`), nunca por nombre.
+  const TRAF_H = { whiteC: 3.2, cyanC: 3.2, eye: 3, flag: 2.72, dbl: 1.5 }
+  const kit = createAgentKit(rc)
+  const { fatLine, edgesOf, ringLoop, creature, wedge } = kit
+
+  // `Pn` (rama ciudad): pool ponderado, reparto proporcional, shuffle y
+  // relleno de faltantes desde un subconjunto reducido.
+  function buildRoster(count) {
+    const pool = [['whiteC', 3], ['cyanC', 4], ['flag', 4], ['dbl', 3], ['eye', 2]]
+    let total = 0
+    for (const [, w] of pool) total += w
+    const out = []
+    for (const [kind, w] of pool) {
+      const share = Math.max(1, Math.round(w / total * count))
+      for (let c = 0; c < share; c++) out.push(kind)
+    }
+    for (let a = out.length - 1; a > 0; a--) {
+      const l = (rnd() * (a + 1)) | 0
+      const tmp = out[a]; out[a] = out[l]; out[l] = tmp
+    }
+    while (out.length < count) out.push(pick(['cyanC', 'flag', 'dbl', 'whiteC']))
+    out.length = count
+    return out
+  }
+
+  // Geometría por especie: idéntica a la del bosque (`scene.js`); `whiteC`
+  // es la única variante nueva (misma jaula cúbica que `cyanC`, en blanco).
+  function buildAgentVisual(kind) {
+    const group = new THREE.Group()
+    let cage = null
+    let effR = 3.3, rollMul = 0, glide = false, spinY = 0
+    if (kind === 'cyanC' || kind === 'whiteC') {
+      cage = new THREE.Group()
+      cage.add(edgesOf(new THREE.BoxGeometry(6, 6, 6), kind === 'cyanC' ? PALETTE.cyan : PALETTE.white))
+      cage.add(creature(1.15))
+      group.add(cage)
+      rollMul = 1; effR = 3.3
+    } else if (kind === 'eye') {
+      cage = new THREE.Group()
+      cage.add(rnd() < 0.55
+        ? fatLine(wedge(1.15), PALETTE.white)
+        : edgesOf(new THREE.OctahedronGeometry(3.6), PALETTE.white))
+      group.add(cage)
+      const deco = new THREE.Group()
+      const disc = new THREE.Mesh(new THREE.CircleGeometry(1, 28),
+        new THREE.MeshBasicMaterial({ color: PALETTE.magenta, side: THREE.DoubleSide }))
+      disc.rotation.x = -Math.PI / 2
+      deco.add(disc)
+      deco.add(ringLoop(1.55, 40, PALETTE.cyanEye))
+      deco.add(fatLine([0, 1, 0, 0, 4, 0], PALETTE.magenta))
+      const ball = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10),
+        new THREE.MeshBasicMaterial({ color: PALETTE.white }))
+      ball.position.set(0, 4, 0)
+      deco.add(ball)
+      group.add(deco)
+      glide = rnd() < 0.55
+      rollMul = glide ? 0 : 0.3
+      effR = 6
+    } else if (kind === 'flag') {
+      const lo = -2.6, hi = 5, r = 2.8
+      const tri = [
+        0, lo, r, -r * 0.86, lo, -r * 0.5,
+        -r * 0.86, lo, -r * 0.5, r * 0.86, lo, -r * 0.5,
+        r * 0.86, lo, -r * 0.5, 0, lo, r,
+      ]
+      group.add(fatLine(tri, pick([PALETTE.blue, PALETTE.magenta, PALETTE.cyanSat])))
+      group.add(fatLine([0, lo, 0, 0, hi, 0],
+        pick([PALETTE.yellow, PALETTE.magenta, PALETTE.orange])))
+      const ring = ringLoop(0.85, 30, pick([PALETTE.pink, PALETTE.cyanEye, PALETTE.yellow]))
+      ring.position.y = hi
+      group.add(ring)
+      spinY = 0.5
+    } else {
+      // 'dbl': dos anillos amarillos y un núcleo naranja.
+      const a = ringLoop(1.15, 34, PALETTE.yellow); a.position.y = 0.5
+      const b = ringLoop(0.75, 30, PALETTE.yellow); b.position.y = -0.5
+      group.add(a); group.add(b)
+      group.add(new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10),
+        new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
+      spinY = 0.7
+    }
+    return { group, cage, effR, rollMul, glide, spinY }
+  }
+
+  // `In` (rama ciudad): escala compacta, altura de tráfico por especie y
+  // asignación dweller (vive dentro de una manzana) vs. tráfico (sigue calle).
+  const density = cfg.wander.density
+  const n = cfg.fireflies.count
+  const roster = buildRoster(n)
+  const agents = []
+  for (let i = 0; i < n; i++) {
+    const kind = roster[i]
+    const visual = buildAgentVisual(kind)
+    const a = {
+      group: visual.group, cage: visual.cage, kind,
+      effR: visual.effR, colR: 2, rollMul: visual.rollMul, glide: visual.glide, spinY: visual.spinY,
+      vel: new THREE.Vector3((rnd() - 0.5) * 2, 0, (rnd() - 0.5) * 2),
+      speedScale: 0.6 + rnd() * 0.85,
+      wanderAng: rnd() * 6.2832,
+      state: 'move', stateT: 1 + rnd() * 4,
+    }
+    const c = (0.9 + rnd() * 0.55) * 0.67
+    a.group.scale.setScalar(c)
+    a.baseScale = c
+    a.effR *= c
+    a.colR *= c
+    a.trafH = (TRAF_H[kind] || 2.4) * c + 0.18
+
+    a.dweller = (kind === 'flag' || kind === 'dbl') && rnd() < 0.45 && blocks.length > 0
+    if (a.dweller) {
+      let found = -1, bx = 0, bz = 0
+      for (let tries = 0; tries < 40 && found < 0; tries++) {
+        const bi = (rnd() * blocks.length) | 0
+        const block = blocks[bi]
+        const x = block.cx + (rnd() * 2 - 1) * (block.hx - 3)
+        const z = block.cz + (rnd() * 2 - 1) * (block.hz - 3)
+        if (nn(block, x, z) < -3 && !un(x, z, 1.5)) { found = bi; bx = x; bz = z }
+      }
+      if (found >= 0) {
+        a.dwB = found
+        a.group.position.set(bx, ln(bx, bz) + a.trafH, bz)
+        a.speedScale *= 0.4
+      } else {
+        a.dweller = false
+      }
+    }
+    if (!a.dweller) {
+      a.tAxis = rnd() < 0.5 ? 0 : 1
+      const roadArr = a.tAxis === 0 ? cutsZ : cutsX
+      a.tRoad = (rnd() * roadArr.length) | 0
+      a.tDir = rnd() < 0.5 ? -1 : 1
+      a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
+      a.tCool = 1 + rnd() * 2
+      a.offroad = false
+      a.offT = 0
+      let along = (rnd() * 2 - 1) * qt * 0.85
+      const cross = roadArr[a.tRoad] + a.tLane
+      for (let tries = 0; tries < 30 && !(an(a.tAxis === 0 ? along : cross, a.tAxis === 0 ? cross : along) > 2); tries++) {
+        along = (rnd() * 2 - 1) * qt * 0.85
+      }
+      if (a.tAxis === 0) a.group.position.set(along, we + a.trafH, cross)
+      else a.group.position.set(cross, we + a.trafH, along)
+      a.vel.set(a.tAxis === 0 ? a.tDir * 3 : 0, 0, a.tAxis === 1 ? a.tDir * 3 : 0)
+    }
+    scene.add(a.group)
+    agents.push(a)
+  }
+
+  // `Rn` (rama ciudad): separación mutua, deambular por curl-noise (atenuado
+  // a 0.3× en tráfico que sigue calzada), contención por SDF de dwellers
+  // dentro de su manzana, seguimiento de carril y reincorporación tras
+  // salirse de la calzada ("offroad"). Puerto verbatim de la fórmula; ver
+  // nota de aproximación en la integración final, donde la fuente se corta.
+  const agentGrad = { x: 0, z: 0 }
+  const motionTmp = {
+    up: new THREE.Vector3(0, 1, 0), dir: new THREE.Vector3(),
+    axis: new THREE.Vector3(), q: new THREE.Quaternion(),
+  }
+  function curl(p, t, out) {
+    const r = 0.06, ii = t * 0.18
+    out.x = Math.sin(p.z * r + ii) - Math.cos(p.y * r * 1.3 - ii * 0.8)
+    out.z = Math.sin(p.x * r * 1.1 + ii * 0.9) - Math.cos(p.z * r + ii * 1.1)
+  }
+  function separate(step) {
+    const rad = 24
+    for (let s = 0; s < agents.length; s++) {
+      const pA = agents[s].group.position
+      for (let c = s + 1; c < agents.length; c++) {
+        const pB = agents[c].group.position
+        const dx = pA.x - pB.x, dz = pA.z - pB.z
+        const distSq = dx * dx + dz * dz
+        if (distSq < rad * rad && distSq > 0.001) {
+          const dist = Math.sqrt(distSq)
+          const kf = 13 * (1 - dist / rad) / dist * step
+          agents[s].vel.x += dx * kf; agents[s].vel.z += dz * kf
+          agents[c].vel.x -= dx * kf; agents[c].vel.z -= dz * kf
+        }
+      }
+    }
+  }
+  function moveAgents(step, time) {
+    separate(step)
+    for (let idx = 0; idx < agents.length; idx++) {
+      const a = agents[idx]
+      const pos = a.group.position
+
+      a.stateT -= step
+      if (a.stateT <= 0) {
+        if (a.state === 'move') {
+          a.state = 'rest'
+          a.stateT = (1.2 + rnd() * 3.5) / density
+        } else {
+          a.state = 'move'
+          a.stateT = (2.5 + rnd() * 5) / density
+          const kickV = 7 + rnd() * 7
+          a.vel.x += Math.cos(a.wanderAng) * kickV
+          a.vel.z += Math.sin(a.wanderAng) * kickV
+        }
+      }
+      const T = a.state === 'move' ? 1 : 0.05
+      // Tráfico que sigue calzada deambula MUCHO menos que el resto.
+      const E = (!a.dweller && !a.offroad) ? 0.3 : 1
+
+      curl(pos, time, agentGrad)
+      a.vel.x += agentGrad.x * 3.5 * step * T * E
+      a.vel.z += agentGrad.z * 3.5 * step * T * E
+      a.wanderAng += (rnd() - 0.5) * 2.2 * step
+      a.vel.x += Math.cos(a.wanderAng) * 4.5 * step * T * E
+      a.vel.z += Math.sin(a.wanderAng) * 4.5 * step * T * E
+
+      const k = 5.2
+      let targetY
+
+      if (a.dweller) {
+        targetY = ln(pos.x, pos.z) + a.trafH
+        if (a.dwB >= blocks.length) a.dwB = 0
+        const block = blocks[a.dwB]
+        const depth = nn(block, pos.x, pos.z)
+        if (depth > -3) {
+          // Gradiente de `nn` por diferencias finitas → empuja de vuelta
+          // hacia el interior de la manzana, proporcional a cuánto se sale.
+          let gx = nn(block, pos.x + 0.6, pos.z) - nn(block, pos.x - 0.6, pos.z)
+          let gz = nn(block, pos.x, pos.z + 0.6) - nn(block, pos.x, pos.z - 0.6)
+          const glen = Math.hypot(gx, gz) || 1
+          gx /= glen; gz /= glen
+          const push = (depth + 3) * 5.5 * step
+          a.vel.x -= gx * push
+          a.vel.z -= gz * push
+          if (depth > -1.2) {
+            const along = a.vel.x * gx + a.vel.z * gz
+            if (along > 0) { a.vel.x -= gx * along; a.vel.z -= gz * along }
+          }
+        }
+      } else if (a.offroad) {
+        targetY = ln(pos.x, pos.z) + a.trafH
+        a.offT -= step
+        const dCenter = Math.hypot(pos.x, pos.z)
+        if (dCenter > Wt * 0.9) {
+          a.vel.x -= pos.x / dCenter * 6 * step
+          a.vel.z -= pos.z / dCenter * 6 * step
+        }
+        if (a.offT <= 0) {
+          a.offroad = false
+          let best = 1e9, bestAxis = 0, bestRoad = 0
+          for (let ri = 0; ri < cutsZ.length; ri++) {
+            const dz2 = Math.abs(pos.z - cutsZ[ri])
+            if (dz2 < best) { best = dz2; bestAxis = 0; bestRoad = ri }
+          }
+          for (let ri = 0; ri < cutsX.length; ri++) {
+            const dx2 = Math.abs(pos.x - cutsX[ri])
+            if (dx2 < best) { best = dx2; bestAxis = 1; bestRoad = ri }
+          }
+          a.tAxis = bestAxis
+          a.tRoad = bestRoad
+          a.tDir = rnd() < 0.5 ? -1 : 1
+          a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
+          a.tCool = 2
+        }
+      } else {
+        targetY = ln(pos.x, pos.z) + a.trafH
+        const roadArr = a.tAxis === 0 ? cutsZ : cutsX
+        if (a.tRoad >= roadArr.length) a.tRoad = roadArr.length - 1
+        const laneCenter = roadArr[a.tRoad] + a.tLane
+        if (a.tAxis === 0) {
+          a.vel.z += (laneCenter - pos.z) * 4.8 * step
+          a.vel.z *= 1 - 2.6 * step
+          a.vel.x += a.tDir * 9 * step * T
+        } else {
+          a.vel.x += (laneCenter - pos.x) * 4.8 * step
+          a.vel.x *= 1 - 2.6 * step
+          a.vel.z += a.tDir * 9 * step * T
+        }
+        a.tCool -= step
+
+        const sdf = an(pos.x, pos.z)
+        if (sdf > 0.5 && rnd() < 0.016 * step) {
+          a.offroad = true
+          a.offT = 5 + rnd() * 8
+          on(pos.x, pos.z, agentGrad)
+          a.vel.x -= agentGrad.x * 5
+          a.vel.z -= agentGrad.z * 5
+        }
+        if (!a.offroad && sdf > -0.5) {
+          const lookAhead = Gt * 0.95 + a.colR
+          const aheadBlocked = an(
+            pos.x + (a.tAxis === 0 ? a.tDir * lookAhead : 0),
+            pos.z + (a.tAxis === 1 ? a.tDir * lookAhead : 0),
+          ) < 2
+          if (a.tCool <= 0 || aheadBlocked) {
+            const crossArr = a.tAxis === 0 ? cutsX : cutsZ
+            const along = a.tAxis === 0 ? pos.x : pos.z
+            for (let ci = 0; ci < crossArr.length; ci++) {
+              if (Math.abs(along - crossArr[ci]) < Gt * 0.5) {
+                if (rnd() < 0.55 || aheadBlocked) {
+                  a.tAxis = 1 - a.tAxis
+                  a.tRoad = ci
+                  const newAlong = a.tAxis === 0 ? pos.x : pos.z
+                  a.tDir = Math.abs(newAlong) > qt * 0.4 ? (newAlong > 0 ? -1 : 1) : (rnd() < 0.5 ? -1 : 1)
+                  if (an(
+                    a.tAxis === 0 ? pos.x + a.tDir * Gt * 0.9 : pos.x,
+                    a.tAxis === 1 ? pos.z + a.tDir * Gt * 0.9 : pos.z,
+                  ) < 2) a.tDir *= -1
+                  a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
+                  a.tCool = 2.4 + rnd()
+                } else {
+                  a.tCool = 1.3
+                }
+                break
+              }
+            }
+          }
+          if (aheadBlocked && an(
+            pos.x + (a.tAxis === 0 ? a.tDir * Gt * 0.5 : 0),
+            pos.z + (a.tAxis === 1 ? a.tDir * Gt * 0.5 : 0),
+          ) < 2) {
+            a.tDir *= -1
+            a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
+            a.tCool = 1
+          }
+          const alongNow = a.tAxis === 0 ? pos.x : pos.z
+          if (alongNow * a.tDir > qt) {
+            a.tDir *= -1
+            a.tLane = a.tDir * (0.12 + rnd() * 0.12) * Gt
+            a.tCool = 1.2
+          }
+          if (Math.abs(alongNow) > Wt * 0.96) {
+            if (a.tAxis === 0) { pos.x = (pos.x > 0 ? 1 : -1) * Wt * 0.96; a.vel.x *= -0.3 }
+            else { pos.z = (pos.z > 0 ? 1 : -1) * Wt * 0.96; a.vel.z *= -0.3 }
+          }
+        }
+        if (!a.offroad) {
+          const clearance = 0.7 + a.colR * 0.35
+          if (sdf < clearance) {
+            on(pos.x, pos.z, agentGrad)
+            pos.x += agentGrad.x * (clearance - sdf) * 0.55
+            pos.z += agentGrad.z * (clearance - sdf) * 0.55
+            const inward = a.vel.x * agentGrad.x + a.vel.z * agentGrad.z
+            if (inward < 0) { a.vel.x -= agentGrad.x * inward * 1.5; a.vel.z -= agentGrad.z * inward * 1.5 }
+          }
+        }
+      }
+
+      a.vel.y += (targetY - pos.y) * k * step
+      a.vel.y *= 1 - 2.2 * step
+      if (a.state === 'rest') { a.vel.x *= 1 - 1.8 * step; a.vel.z *= 1 - 1.8 * step }
+
+      // Integración final: la fuente real (`city-agents-real.min.js`) se
+      // corta exactamente aquí (termina a mitad de "p.world===`pond`"). Se
+      // aproxima con arrastre horizontal + tope de velocidad por
+      // `speedScale`, el mismo patrón de arrastre/tope que usa el resto del
+      // proyecto (`sim/wander.js`) — es la ÚNICA parte de `Rn` que no pudo
+      // portarse verbatim por falta de fuente.
+      const drag = 1 - 2 * step
+      a.vel.x *= drag
+      a.vel.z *= drag
+      const sp = Math.hypot(a.vel.x, a.vel.z)
+      const maxSp = 9 * a.speedScale
+      if (sp > maxSp) { const f = maxSp / sp; a.vel.x *= f; a.vel.z *= f }
+
+      pos.x += a.vel.x * step
+      pos.y += a.vel.y * step
+      pos.z += a.vel.z * step
+
+      // Orientación: mismo patrón que `updateAgentMotion` del bosque
+      // (agents3d.js), adaptado a velocidad directa en unidades de mundo
+      // (los agentes de ciudad no usan roamers normalizados).
+      const wspeed = Math.hypot(a.vel.x, a.vel.z)
+      if (a.glide) {
+        if (wspeed > 0.05) a.group.rotation.y = Math.atan2(a.vel.x, a.vel.z)
+      } else if (a.rollMul > 0 && a.cage && wspeed > 1e-4) {
+        motionTmp.dir.set(a.vel.x, 0, a.vel.z).normalize()
+        motionTmp.axis.crossVectors(motionTmp.up, motionTmp.dir)
+        if (motionTmp.axis.lengthSq() < 1e-5) motionTmp.axis.set(1, 0, 0)
+        motionTmp.axis.normalize()
+        motionTmp.q.setFromAxisAngle(motionTmp.axis, (wspeed * step) / a.effR * a.rollMul)
+        a.cage.quaternion.premultiply(motionTmp.q)
+      } else if (a.spinY) {
+        a.group.rotation.y += a.spinY * step
+      }
+    }
+  }
+
+  // Precalentamiento (como `In`): 320 pasos de 1/60s antes del primer
+  // frame, para que el tráfico y los dwellers no arranquen "congelados".
+  let clock = 0
+  for (let f = 0; f < 320; f++) { clock += 1 / 60; moveAgents(1 / 60, clock) }
+
+  // Estelas: un único tono rojo/rosa (`en` = #FF3B59), igual para todas las
+  // especies — a diferencia del bosque, la ciudad no varía el color de
+  // estela por especie.
+  const worldPos = new Float32Array(n * 3)
+  const trails = createTrails(scene, n, [0xff3b59], rc, draw.pointMaterial)
+  const _proj = new THREE.Vector3()
+  let lx = 0, ly = 0
+
+  stage.setResizeHook((m) => {
+    draw.uniforms.uProj.value = m.proj
+    kit.setResolution(m.w * m.dpr, m.h * m.dpr)
+  })
+
   function update(swarm, dt, eco) {
-    stage.render(dt || 0.016)
+    const step = dt || 0.016
+    clock += step
+    moveAgents(step, clock)
+
+    for (let i = 0; i < n; i++) {
+      const p = agents[i].group.position
+      worldPos[i * 3] = p.x; worldPos[i * 3 + 1] = p.y; worldPos[i * 3 + 2] = p.z
+    }
+
+    // Destello: mismo pulso que el bosque (jaula si existe, si no el grupo).
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      const pulse = 1 + swarm.flash[i] * 0.35
+      if (a.cage) a.cage.scale.setScalar(pulse)
+      else a.group.scale.setScalar(a.baseScale * pulse)
+    }
+
+    // Etiqueta: el agente visible más cercano al centro de pantalla.
+    let bestI = -1, bestD = 0.16
+    for (let i = 0; i < n; i++) {
+      _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
+      if (_proj.z > 1) continue // detrás de la cámara
+      const d = Math.hypot(_proj.x, _proj.y)
+      if (d < bestD) { bestD = d; bestI = i; lx = _proj.x; ly = _proj.y }
+    }
+    if (bestI >= 0 && agentNames[bestI]) {
+      const { w, h, ox, oy } = stage.metrics
+      labelEl.style.left = ox + (lx * 0.5 + 0.5) * w + 'px'
+      labelEl.style.top = oy + (-ly * 0.5 + 0.5) * h + 'px'
+      labelEl.textContent = agentNames[bestI]
+      labelEl.style.opacity = '1'
+    } else {
+      labelEl.style.opacity = '0'
+    }
+
+    trails.update(worldPos)
+
+    stage.render(step)
     return []
   }
 
-  // Temporal: la sacudida no tiene efecto aún hasta que haya agentes/mundo real.
-  function scare(strength) {}
+  // "Sacudir" la ciudad: empujón radial hacia afuera para cada agente,
+  // como el `scare` del bosque pero sobre el arreglo propio de agentes de
+  // ciudad (magnitud ajustada a las unidades de mundo del tráfico/curl-
+  // noise, no a las unidades normalizadas de los roamers del bosque).
+  function scare(strength = 1) {
+    for (const a of agents) {
+      const pos = a.group.position
+      const m = Math.hypot(pos.x, pos.z) || 1e-3
+      const kf = (6 + rnd() * 10) * strength
+      a.vel.x += (pos.x / m) * kf + (rnd() - 0.5) * kf * 1.5
+      a.vel.z += (pos.z / m) * kf + (rnd() - 0.5) * kf * 1.5
+      a.state = 'move'
+      a.stateT = 1.2 + rnd() * 1.5
+    }
+  }
 
   return {
     update,
