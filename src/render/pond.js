@@ -36,8 +36,9 @@ export function createPond(container, cfg, agentNames = []) {
   const Y = [0.004, 0.01, 0.028]        // agua base (casi negro)
   const Mt = [0.02, 0.07, 0.23]         // azul profundo
   const Nt = [0.115, 0.38, 1.0]         // azul eléctrico (glow)
-  const SAND_LO = [0.66, 0.43, 0.415]   // arcilla (jt)
-  const SAND_HI = [0.935, 0.72, 0.635]  // arena clara (J)
+  // Piedra oscura, mojada (roca de río/mar de Chile): gris-carbón frío, no arena.
+  const SAND_LO = [0.065, 0.072, 0.085]  // roca húmeda en sombra
+  const SAND_HI = [0.30, 0.315, 0.35]    // canto iluminado (gris frío)
   const RIM = [0.07, 0.68, 0.62]        // brillo cian de borde (Et)
   const clamp01 = (v) => Math.max(0, Math.min(1, v))
   const smooth = (t) => { const c = clamp01(t); return c * c * (3 - 2 * c) }
@@ -86,7 +87,7 @@ export function createPond(container, cfg, agentNames = []) {
     return Math.hypot(lx / L.rx, lz / L.rz) // <1 dentro de la huella
   }
   function kt(x, z) { let m = 0; for (const L of lobes) m = Math.max(m, 1 - Math.min(1, lobeQ(L, x, z))); return m }
-  function wt(x, z) { let m = 0; for (const L of lobes) m = Math.max(m, smooth((1.5 - lobeQ(L, x, z)) / 1.2)); return m }
+  function wt(x, z) { let m = 0; for (const L of lobes) m = Math.max(m, smooth((3.2 - lobeQ(L, x, z)) / 2.9)); return m }
   function edgeMask(x, z) { // rim en la línea de agua (q≈1)
     let m = 0; for (const L of lobes) m = Math.max(m, clamp01(1 - Math.abs(lobeQ(L, x, z) - 0.96) / 0.28)); return m
   }
@@ -216,9 +217,15 @@ export function createPond(container, cfg, agentNames = []) {
         varying vec2 vXZ; varying vec3 vCol;
         void main() {
           // Shimmer: reflejos que se deslizan sobre la superficie.
+          // Oleaje multi-octava (olas grandes + rizado fino), como la ref de agua.
           float w = sin(vXZ.x * 0.09 + uTime * 0.7) * sin(vXZ.y * 0.075 - uTime * 0.55)
-                  + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35);
+                  + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35)
+                  + 0.28 * sin(vXZ.x * 0.24 - vXZ.y * 0.19 + uTime * 1.35)
+                  + 0.16 * sin(vXZ.x * 0.51 + vXZ.y * 0.44 - uTime * 2.1);
           float glint = smoothstep(0.75, 1.4, w);
+          // Cáusticas: red fina que se arrastra sobre el agua.
+          float c1 = sin(vXZ.x * 0.33 + uTime * 0.9) * sin(vXZ.y * 0.29 - uTime * 0.75);
+          float caustic = pow(max(0.0, c1), 3.0) * 0.5;
           // Wake: anillos que se expanden donde pasa un elemento.
           float wake = 0.0;
           for (int i = 0; i < N; i++) {
@@ -228,9 +235,9 @@ export function createPond(container, cfg, agentNames = []) {
             wake += smoothstep(3.2, 0.0, abs(d - r.z)) * r.w;
           }
           wake = min(wake, 1.5);
-          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + wake * vec3(0.32, 0.60, 0.98);
+          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72) + wake * vec3(0.32, 0.60, 0.98);
           float lum = dot(vCol, vec3(0.5, 0.6, 0.7));
-          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + wake * 0.55, 0.0, 0.92);
+          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + caustic * 0.1 + wake * 0.55, 0.0, 0.92);
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -286,13 +293,13 @@ export function createPond(container, cfg, agentNames = []) {
     }
     // Espuma blanca en la línea de agua (con phase = balanceo).
     if (shore.length) {
-      const foamN = Math.min(2600, Math.floor(70 * (L.rx + L.rz)))
+      const foamN = Math.min(7000, Math.floor(210 * (L.rx + L.rz)))
       for (let i = 0; i < foamN; i++) {
         const p2 = shore[q() * shore.length | 0]
         const lx = p2[0] - L.x, lz = p2[1] - L.z, dd = Math.hypot(lx, lz) || 1
         const be = Math.pow(q(), 2) * 2, va = (q() - 0.5) * 1.2
         pushPoint(p2[0] + lx / dd * be - lz / dd * va, ht + 0.06 + Math.pow(q(), 2.2) * 0.9, p2[1] + lz / dd * be + lx / dd * va,
-          [1, 1, 1], 0.1 + q() * 0.2, 0.05 + q() * 0.95)
+          [1, 1, 1], 0.055 + q() * 0.1, 0.05 + q() * 0.95)
       }
       // 1–2 ramas secas (driftwood) por isla.
       const branches = 1 + (q() * 2 | 0)
@@ -323,7 +330,7 @@ export function createPond(container, cfg, agentNames = []) {
         if (fbm(pos.getX(vi) * 0.4 + seed * 2.3 + 9, pos.getZ(vi) * 0.4, 2) < 0.55) continue
         pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.08, L.z + pos.getZ(vi), [0.26 + q() * 0.12, 0.42 + q() * 0.14, 0.24], 0.18 + q() * 0.22, 0)
       }
-      let want = 8 + (q() * 10 | 0)
+      let want = 26 + (q() * 22 | 0)
       for (let guard = 0; want > 0 && guard < 400; guard++) {
         const vi = up[q() * up.length | 0]
         if (nrm.getY(vi) < 0.5) continue
@@ -381,7 +388,7 @@ export function createPond(container, cfg, agentNames = []) {
       for (let a = 0; a < n; a++) {
         const o = q() * 6.2832, s = Math.pow(q(), 0.7) * rad
         pushPoint(sp[0] + Math.cos(o) * s, ht + 0.08 + Math.pow(q(), 2) * 0.5, sp[1] + Math.sin(o) * s,
-          [1, 1, 1], 0.11 + q() * 0.2, 0.05 + q() * 0.95)
+          [1, 1, 1], 0.07 + q() * 0.12, 0.05 + q() * 0.95)
       }
     }
   }
@@ -404,7 +411,7 @@ export function createPond(container, cfg, agentNames = []) {
 
   // ─── NIEBLA azul (Bt): 4200 puntos aditivos sobre la laguna ───────────────
   const hazeUniforms = createHaze(scene, {
-    R: mt * 1.28, G, count: P.hazeCount, color: [0.14, 0.42, 1.0], alpha: 0.16,
+    R: mt * 1.72, G, count: P.hazeCount, color: [0.12, 0.35, 1.0], alpha: 0.2,
     heightFn: () => P.waterLevel,
   }).uniforms
 
@@ -433,7 +440,25 @@ export function createPond(container, cfg, agentNames = []) {
     })
     trailColors.push(KIND_COLOR[kind])
   }
-  const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial)
+  // AGENTES EXTRA (decorativos): más vida en la laguna sin tocar el swarm/censo
+  // del host (esos son los `n` nombrados). No llevan etiqueta ni estela.
+  const EXTRA = 16
+  const extras = []
+  for (let i = 0; i < EXTRA; i++) {
+    const kind = pool[q() * pool.length | 0]
+    const { group, params } = buildSpecies(kind, kit)
+    group.scale.setScalar(0.85 + q() * 0.5)
+    scene.add(group)
+    extras.push({
+      group, cage: params.rollMul > 0 ? group.children[0] : null,
+      idx: n + i, homeY: 0.4 + q() * 1.2,
+      dive: params.dive, hover: params.hover, spinY: params.spinY,
+    })
+  }
+
+  // yOffset negativo: las estelas se siembran POR ENCIMA del agente para que
+  // floten sobre la superficie del agua (si no, quedan sumergidas e invisibles).
+  const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial, -0.3)
 
   // Cardúmenes de peces bajo el agua (boids). state.fish expone posiciones.
   const fish = createFishRender(scene, cfg, q)
@@ -532,12 +557,25 @@ export function createPond(container, cfg, agentNames = []) {
 
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
-  const LR = mt * 0.92
+  const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
+  const LR = mt * 1.45
   const worldPos = new Float32Array(n * 3)
   let simTime = 0
   function mapPositions(dt, t) {
     simTime += dt
     updateRoamers(roamers, cfg.wander, dt, q, simTime, null, null, null)
+    updateRoamers(extraRoamers, cfg.wander, dt, q, simTime + 31.7, null, null, null)
+    for (let i = 0; i < EXTRA; i++) {
+      const a = extras[i], r = extraRoamers[i]
+      let j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
+      if (j < bedY + 0.9) j = bedY + 0.9
+      a.group.position.set(r.x * LR, j, r.z * LR)
+      if (a.spinY) a.group.rotation.y += a.spinY * dt
+      if (j < ht + 1.2) {
+        a.group.rotation.x = Math.sin(t * 1.7 + a.idx) * 0.085
+        a.group.rotation.z = Math.cos(t * 1.5 + a.idx) * 0.085
+      }
+    }
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
       // Física de agua (spec §4.3): unas bucean (dive>0), otras planean (dive<0).
@@ -557,7 +595,8 @@ export function createPond(container, cfg, agentNames = []) {
   function lensNDC(px, py) {
     let sx = px, sy = py
     for (let it = 0; it < 3; it++) {
-      const rn = Math.hypot(sx, sy) / 0.7071
+      // rn del shader = |cc|/0.7071 con cc = uv-0.5 (max 0.5) → en NDC es |ndc|/1.4142.
+      const rn = Math.hypot(sx, sy) / 1.4142
       const f = (1 - _fk) + _fk * rn * rn
       sx = px / f; sy = py / f
     }
@@ -580,10 +619,17 @@ export function createPond(container, cfg, agentNames = []) {
     rippleTimer -= step
     if (rippleTimer <= 0) {
       // Varios focos por tick: agentes cerca de la superficie + peces al tope.
+      // Cuanto más rápido va un agente cerca de la superficie, más agua mueve.
       let spawned = 0
-      for (let t = 0; t < 8 && spawned < 3; t++) {
+      for (let t = 0; t < 14 && spawned < 5; t++) {
         const i = q() * n | 0
-        if (Math.abs(worldPos[i * 3 + 1] - ht) < 1.8) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 0.9 + q() * 0.3); spawned++ }
+        const dy = Math.abs(worldPos[i * 3 + 1] - ht)
+        if (dy > 2.2) continue
+        const r = roamers[i]
+        const sp = Math.hypot(r.vx, r.vz) * LR
+        const near = 1 - dy / 2.2
+        spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], (0.5 + Math.min(1.2, sp * 0.9)) * near)
+        spawned++
       }
       const f = fish.state.fish
       for (let t = 0; t < 3; t++) { const k = q() * f.length | 0; if (f[k] && f[k].y > ht - 2.4) spawnRipple(f[k].x * mt, f[k].z * mt, 0.5) }
@@ -647,6 +693,9 @@ export function createPond(container, cfg, agentNames = []) {
     if (ptrX !== null) {
       let bestD = 0.14
       for (let i = 0; i < n; i++) {
+        // Ocluido por una isla (el agente está por debajo de su superficie ahí):
+        // no mostrar su etiqueta sobre la roca. `lobeTop` = -Inf fuera de islas.
+        if (worldPos[i * 3 + 1] < lobeTop(worldPos[i * 3], worldPos[i * 3 + 2]) + 0.5) continue
         _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 3, worldPos[i * 3 + 2]).project(stage.camera)
         if (_proj.z > 1) continue
         const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
