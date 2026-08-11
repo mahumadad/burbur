@@ -1368,6 +1368,19 @@ export function createScene(container, cfg, agentNames = []) {
   let _lx = 0, _ly = 0
   let ptrX = null, ptrY = null // posición del mouse en NDC (null = fuera del canvas)
   function setPointer(x, y) { ptrX = x; ptrY = y }
+  // El lente fisheye del post-proceso desplaza la posición VISUAL del agente
+  // respecto a su NDC lógico (nulo al centro, fuerte al borde). Para que el hover
+  // matchee lo que se ve, distorsiono la proyección igual que el shader del lente.
+  const _fk = Math.min(rc.fisheye, 0.62)
+  function lensNDC(px, py) {
+    let sx = px, sy = py
+    for (let it = 0; it < 3; it++) {
+      const rn = Math.hypot(sx, sy) / 0.7071
+      const f = (1 - _fk) + _fk * rn * rn
+      sx = px / f; sy = py / f
+    }
+    return [sx, sy]
+  }
   const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1
@@ -1530,12 +1543,13 @@ export function createScene(container, cfg, agentNames = []) {
     // Etiqueta: SOLO al pasar el mouse por encima de un agente (no en el centro).
     let bestI = -1
     if (ptrX !== null) {
-      let bestD = 0.12 // umbral de "encima" en NDC (agentes chicos y en movimiento)
+      let bestD = 0.14 // umbral de "encima" en NDC (agentes chicos y en movimiento)
       for (let i = 0; i < n; i++) {
         _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
         if (_proj.z > 1) continue // detrás de la cámara
-        const d = Math.hypot(_proj.x - ptrX, _proj.y - ptrY)
-        if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+        const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
+        const d = Math.hypot(vx - ptrX, vy - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = vx; _ly = vy }
       }
     }
     if (bestI >= 0 && agentNames[bestI]) {
