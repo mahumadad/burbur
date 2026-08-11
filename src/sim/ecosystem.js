@@ -96,6 +96,52 @@ export const CELL_PROFILE = {
 /** Fases en las que la célula está en mitosis: se redondea y deja de migrar. */
 export const MITOTIC_PHASES = new Set(['prophase', 'metaphase', 'anaphase', 'telophase'])
 
+// ── MICELIO ──────────────────────────────────────────────────────────────────
+// El "día" es el ciclo de humedad y temperatura: la red crece de NOCHE y al ALBA
+// (con rocío) y se detiene al mediodía seco. `light` mantiene la escena tenue y
+// fría (suelo del bosque); `gain` no cae del todo de noche para que se vea el
+// foxfire. Ver spec §9.
+export const FUNGUS_PHASES = [
+  'medianoche', 'madrugada', 'rocío del alba', 'primera luz',
+  'mañana', 'media mañana', 'mediodía seco', 'siesta',
+  'tarde', 'frescor', 'anochecer', 'relente',
+]
+
+const FUNGUS_PHASE = [
+  { act: 0.85, temp: 8, light: [0.34, 0.42, 0.55], gain: 0.78 }, // medianoche
+  { act: 0.92, temp: 6, light: [0.36, 0.44, 0.58], gain: 0.76 }, // madrugada
+  { act: 1.00, temp: 7, light: [0.55, 0.58, 0.62], gain: 0.86 }, // rocío del alba
+  { act: 0.86, temp: 10, light: [0.72, 0.70, 0.62], gain: 0.98 }, // primera luz
+  { act: 0.64, temp: 13, light: [0.82, 0.80, 0.70], gain: 1.06 }, // mañana
+  { act: 0.48, temp: 16, light: [0.88, 0.86, 0.76], gain: 1.10 }, // media mañana
+  { act: 0.28, temp: 19, light: [0.92, 0.90, 0.80], gain: 1.12 }, // mediodía seco
+  { act: 0.30, temp: 18, light: [0.90, 0.88, 0.78], gain: 1.08 }, // siesta
+  { act: 0.44, temp: 16, light: [0.86, 0.82, 0.72], gain: 1.02 }, // tarde
+  { act: 0.62, temp: 13, light: [0.72, 0.68, 0.66], gain: 0.94 }, // frescor
+  { act: 0.78, temp: 11, light: [0.50, 0.52, 0.60], gain: 0.86 }, // anochecer
+  { act: 0.86, temp: 9, light: [0.38, 0.44, 0.58], gain: 0.80 }, // relente
+]
+
+// El "clima" es la humedad: el eje que de verdad manda para un hongo.
+export const FUNGUS_MOISTURE = [
+  'empapado', 'lluvia', 'niebla', 'rocío', 'secándose', 'seco', 'helada',
+]
+
+const FUNGUS_MEDIUM = {
+  'empapado': { act: 1.05, tension: 0.05, temp: -1, rain: 0.20, fog: 0.50 },
+  'lluvia': { act: 1.00, tension: 0.10, temp: -1, rain: 1.00, fog: 0.60 },
+  'niebla': { act: 0.92, tension: 0.10, temp: 0, rain: 0.05, fog: 0.72 },
+  'rocío': { act: 0.98, tension: 0.08, temp: 0, rain: 0.02, fog: 0.42 },
+  'secándose': { act: 0.55, tension: 0.30, temp: 1, rain: 0.00, fog: 0.20 },
+  'seco': { act: 0.22, tension: 0.50, temp: 2, rain: 0.00, fog: 0.05 }, // la red se detiene
+  'helada': { act: 0.30, tension: 0.45, temp: -6, rain: 0.00, fog: 0.55 }, // gatilla fructificación
+}
+
+export const FUNGUS_PROFILE = {
+  phases: FUNGUS_PHASES, phaseData: FUNGUS_PHASE,
+  weathers: FUNGUS_MOISTURE, weatherData: FUNGUS_MEDIUM,
+}
+
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const lerp = (a, b, t) => a + (b - a) * t
 

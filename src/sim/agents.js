@@ -83,6 +83,47 @@ export const CELL_CENSUS = [
   { name: 'la onda de calcio', type: 'signal', static: true },
 ]
 
+/**
+ * Censo del MICELIO. Los individuos VISIBLES (jaula + nombre) son la fauna del
+ * suelo — móviles, sin artículo, como la fauna del bosque. La red NO es un
+ * agente: es el terreno del mundo (como la membrana en la célula). Las colonias,
+ * la propia red y el sustrato hablan desde el censo INVISIBLE (con artículo; son
+ * también las claves del léxico por nombre). Ver spec §6.
+ */
+export const FUNGUS_CENSUS = [
+  // soil_fauna — los visibles con jaula y nombre (móviles)
+  { name: 'colémbolo', type: 'soil_fauna' },
+  { name: 'nematodo', type: 'soil_fauna' },        // presa: el hongo lo caza
+  { name: 'ácaro', type: 'soil_fauna' },
+  { name: 'cochinilla de humedad', type: 'soil_fauna' },
+  { name: 'lombriz', type: 'soil_fauna' },
+  { name: 'milpiés', type: 'soil_fauna' },
+  { name: 'larva de escarabajo', type: 'soil_fauna' },
+  { name: 'tijereta', type: 'soil_fauna' },
+  { name: 'babosa', type: 'soil_fauna' },
+  { name: 'pseudoescorpión', type: 'soil_fauna' },
+  // colony — los hongos en guerra (no deambulan: son la red; hablan)
+  { name: 'Pleurotus', type: 'colony', static: true },
+  { name: 'Trametes', type: 'colony', static: true },
+  { name: 'Armillaria', type: 'colony', static: true },   // la que brilla de noche
+  // mycelium — la red misma, hablando de lo que hace
+  { name: 'el frente de avance', type: 'mycelium', static: true },
+  { name: 'el cordón', type: 'mycelium', static: true },
+  { name: 'el rizomorfo', type: 'mycelium', static: true },
+  { name: 'la hifa', type: 'mycelium', static: true },
+  { name: 'la anastomosis', type: 'mycelium', static: true },
+  // substrate — el tronco y la despensa (paisaje que suena)
+  { name: 'el tronco', type: 'substrate', static: true },
+  { name: 'la corteza', type: 'substrate', static: true },
+  { name: 'la albura', type: 'substrate', static: true },
+  { name: 'el duramen', type: 'substrate', static: true },
+  { name: 'la hojarasca', type: 'substrate', static: true },
+  { name: 'la ramita', type: 'substrate', static: true },
+  { name: 'el escarabajo muerto', type: 'substrate', static: true }, // nitrógeno
+  { name: 'el caracol vacío', type: 'substrate', static: true },     // calcio
+  { name: 'el musgo', type: 'substrate', static: true },
+]
+
 /** Censo del estanque, por tipo. Fauna de humedal chilena, en español (coherente
  * con el bosque). Móviles sin artículo; estáticos con artículo. */
 export const POND_CENSUS = [
