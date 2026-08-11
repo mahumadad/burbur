@@ -212,6 +212,19 @@ export const CONFIG = {
     // Cuánto esfuerzo de forrajeo aplica cada punta por segundo. Es lo que
     // agota el sustrato y, por lo tanto, lo que hace que la red se remodele.
     eatRate: 2.2,
+    // Fructificación (spec §7): se GANA cazando nitrógeno. Un nematodo cazado
+    // suma `trapNitrogen`; al juntar `nitrogenThreshold` + choque de frío +
+    // humedad, empujan los cuerpos fructíferos. Duraciones en segundos reales.
+    fruiting: {
+      nitrogenThreshold: 5, nitrogenCost: 5, trapNitrogen: 1.4,
+      shockDelta: 2.5, shockWindow: 30, moistureMin: 0.25,
+      co2Max: 0.62, lightMin: 0.5,
+      primordiaDuration: 6, expandingDuration: 9, sporulatingDuration: 12, senescentDuration: 6,
+      sporeRate: 26, deformedSporeFactor: 0.2,
+    },
+    // Trampa de nematodos (Pleurotus es nematófago): si un nematodo pasa sobre
+    // el micelio a menos de esto, queda atrapado. Es lo que da el nitrógeno.
+    trapRadius: 0.05,
     fauna: 10,              // agentes visibles de fauna del suelo
     litter: 900,            // puntos de hojarasca
     logDither: 5200,        // puntos de textura del tronco
