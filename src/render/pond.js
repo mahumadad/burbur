@@ -5,6 +5,7 @@ import { createHaze } from './engine/haze.js'
 import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
 import { lichenRosette, mossClump, LICHEN_ORANGE, LICHEN_PALE } from './engine/crust.js'
+import { createRain, createSnow } from './engine/weather.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
@@ -670,7 +671,7 @@ export function createPond(container, cfg, agentNames = []) {
 
   // Wake: pool de ondas que se expanden y desvanecen; se siembran donde un
   // elemento cruza/roza la superficie (agentes cerca del nivel, peces al tope).
-  let rippleHead = 0, rippleTimer = 0
+  let rippleHead = 0, rippleTimer = 0, dropTimer = 0
   function spawnRipple(x, z, str) {
     waterUniforms.uRipples.value[rippleHead].set(x, z, 0.5, str)
     rippleHead = (rippleHead + 1) % RIPPLES
@@ -701,6 +702,11 @@ export function createPond(container, cfg, agentNames = []) {
       rippleTimer = 0.07 + q() * 0.1
     }
   }
+
+  // ─── CLIMA: lluvia y nieve sobre la laguna (mismo motor que el bosque) ────
+  // La lluvia arranca por encima del agua, no del suelo del bosque.
+  const rain = createRain(scene, mt * 1.35, ht + 1)
+  const snow = createSnow(scene, mt * 1.35, ht + 1, pointUniforms.uProj)
 
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
@@ -777,6 +783,26 @@ export function createPond(container, cfg, agentNames = []) {
       stage.labelEl.style.opacity = '1'
     } else {
       stage.labelEl.style.opacity = '0'
+    }
+
+    // Clima: cae lluvia (o nieve si hiela) y cada gota pica el agua.
+    if (eco) {
+      const snowing = eco.temperature <= -3
+      const rainI = snowing ? 0 : eco.rain
+      rain.update(step, rainI)
+      snow.update(step, clock, snowing ? (0.6 + eco.rain * 0.6) : 0)
+      // Gotas sobre la superficie: ondas chicas y numerosas según la intensidad.
+      if (rainI > 0.02) {
+        dropTimer -= step
+        if (dropTimer <= 0) {
+          const drops = 1 + (q() * (1 + rainI * 5) | 0)
+          for (let d = 0; d < drops; d++) {
+            const a = q() * 6.2832, rr = Math.sqrt(q()) * mt * 1.1
+            spawnRipple(Math.cos(a) * rr, Math.sin(a) * rr, 0.22 + rainI * 0.3)
+          }
+          dropTimer = 0.03 + q() * 0.06
+        }
+      }
     }
 
     updateRipples(step)
