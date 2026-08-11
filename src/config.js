@@ -196,9 +196,11 @@ export const CONFIG = {
     // hojarasca alrededor (antes llenaba la pantalla y no se leía como tronco).
     // logCurve: curvatura del eje (rad por unidad de u) → tronco curvo tipo
     // banana, no un cilindro recto (referencia alikim: medio toro, arc = PI).
-    // logCurveUp: cuánto se elevan las puntas (arco vertical) → el tronco se
-    // arquea hacia arriba, con el centro apoyado y los extremos levantados.
-    substrate: { logAngle: 0.6, logCurve: 1.15, logCurveUp: 0.18, logHalfLength: 0.52, logRadius: 0.15, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
+    // ARCO: el tronco se arquea como un puente — el centro se eleva (`logArch`,
+    // la "guata" hacia arriba) y las dos puntas se HUNDEN en la tierra
+    // (`logBury`), dejando un túnel debajo donde anidan los bichos. `logCurve`
+    // es la curva horizontal (banana), aquí suave para no competir con el arco.
+    substrate: { logAngle: 0.6, logCurve: 0.55, logArch: 0.5, logBury: 0.34, logHalfLength: 0.52, logRadius: 0.15, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
     // Ajustado al look de placa de cultivo (referencia del usuario): más puntas
     // = borde más plumoso; más ramificación + autotropismo = rosetón radial que
     // se esparce parejo; más widthGain = rizomorfos (cordones) marcados.

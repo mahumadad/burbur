@@ -116,12 +116,14 @@ export function createFungusScene(container, cfg, agentNames = []) {
    * rota `k` rad por unidad → tronco curvo tipo banana. */
   const k = cc.substrate.logCurve || 0
   const baseA = cc.substrate.logAngle
-  const upAmp = cc.substrate.logCurveUp || 0
+  const archAmp = cc.substrate.logArch || 0
+  const buryAmp = cc.substrate.logBury || 0
   function centerX(u) { return k ? (Math.sin(baseA + k * u) - Math.sin(baseA)) / k : logAx * u }
   function centerZ(u) { return k ? (Math.cos(baseA) - Math.cos(baseA + k * u)) / k : logAz * u }
-  /** Elevación vertical del eje: las puntas suben (arco hacia arriba); el centro
-   * (u=0) queda apoyado. En unidades de MUNDO. */
-  function centerY(u) { const t = u / halfLen; return upAmp * t * t * R * LOG_HEIGHT_SCALE }
+  /** Arco vertical del eje: el CENTRO se eleva (guata hacia arriba) y las dos
+   * PUNTAS se hunden bajo el suelo (t=±1 → -buryAmp). Deja un túnel en el medio.
+   * En unidades de MUNDO. */
+  function centerY(u) { const t = u / halfLen; return (archAmp * (1 - t * t) - buryAmp * t * t) * R * LOG_HEIGHT_SCALE }
   function perpX(u) { return -Math.sin(baseA + k * u) }
   function perpZ(u) { return Math.cos(baseA + k * u) }
   /** El punto más cercano del eje curvo a (x,z): devuelve [u, v] (v = offset
@@ -214,44 +216,53 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // curva, no una lámina. La corteza rugosa (ruido en radio + color) va en toda
   // la vuelta; el musgo y la red se apoyan en la mitad de arriba. ────────────
   {
-    const NU = 130, NA = 40           // segmentos a lo largo × alrededor
+    const NU = 200, NA = 64           // fina: los surcos necesitan resolución
     const u0 = -halfLen - logR, u1 = halfLen + logR
     const pos = [], col = [], idx = []
+    // Paletas de corteza para variar el TONO (no solo el brillo): gris, pardo
+    // rojizo, pardo oscuro — como una corteza real, no un marrón plano.
+    const BARK_A = [0.30, 0.22, 0.15]   // pardo claro (crestas)
+    const BARK_B = [0.16, 0.10, 0.06]   // pardo oscuro
+    const BARK_C = [0.20, 0.19, 0.17]   // gris (líquenes/edad)
     for (let i = 0; i <= NU; i++) {
       const u = u0 + (u1 - u0) * (i / NU)
       const uc = Math.max(-halfLen, Math.min(halfLen, u))
       const over = Math.max(0, Math.abs(u) - halfLen)
-      // Radio local: ahusado + cierre redondeado en las puntas (cap→0).
       const cap = Math.sqrt(Math.max(0, 1 - (over / logR) * (over / logR)))
       const worldR = logRAt(uc) * cap * R
       const cx = centerX(u) * R, cz = centerZ(u) * R
       const px = perpX(u), pz = perpZ(u)
       const axisY = logRAt(uc) * R * LOG_HEIGHT_SCALE
       const f = edgeFade(centerX(u), centerZ(u))
+      const cy = centerY(u)
       for (let a = 0; a <= NA; a++) {
         const th = (a % NA) / NA * Math.PI * 2
-        const st = Math.sin(th), ct = Math.cos(th) // th=0 arriba, th=π abajo
-        // TEXTURA DE CORTEZA: PLAQUETAS/SURCOS longitudinales — la firma de la
-        // corteza. Alrededor del tronco hay ~16 crestas separadas por surcos
-        // hondos, onduladas a lo largo del eje. Las crestas SOBRESALEN (radio) y
-        // van claras; los surcos se hunden y van oscuros.
-        const wander = noise2(u * 1.6, th * 0.5) * 3.0
-        const plate = Math.abs(Math.sin(th * 8 + wander + u * 2.5))   // 0 surco, 1 cresta
-        const micro = noise2(u * 26 + a, th * 6)                       // grano fino
-        const rough = 1 + 0.14 * plate + 0.04 * (micro - 0.5) * 2       // crestas afuera
-        const rr = worldR * rough
+        const st = Math.sin(th), ct = Math.cos(th)
+        // SURCOS PROFUNDOS: ~13 crestas alrededor, onduladas a lo largo, que
+        // MUERDEN la silueta (crestas afuera, surcos MUY adentro) — así el
+        // contorno se ve dentado, no un chorizo liso.
+        const wander = noise2(u * 1.3, th * 0.5) * 4
+        const plate = Math.pow(Math.abs(Math.sin(th * 6.5 + wander + u * 2)), 0.7) // 0 surco, 1 cresta
+        const knots = noise2(u * 3, th * 1.2)                     // bultos/nudos anchos
+        const micro = noise2(u * 34 + a, th * 9)                   // grano fino
+        const rough = 1 + 0.22 * plate - 0.14 * (1 - plate) + 0.10 * (knots - 0.5) + 0.05 * (micro - 0.5) * 2
+        const rr = worldR * Math.max(0.5, rough)
         const x = cx + px * rr * st
         const z = cz + pz * rr * st
-        const y = Math.max(0, axisY + centerY(u) + rr * ct)   // no baja del suelo
+        const y = axisY + cy + rr * ct                            // puede hundirse bajo el suelo (puntas)
         pos.push(x, y, z)
-        // Color: surcos MUY oscuros, crestas más claras; arriba (ct>0) algo más
-        // iluminado (mundo unlit). Contraste alto = se lee la textura.
-        const topLight = 0.5 + 0.5 * Math.max(0, ct)
-        const shade = (0.18 + 0.9 * plate) * (0.7 + 0.4 * micro) * topLight * f
-        let cr = 0.11 + 0.32 * shade, cg = 0.075 + 0.19 * shade, cb = 0.045 + 0.1 * shade
-        const weather = noise2(u * 1.4 + 40, th * 1.2)
-        if (weather > 0.74 && ct > 0) { cr *= 0.85; cg *= 1.15; cb *= 0.95 } // verdín arriba
-        col.push(cr, cg, cb)
+        // COLOR: mezcla de tres tonos por ruido (gris/rojizo/oscuro), surcos
+        // hundidos MUY oscuros, crestas iluminadas; arriba algo más claro.
+        const mixAB = plate                                       // cresta→A, surco→B
+        const grey = Math.max(0, (noise2(u * 1.1 - 15, th * 0.9) - 0.55) * 3) // parches grises
+        let br = BARK_A[0] * mixAB + BARK_B[0] * (1 - mixAB)
+        let bg = BARK_A[1] * mixAB + BARK_B[1] * (1 - mixAB)
+        let bb = BARK_A[2] * mixAB + BARK_B[2] * (1 - mixAB)
+        br = br * (1 - grey) + BARK_C[0] * grey
+        bg = bg * (1 - grey) + BARK_C[1] * grey
+        bb = bb * (1 - grey) + BARK_C[2] * grey
+        const light = (0.35 + 0.85 * plate) * (0.75 + 0.35 * micro) * (0.55 + 0.5 * Math.max(0, ct)) * f
+        col.push(br * light * 2.6, bg * light * 2.6, bb * light * 2.6)
       }
     }
     const ring = NA + 1
