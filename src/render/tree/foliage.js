@@ -1,0 +1,156 @@
+// Follaje: racimos instanciados. Cada instancia son DOS QUADS PERPENDICULARES
+// (técnica EZ-Tree) con la celda del atlas que le corresponde, así el racimo se
+// lee desde cualquier ángulo en vez de girar siempre hacia la cámara como
+// hacían los puntos.
+
+/**
+ * Geometría base: dos quads en cruz, 8 vértices, 4 triángulos. Instanciada
+ * (no BufferGeometry normal): un THREE.Mesh con InstancedBufferAttribute
+ * necesita InstancedBufferGeometry, si no las instancias no se dibujan.
+ */
+function geometriaCruz(THREE) {
+  const g = new THREE.InstancedBufferGeometry()
+  const h = 0.5
+  const pos = new Float32Array([
+    -h, -h, 0, h, -h, 0, h, h, 0, -h, h, 0,     // quad A (plano XY)
+    0, -h, -h, 0, -h, h, 0, h, h, 0, h, -h,     // quad B (plano ZY)
+  ])
+  const uv = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1])
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+  g.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7])
+  return g
+}
+
+/** Interpola linealmente entre dos colores [r,g,b]. */
+const mezclar = (a, b, t) => [
+  a[0] + (b[0] - a[0]) * t,
+  a[1] + (b[1] - a[1]) * t,
+  a[2] + (b[2] - a[2]) * t,
+]
+
+/**
+ * @param {Array} tips        salida de growSkeleton
+ * @param {object} def        SPECIES[especie]
+ * @param {THREE.Texture} atlas
+ * @returns {{mesh, uniforms, geometry, material, leafAnchors, flowerAnchors}}
+ *   `leafAnchors`: Float32Array de 9 floats por racimo de hoja — posición(3) +
+ *   color verde(3) + color de otoño(3) — mismo formato que consume
+ *   `tintLeafAnchors` de litter.js.
+ *   `flowerAnchors`: Float32Array de 6 floats por racimo de flor — posición(3)
+ *   + color(3) — listo para `litter.update`/`litter.burst`.
+ *   Van separadas (y no mezcladas en un solo array) porque `litter` tiene un
+ *   pool distinto para hoja y para pétalo, con formas y perfiles de caída
+ *   distintos: si se mezclaran, a veces caería un "pétalo" con forma de hoja
+ *   verde, o una "hoja" rosada.
+ */
+export function buildFoliage(tips, def, atlas, THREE, rnd) {
+  const n = Math.min(tips.length, def.clusters)
+  const geo = geometriaCruz(THREE)
+
+  const iPos = new Float32Array(n * 3)
+  const iYear = new Float32Array(n)
+  const iScale = new Float32Array(n)
+  const iRot = new Float32Array(n)
+  const iCell = new Float32Array(n * 2)   // desplazamiento en el atlas
+
+  const leafAnchors = []
+  const flowerAnchors = []
+
+  const celdaHoja = [0, 0], celdaFlor = [0.5, 0]
+  const cLeafLo = def.colors.leaf[0], cLeafHi = def.colors.leaf[1]
+  const autumnPar = def.colors.autumn || def.colors.leaf
+  const cAutLo = autumnPar[0], cAutHi = autumnPar[1]
+  const florPar = def.colors.flower || [[1, 1, 1], [1, 1, 1]]
+  const cFlorLo = florPar[0], cFlorHi = florPar[1] || florPar[0]
+
+  for (let i = 0; i < n; i++) {
+    const t = tips[(i * 7919) % tips.length]   // barajado determinista
+    const j = (0.3 + rnd() * 0.7)
+    iPos[i * 3] = t.p.x + (rnd() - 0.5) * j
+    iPos[i * 3 + 1] = t.p.y + (rnd() - 0.5) * j
+    iPos[i * 3 + 2] = t.p.z + (rnd() - 0.5) * j
+    iYear[i] = t.year
+    iScale[i] = 1.1 + rnd() * 0.9
+    iRot[i] = rnd() * 6.2832
+    // Una fracción de los racimos son de FLOR; el resto de hoja.
+    const esFlor = !!def.colors.flower && rnd() < (def.flowerRatio || 0.35)
+    iCell[i * 2] = esFlor ? celdaFlor[0] : celdaHoja[0]
+    iCell[i * 2 + 1] = esFlor ? celdaFlor[1] : celdaHoja[1]
+
+    const px = iPos[i * 3], py = iPos[i * 3 + 1], pz = iPos[i * 3 + 2]
+    if (esFlor) {
+      const c = mezclar(cFlorLo, cFlorHi, rnd())
+      flowerAnchors.push(px, py, pz, c[0], c[1], c[2])
+    } else {
+      const g = rnd()
+      const verde = mezclar(cLeafLo, cLeafHi, g)
+      const otono = mezclar(cAutLo, cAutHi, g)
+      leafAnchors.push(px, py, pz, verde[0], verde[1], verde[2], otono[0], otono[1], otono[2])
+    }
+  }
+
+  geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3))
+  geo.setAttribute('iYear', new THREE.InstancedBufferAttribute(iYear, 1))
+  geo.setAttribute('iScale', new THREE.InstancedBufferAttribute(iScale, 1))
+  geo.setAttribute('iRot', new THREE.InstancedBufferAttribute(iRot, 1))
+  geo.setAttribute('iCell', new THREE.InstancedBufferAttribute(iCell, 2))
+  geo.instanceCount = n
+
+  const uniforms = {
+    uTex: { value: atlas },
+    uT: { value: 0 },
+    uGrowth: { value: 0 },
+    uLeaf: { value: 0 },
+    uFlower: { value: 0 },
+    uAutumn: { value: 0 },
+    uAutumnCol: { value: new THREE.Color(...cAutLo) },
+  }
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    vertexShader: `
+      attribute vec3 iPos; attribute float iYear; attribute float iScale;
+      attribute float iRot; attribute vec2 iCell;
+      uniform float uT, uGrowth, uLeaf, uFlower;
+      varying vec2 vUv; varying float vFlor; varying float vFade;
+      void main() {
+        // ¿Ya le tocó a esta rama? (crecimiento acumulativo)
+        float vivo = smoothstep(iYear, iYear + 1.0, uGrowth);
+        vFlor = step(0.25, iCell.x);
+        // Densidad estacional: la hoja sigue uLeaf, la flor sigue uFlower.
+        float dens = mix(uLeaf, uFlower, vFlor);
+        float k = vivo * dens;
+        vFade = k;
+        float s = iScale * k;
+        // Rotación alrededor de Y + balanceo con el tiempo.
+        float a = iRot + sin(uT * 0.7 + iRot * 3.0) * 0.12;
+        mat2 r = mat2(cos(a), -sin(a), sin(a), cos(a));
+        vec3 p = position * s;
+        p.xz = r * p.xz;
+        p += iPos;
+        p.x += sin(uT * 0.6 + iRot) * 0.25;
+        vUv = uv * 0.5 + iCell;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `
+      precision mediump float;
+      uniform sampler2D uTex; uniform float uAutumn; uniform vec3 uAutumnCol;
+      varying vec2 vUv; varying float vFlor; varying float vFade;
+      void main() {
+        vec4 t = texture2D(uTex, vUv);
+        if (t.a < 0.35 || vFade < 0.02) discard;
+        // Solo la HOJA vira en otoño; la flor conserva su color.
+        vec3 c = mix(t.rgb, uAutumnCol * (0.6 + 0.6 * t.g), uAutumn * (1.0 - vFlor));
+        gl_FragColor = vec4(c, t.a);
+      }`,
+  })
+
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.frustumCulled = false
+  return {
+    mesh, uniforms, geometry: geo, material: mat,
+    leafAnchors: new Float32Array(leafAnchors),
+    flowerAnchors: new Float32Array(flowerAnchors),
+  }
+}

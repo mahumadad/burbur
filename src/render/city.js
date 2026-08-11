@@ -15,6 +15,7 @@ import { createPerchers, updatePerchers } from '../sim/perch.js'
 import { phenology } from '../sim/phenology.js'
 import { SPECIES } from './tree/species.js'
 import { createLitter, tintLeafAnchors } from './tree/litter.js'
+import { createTreeFactory } from './tree/index.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -983,255 +984,56 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   kn()
 
-  // ─── SAKURA: copia mínima del sistema de árbol+follaje del bosque (Task S1)
+  // ─── SAKURA: generador compartido (Task 3) ──────────────────────────────
   // ─────────────────────────────────────────────────────────────────────────
-  // `src/render/scene.js` tiene un sistema completo de árbol (tubos ahusados
-  // recursivos, `tube`/`branch`) + follaje estacional (hojas/flores como
-  // PUNTOS que brotan/abren con `uSeason`/`uLeaf`/`uFlower`/`uAutumn`, mismo
-  // shader) + hojarasca reciclable con deriva por viento (`createLitter`). Se copia
-  // aquí el MÍNIMO necesario para plantar sakuras en la ciudad (sin la rama
-  // de árboles "normales"/troncos caídos del bosque, que la ciudad no usa):
-  // mismo look, mismo shader, sin reinventar nada.
-  const TREE_FILL = 0x130d09, TREE_EDGE = 0xd9d9ba
-  const treePos = [], treeIdx = []
-  const folPos = [], folCol = [], folSize = [], folPhase = [], folKind = [], folBirth = []
-  const folFall = [], folRot = []
-  const petalAnchors = [] // posiciones+color de las flores → lluvia de pétalos
-  const SAKURA_COL = [[1.0, 0.72, 0.82], [1.0, 0.80, 0.90], [1.0, 0.60, 0.74], [0.98, 0.90, 0.96]]
-  const SAKURA_LEAF_LO = [0.09, 0.20, 0.05], SAKURA_LEAF_HI = [0.30, 0.52, 0.13]
-  const SAKURA_AUTUMN = [[0.85, 0.20, 0.06], [0.92, 0.44, 0.05], [0.90, 0.66, 0.10], [0.60, 0.26, 0.08], [0.78, 0.33, 0.10]]
-  const _fperp = new THREE.Vector3()
-  function addSakuraLeaf(p, tan) {
-    _fperp.set(-tan.z, (rnd() - 0.5) * 0.7, tan.x).normalize().multiplyScalar(0.3 + rnd() * 0.8)
-    const g = rnd()
-    folPos.push(p.x + _fperp.x + (rnd() - 0.5) * 0.5, p.y + _fperp.y + (rnd() - 0.5) * 0.5, p.z + _fperp.z + (rnd() - 0.5) * 0.5)
-    folCol.push(
-      SAKURA_LEAF_LO[0] + (SAKURA_LEAF_HI[0] - SAKURA_LEAF_LO[0]) * g,
-      SAKURA_LEAF_LO[1] + (SAKURA_LEAF_HI[1] - SAKURA_LEAF_LO[1]) * g,
-      SAKURA_LEAF_LO[2] + (SAKURA_LEAF_HI[2] - SAKURA_LEAF_LO[2]) * g,
-    )
-    const fc = SAKURA_AUTUMN[(rnd() * SAKURA_AUTUMN.length) | 0]
-    folFall.push(fc[0], fc[1], fc[2]); folRot.push(rnd() * 6.2832)
-    folSize.push(0.6 + rnd() * 0.7); folPhase.push(rnd()); folKind.push(0)
-    folBirth.push(rnd() * 0.12) // brotan temprano en primavera, escalonados
-  }
-  function addSakuraBlossom(p) {
-    const c = SAKURA_COL[(rnd() * SAKURA_COL.length) | 0]
-    const x = p.x + (rnd() - 0.5) * 1.8, y = p.y + (rnd() - 0.5) * 1.8, z = p.z + (rnd() - 0.5) * 1.8
-    folPos.push(x, y, z); folCol.push(c[0], c[1], c[2])
-    folFall.push(c[0], c[1], c[2]); folRot.push(0)
-    folSize.push(0.8 + rnd() * 1.0); folPhase.push(rnd()); folKind.push(1)
-    folBirth.push(0.02 + rnd() * 0.12)
-    petalAnchors.push(x, y, z, c[0], c[1], c[2])
-  }
-  /** Tubo alrededor de una espina, con ahusado y radio perturbado por ruido (puerto de `tube` del bosque). */
-  function sakuraTube(spine, r0, r1, segs, seed) {
-    const base = treePos.length / 3
-    const nseg = spine.length
-    const tan = new THREE.Vector3(), up = new THREE.Vector3()
-    const bx = new THREE.Vector3(), by = new THREE.Vector3()
-    for (let c = 0; c < nseg; c++) {
-      tan.subVectors(spine[Math.min(nseg - 1, c + 1)], spine[Math.max(0, c - 1)]).normalize()
-      up.set(0, 1, 0)
-      if (Math.abs(tan.y) > 0.9) up.set(1, 0, 0)
-      bx.crossVectors(tan, up).normalize()
-      by.crossVectors(tan, bx)
-      const h = c / (nseg - 1)
-      const g = r0 + (r1 - r0) * Math.pow(h, 0.85)
-      const p = spine[c]
-      for (let l = 0; l < segs; l++) {
-        const a = (l / segs) * 6.2832
-        const cv = Math.cos(a), sv = Math.sin(a)
-        const rad = g * (1 + (noise2(p.x * 1.4 + seed + l * 3.7, p.z * 1.4 + p.y * 0.9) - 0.5) * 0.34)
-        treePos.push(
-          p.x + (bx.x * cv + by.x * sv) * rad,
-          p.y + (bx.y * cv + by.y * sv) * rad,
-          p.z + (bx.z * cv + by.z * sv) * rad,
-        )
-      }
-    }
-    for (let c = 0; c < nseg - 1; c++) {
-      for (let l = 0; l < segs; l++) {
-        const x = base + c * segs + l
-        const s2 = base + c * segs + ((l + 1) % segs)
-        const C = x + segs, w = s2 + segs
-        treeIdx.push(x, C, s2, s2, C, w)
-      }
-    }
-  }
-  /** Rama recursiva del sakura: siempre florece (sin la rama de árbol "normal"/tronco caído del bosque). */
-  function sakuraBranch(start, dir, len, radius, depth, maxDepth, seed) {
-    const SEG = 4
-    const spine = [start.clone()]
-    const cur = start.clone()
-    const d = dir.clone()
-    for (let p = 0; p < SEG; p++) {
-      d.x += (rnd() - 0.5) * 0.55
-      d.y += (rnd() - 0.5) * 0.38 + 0.16
-      d.z += (rnd() - 0.5) * 0.55
-      d.normalize()
-      cur.addScaledVector(d, len / SEG)
-      spine.push(cur.clone())
-    }
-    const tip = depth >= maxDepth
-    const rEnd = tip ? 0.03 : radius * (0.52 + rnd() * 0.16)
-    sakuraTube(spine, radius, rEnd, radius > 0.8 ? 9 : radius > 0.35 ? 7 : 5, seed)
-    if (tip) {
-      // Sakura FRONDOSA: bastantes hojas verdes + canopy MUY DENSO de flores rosadas,
-      // repartidas por toda la espina de la ramita (no solo la punta) → volumen.
-      const leafN = 7 + ((rnd() * 8) | 0)   // 7..14
-      for (let k = 0; k < leafN; k++) addSakuraLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
-      const nb = 16 + ((rnd() * 14) | 0)    // 16..29
-      for (let k = 0; k < nb; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
-      return
-    }
-    // Ramas gruesas también llevan follaje (relleno de copa interior), no solo las puntas.
-    if (depth >= 2) {
-      const midB = 3 + ((rnd() * 5) | 0)
-      for (let k = 0; k < midB; k++) addSakuraBlossom(spine[1 + ((rnd() * (spine.length - 1)) | 0)])
-      const midL = 2 + ((rnd() * 3) | 0)
-      for (let k = 0; k < midL; k++) addSakuraLeaf(spine[1 + ((rnd() * (spine.length - 1)) | 0)], d)
-    }
-    // Copa más ramificada → silueta más rica y frondosa.
-    const kids = depth === 0 ? 3 + ((rnd() * 2) | 0)
-      : (rnd() < 0.55 ? 2 : 3) + (rnd() < 0.35 ? 1 : 0)
-    const up = new THREE.Vector3()
-    for (let i = 0; i < kids; i++) {
-      const v = d.clone()
-      up.set(0, 1, 0)
-      if (Math.abs(v.y) > 0.9) up.set(1, 0, 0)
-      const bx = new THREE.Vector3().crossVectors(v, up).normalize()
-      const by = new THREE.Vector3().crossVectors(v, bx)
-      const az = rnd() * 6.2832
-      const spread = 0.35 + rnd() * 0.65
-      const w = bx.multiplyScalar(Math.cos(az)).addScaledVector(by, Math.sin(az))
-      v.multiplyScalar(Math.cos(spread)).addScaledVector(w, Math.sin(spread)).normalize()
-      const from = i === 0 ? spine[spine.length - 1] : spine[1 + ((rnd() * (spine.length - 1)) | 0)]
-      sakuraBranch(from.clone(), v, len * (0.6 + rnd() * 0.22),
-        rEnd * (0.85 + rnd() * 0.2), depth + 1, maxDepth, seed)
-    }
-  }
+  // Antes de esta tarea la ciudad tenía su propia copia del árbol+follaje del
+  // bosque (`sakuraTube`/`sakuraBranch`/`addSakuraLeaf`/`addSakuraBlossom` +
+  // un follaje de PUNTOS que siempre giraba hacia la cámara). Ahora usa el
+  // mismo `createTreeFactory` que el bosque: esqueleto → corteza con shader
+  // de crecimiento → follaje de racimos instanciados (dos quads en cruz, con
+  // atlas pintado en canvas), que se lee bien desde cualquier ángulo.
+  const arboles = createTreeFactory(THREE, noise2)
+  const sakuras = []
+  const leafAnchors = []    // 9 floats por racimo de hoja: pos(3)+verde(3)+otoño(3)
+  const petalAnchors = []   // 6 floats por racimo de flor: pos(3)+color(3)
 
   // Siembra 1–3 sakuras en interiores de manzana: bien adentro (`nn`≤-6, lejos
   // de la calle) y lejos de cualquier edificio ya colocado (`un`), separadas
   // entre sí. `En()` (definido arriba) pondera por área, igual que el resto
   // de la vegetación de la ciudad (`kn`).
-  const sakuraTrees = []
   {
     const want = 2 + ((rnd() * 2) | 0) // 2..3 (más presencia)
-    for (let guard = 0; sakuraTrees.length < want && guard < 200 && blocks.length; guard++) {
+    for (let guard = 0; sakuras.length < want && guard < 200 && blocks.length; guard++) {
       const block = En()
       const tx = block.cx + (rnd() * 2 - 1) * Math.max(0, block.hx - 9)
       const tz = block.cz + (rnd() * 2 - 1) * Math.max(0, block.hz - 9)
       if (nn(block, tx, tz) > -6) continue
       if (un(tx, tz, 9)) continue
-      if (sakuraTrees.some((s) => Math.hypot(tx - s.x, tz - s.z) < 16)) continue
-      // Altura proporcionada: un sakura urbano, más bajo que los edificios.
-      // La frondosidad viene de la densidad de copa (hojas/flores), no del tamaño.
-      const treeLen = 6.5 + rnd() * 3   // ~6.5..9.5
+      if (sakuras.some((s) => Math.hypot(tx - s.x, tz - s.z) < 16)) continue
       const gy = ln(tx, tz)
-      // maxDepth 4 → copa densa y ramificada, pero con ramas cortas → árbol compacto.
-      sakuraBranch(new THREE.Vector3(tx, gy - 0.6, tz),
-        new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
-        treeLen, 0.85 + rnd() * 0.45, 0, 4, rnd() * 97)
-      // Copa como posado (mismo formato que las cimas de edificio, línea ~444:
-      // normalizado por R_CITY, `h` = altura absoluta sobre `we`) + nieve.
-      poiPerch.push({ x: tx / R_CITY, z: tz / R_CITY, h: (gy + treeLen * 0.55) - we })
-      sakuraTrees.push({ x: tx, z: tz })
+      const t = arboles.createTree({
+        species: 'sakura',
+        origin: new THREE.Vector3(tx, gy - 0.6, tz),
+        dir: new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
+        rnd,
+      })
+      t.setGrowth(99)   // adulto: el ciclo de vida real llega en la Task 4
+      scene.add(t.group)
+      t.x = tx; t.z = tz
+      sakuras.push(t)
+      // Copa como posadero (mismo formato que las cimas de edificio, línea
+      // ~444: normalizado por R_CITY, `h` = altura absoluta sobre `we`).
+      poiPerch.push({ x: tx / R_CITY, z: tz / R_CITY, h: (gy + SPECIES.sakura.form.len * 0.55) - we })
+      // Semillas de nieve sobre la copa: un vértice de cada cinco de la
+      // corteza ya crecida (mismo muestreo que usaba el tronco combinado).
+      const bp = t.barkGeometry.attributes.position
+      for (let i = 0; i < bp.count; i += 5) capPos.push(bp.getX(i), bp.getY(i) + 0.1, bp.getZ(i))
+      for (let i = 0; i < t.leafAnchors.length; i++) leafAnchors.push(t.leafAnchors[i])
+      for (let i = 0; i < t.flowerAnchors.length; i++) petalAnchors.push(t.flowerAnchors[i])
     }
   }
-  if (treeIdx.length) {
-    for (let i = 0; i < treePos.length; i += 3 * 5) {
-      capPos.push(treePos[i], treePos[i + 1] + 0.1, treePos[i + 2])
-    }
-    const tg = new THREE.BufferGeometry()
-    tg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(treePos), 3))
-    tg.setIndex(treeIdx)
-    scene.add(new THREE.Mesh(tg, new THREE.MeshBasicMaterial({
-      color: TREE_FILL, side: THREE.DoubleSide, fog: true,
-      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
-    })))
-    scene.add(new THREE.LineSegments(
-      new THREE.WireframeGeometry(tg),
-      new THREE.LineBasicMaterial({ color: TREE_EDGE, transparent: true, opacity: 0.55, fog: true }),
-    ))
-  }
 
-  // ─── FOLLAJE del sakura: hojas/flores que brotan y abren con la estación,
-  // MISMO shader que el bosque (`scene.js`), compartiendo uProj/uT con `draw`.
-  const foliageUniforms = {
-    uProj: draw.uniforms.uProj, uT: draw.uniforms.uT,
-    uSeason: { value: 0 }, uLeaf: { value: 0 }, uFlower: { value: 0 }, uAutumn: { value: 0 },
-  }
-  if (folPos.length) {
-    const fg = new THREE.BufferGeometry()
-    fg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(folPos), 3))
-    fg.setAttribute('hcol', new THREE.BufferAttribute(new Float32Array(folCol), 3))
-    fg.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(folSize), 1))
-    fg.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(folPhase), 1))
-    fg.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array(folKind), 1))
-    fg.setAttribute('aBirth', new THREE.BufferAttribute(new Float32Array(folBirth), 1))
-    fg.setAttribute('aFall', new THREE.BufferAttribute(new Float32Array(folFall), 3))
-    fg.setAttribute('aRot', new THREE.BufferAttribute(new Float32Array(folRot), 1))
-    const foliageMat = new THREE.ShaderMaterial({
-      uniforms: foliageUniforms, transparent: true, depthWrite: false,
-      vertexShader: `
-        attribute vec3 hcol; attribute float hsize; attribute float hphs;
-        attribute float aKind; attribute float aBirth; attribute vec3 aFall; attribute float aRot;
-        uniform float uProj, uT, uSeason, uLeaf, uFlower, uAutumn;
-        varying vec3 vC; varying float vKind; varying float vRot;
-        void main() {
-          vec3 p = position;
-          float ph = hphs * 6.2831;
-          p.x += sin(uT * 0.7 + ph) * 0.5;
-          p.z += cos(uT * 0.6 + ph * 1.7) * 0.5;
-          p.y += sin(uT * 1.1 + ph * 2.3) * 0.18;
-          float grow = clamp((uSeason - aBirth) / 0.18, 0.0, 1.0);
-          grow = grow * grow * (3.0 - 2.0 * grow);
-          float amount = (aKind < 0.5) ? uLeaf : uFlower;
-          float g = grow * amount;
-          vec3 col = (aKind < 0.5) ? mix(hcol, aFall, uAutumn) : hcol;
-          col *= 0.9 + 0.14 * sin(uT * 2.0 + ph * 5.0);
-          vC = col; vKind = aKind; vRot = aRot + uT * 0.15;
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          float vd = max(-mv.z, 0.001);
-          float sz = hsize * (0.12 + 0.88 * g);
-          gl_PointSize = (g < 0.02) ? 0.0 : clamp(sz * uProj / vd, 1.0, 48.0);
-          gl_Position = projectionMatrix * mv;
-        }`,
-      fragmentShader: `
-        precision mediump float;
-        varying vec3 vC; varying float vKind; varying float vRot;
-        void main() {
-          vec2 uv = gl_PointCoord - 0.5;
-          if (vKind > 0.5) {
-            float d = length(uv) * 2.0;
-            if (d > 1.0) discard;
-            gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
-            return;
-          }
-          float s = sin(vRot), c = cos(vRot);
-          vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
-          float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
-          if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
-          float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
-          float rib = smoothstep(0.06, 0.0, abs(q.x));
-          gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
-        }`,
-    })
-    const fmesh = new THREE.Points(fg, foliageMat)
-    fmesh.frustumCulled = false
-    scene.add(fmesh)
-  }
-
-  // ─── PÉTALOS QUE CAEN: pool reciclable, mismo patrón que el bosque.
-  const leafAnchors = []
-  for (let i = 0; i < folKind.length; i++) {
-    if (folKind[i] === 0) leafAnchors.push(
-      folPos[i * 3], folPos[i * 3 + 1], folPos[i * 3 + 2],
-      folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
-      folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
-  }
+  // ─── PÉTALOS Y HOJAS QUE CAEN: pool reciclable, mismo patrón que el bosque.
   const litter = createLitter({
     THREE, count: 480, ground: we, pointUniforms: draw.uniforms,
   })
@@ -1960,10 +1762,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       // fallback local que usa el bosque).
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.sakura.curve)
-      foliageUniforms.uSeason.value = seasonT
-      foliageUniforms.uLeaf.value = phen.leafShown
-      foliageUniforms.uFlower.value = phen.flowerShown
-      foliageUniforms.uAutumn.value = phen.autumn
+      for (const t of sakuras) t.update(phen, clock)
       anclasHoja(phen.autumn)
       litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
         { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
@@ -2043,10 +1842,12 @@ export function createCityScene(container, cfg, agentNames = []) {
     litter.burst('leaf', 24 * strength * lastPhen.leaf, anclas.leaf)
   }
 
-  // El desmontaje: libera la hojarasca y delega el resto (GPU + nodos del DOM)
-  // en el escenario compartido.
+  // El desmontaje: libera la hojarasca, los árboles (geometrías, materiales y
+  // el atlas de canvas) y delega el resto (GPU + nodos del DOM) en el
+  // escenario compartido.
   function dispose() {
     litter.dispose()
+    arboles.dispose()
     stage.dispose()
   }
 
