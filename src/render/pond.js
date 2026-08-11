@@ -4,6 +4,7 @@ import { createDraw, createPointCloud } from './engine/points.js'
 import { createHaze } from './engine/haze.js'
 import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
+import { lichenRosette, mossClump, LICHEN_ORANGE, LICHEN_PALE } from './engine/crust.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
@@ -232,7 +233,11 @@ export function createPond(container, cfg, agentNames = []) {
             vec4 r = uRipples[i];
             if (r.w <= 0.001) continue;
             float d = distance(vXZ, r.xy);
-            wake += smoothstep(3.2, 0.0, abs(d - r.z)) * r.w;
+            // Tren de ondas: varias crestas que se alejan del impacto y se
+            // amortiguan con la distancia (como una gota real en el agua).
+            float ring = sin((d - r.z) * 1.9) * exp(-abs(d - r.z) * 0.42);
+            float env = smoothstep(9.0, 0.0, abs(d - r.z));
+            wake += max(0.0, ring) * env * r.w;
           }
           wake = min(wake, 1.5);
           vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72) + wake * vec3(0.32, 0.60, 0.98);
@@ -317,18 +322,29 @@ export function createPond(container, cfg, agentNames = []) {
     }
     if (up.length) {
       const area = L.rx * L.rz
-      const lichenN = Math.min(1700, Math.floor(area * 4.6))
-      for (let i = 0; i < lichenN; i++) {
+      // LÍQUENES: rosetas planas (naranja y gris-verde) sembradas en manchas.
+      const rosettes = Math.min(60, Math.max(6, Math.floor(area * 0.16)))
+      for (let i = 0; i < rosettes; i++) {
         const vi = up[q() * up.length | 0]
-        if (fbm(pos.getX(vi) * 0.5 + seed * 1.7, pos.getZ(vi) * 0.5, 2) < 0.42) continue
-        const A = 0.9 + q() * 0.12
-        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.1, L.z + pos.getZ(vi), [1, 0.827 * A, 0.071], 0.09 + q() * 0.14, 0)
+        const fx = pos.getX(vi), fy = pos.getY(vi), fz = pos.getZ(vi)
+        // El ruido decide DÓNDE hay colonia: deja piedra desnuda entre parches.
+        if (fbm(fx * 0.35 + seed * 1.7, fz * 0.35, 2) < 0.42) continue
+        lichenRosette(pushPoint, L.x + fx, L.cy + fy, L.z + fz, {
+          radius: 0.5 + q() * 1.5,
+          color: q() < 0.55 ? LICHEN_ORANGE : LICHEN_PALE,
+          size: 0.085 + q() * 0.06,
+        })
       }
-      const mossN = Math.min(750, Math.floor(area * 2.1))
-      for (let i = 0; i < mossN; i++) {
+      // MUSGO: cúmulos abultados que coronan la piedra (donde junta humedad).
+      const clumps = Math.min(26, Math.max(3, Math.floor(area * 0.07)))
+      for (let i = 0; i < clumps; i++) {
         const vi = up[q() * up.length | 0]
-        if (fbm(pos.getX(vi) * 0.4 + seed * 2.3 + 9, pos.getZ(vi) * 0.4, 2) < 0.55) continue
-        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.08, L.z + pos.getZ(vi), [0.26 + q() * 0.12, 0.42 + q() * 0.14, 0.24], 0.18 + q() * 0.22, 0)
+        const fx = pos.getX(vi), fy = pos.getY(vi), fz = pos.getZ(vi)
+        if (nrm.getY(vi) < 0.42) continue
+        if (fbm(fx * 0.3 + seed * 2.3 + 9, fz * 0.3, 2) < 0.5) continue
+        mossClump(pushPoint, L.x + fx, L.cy + fy, L.z + fz, {
+          radius: 0.8 + q() * 1.8, height: 0.35 + q() * 0.5, density: 0.8 + q() * 0.6,
+        })
       }
       let want = 26 + (q() * 22 | 0)
       for (let guard = 0; want > 0 && guard < 400; guard++) {
@@ -440,6 +456,55 @@ export function createPond(container, cfg, agentNames = []) {
     })
     trailColors.push(KIND_COLOR[kind])
   }
+  // ─── RANAS: bichitos que se suben a las piedras y de a ratos saltan al agua.
+  // Cada una elige un punto ALTO de una isla, se posa un rato, y salta a otra.
+  const FROGN = 7
+  const frogs = []
+  function frogPerch() {
+    const L = lobes[q() * lobes.length | 0]
+    const a = q() * 6.2832, t = q() * 0.62      // dentro de la huella de la isla
+    const fx = L.x + Math.cos(a) * L.rx * t, fz = L.z + Math.sin(a) * L.rz * t
+    const top = lobeTop(fx, fz)
+    return { x: fx, z: fz, y: (top > -Infinity ? top : ht) + 0.35 }
+  }
+  const frogCloud = createPointCloud(FROGN * 3, draw.pointMaterial)
+  for (let i = 0; i < FROGN; i++) {
+    const p0 = frogPerch()
+    frogs.push({ ...p0, tx: p0.x, tz: p0.z, ty: p0.y, wait: 1 + q() * 5, jump: 0 })
+    for (let k = 0; k < 3; k++) {
+      const j = (i * 3 + k) * 3
+      // Verde rana con vientre más claro.
+      frogCloud.col[j] = k === 2 ? 0.72 : 0.22
+      frogCloud.col[j + 1] = k === 2 ? 0.82 : 0.62 + q() * 0.2
+      frogCloud.col[j + 2] = k === 2 ? 0.55 : 0.2
+      frogCloud.size[i * 3 + k] = k === 2 ? 0.16 : 0.3
+    }
+  }
+  scene.add(frogCloud.mesh)
+  function updateFrogs(step) {
+    for (let i = 0; i < FROGN; i++) {
+      const f = frogs[i]
+      if (f.jump > 0) {
+        // Salto: parábola entre la piedra actual y la siguiente.
+        f.jump = Math.max(0, f.jump - step / 0.9)
+        const k = 1 - f.jump
+        f.x += (f.tx - f.x) * 0.12
+        f.z += (f.tz - f.z) * 0.12
+        f.y = f.y + (f.ty - f.y) * 0.12 + Math.sin(k * Math.PI) * 0.22
+        if (f.jump === 0) { f.x = f.tx; f.z = f.tz; f.y = f.ty; f.wait = 2 + q() * 7 }
+      } else {
+        f.wait -= step
+        if (f.wait <= 0) { const p1 = frogPerch(); f.tx = p1.x; f.tz = p1.z; f.ty = p1.y; f.jump = 1 }
+      }
+      // Cuerpo (2 puntos) + ojo.
+      const b = i * 3
+      frogCloud.pos[b * 3] = f.x; frogCloud.pos[b * 3 + 1] = f.y; frogCloud.pos[b * 3 + 2] = f.z
+      frogCloud.pos[(b + 1) * 3] = f.x + 0.22; frogCloud.pos[(b + 1) * 3 + 1] = f.y - 0.05; frogCloud.pos[(b + 1) * 3 + 2] = f.z + 0.1
+      frogCloud.pos[(b + 2) * 3] = f.x - 0.12; frogCloud.pos[(b + 2) * 3 + 1] = f.y + 0.16; frogCloud.pos[(b + 2) * 3 + 2] = f.z - 0.08
+    }
+    frogCloud.commit()
+  }
+
   // AGENTES EXTRA (decorativos): más vida en la laguna sin tocar el swarm/censo
   // del host (esos son los `n` nombrados). No llevan etiqueta ni estela.
   const EXTRA = 16
@@ -558,7 +623,7 @@ export function createPond(container, cfg, agentNames = []) {
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
   const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
-  const LR = mt * 1.45
+  const LR = mt * 1.05
   const worldPos = new Float32Array(n * 3)
   let simTime = 0
   function mapPositions(dt, t) {
@@ -657,6 +722,7 @@ export function createPond(container, cfg, agentNames = []) {
     fish.update(step, clock)      // mueve los peces primero
     huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
     updateBugs(step, clock)
+    updateFrogs(step)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
