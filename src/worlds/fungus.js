@@ -185,11 +185,14 @@ export function createFungusScene(container, cfg, agentNames = []) {
         const [x, z] = uvToWorld(u, v)
         vertOf[i * cols + j] = vc++
         pos.push(x * R, surfaceYUV(u, v), z * R)
-        // Pardo tierra, más oscuro en el borde y con moteado; el musgo lo tapa
-        // casi todo, esto es el suelo que se ve entre las matas.
+        // CORTEZA de verdad: pardo cálido con SURCOS longitudinales (bandas de v
+        // más oscuras, la textura fibrosa de la corteza) + moteado por ruido. Es
+        // la piel que se ve entre las matas de musgo; no un pardo plano.
         const f = edgeFade(x, z)
-        const shade = (0.55 + 0.45 * (Math.abs(v) / lr < 0.6 ? 1 : 0.6)) * (0.8 + 0.4 * noise2(u * 5 + 3, v * 5))
-        col.push(C_HEARTWOOD[0] * shade * f, C_HEARTWOOD[1] * shade * f, C_HEARTWOOD[2] * shade * f)
+        const furrow = 0.6 + 0.4 * Math.abs(Math.sin(v / lr * 9 + noise2(u * 2, v) * 3))
+        const flank = Math.abs(v) / lr < 0.55 ? 1 : 0.7   // el lomo más claro que los costados
+        const shade = furrow * flank * (0.8 + 0.35 * noise2(u * 6 + 3, v * 6)) * f
+        col.push(C_BARK[0] * shade * 3.0, C_BARK[1] * shade * 3.0, C_BARK[2] * shade * 3.0)
       }
     }
     for (let i = 0; i < NU; i++) {
@@ -205,7 +208,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
     geo.setIndex(idx)
     geo.computeVertexNormals()
-    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true })))
+    // DoubleSide: la malla es una cáscara abierta (solo el domo, sin fondo). Con
+    // FrontSide, el lado lejano se descartaba y se VEÍA A TRAVÉS del tronco (se
+    // leía transparente). Con DoubleSide el tronco es opaco desde cualquier ángulo.
+    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })))
   }
 
   // ─── TRONCO (textura): la superficie sólida de arriba le da masa; esto le
