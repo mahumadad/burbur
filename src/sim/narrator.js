@@ -84,6 +84,14 @@ export const FOREST_LEXICON = {
     const a = pick(ACTIONS[ev.agentType] || ACTIONS.static_object, rand)
     return { log: `Algo sobresalta al claro; ${ev.agent} ${a.l}.`, short: `${ev.agent} ${a.s}` }
   },
+  // Ciclo de vida del árbol (Task 4): lo emite el mundo con `kind` cuando
+  // un árbol lush cae. No hay agente involucrado.
+  treeLife: (ctx, ev) => {
+    const map = {
+      fall: { log: 'Un árbol se vino abajo.', short: 'árbol caído' },
+    }
+    return map[ev.kind] || map.fall
+  },
 }
 
 // Célula: vocabulario de biología celular (doc de diseño §7). Además de las

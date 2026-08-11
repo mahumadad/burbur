@@ -16,6 +16,7 @@ import { phenology } from '../sim/phenology.js'
 import { SPECIES } from './tree/species.js'
 import { createLitter, tintLeafAnchors } from './tree/litter.js'
 import { createTreeFactory } from './tree/index.js'
+import { createTreeLife, updateTreeLife } from '../sim/treeLife.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -997,33 +998,52 @@ export function createCityScene(container, cfg, agentNames = []) {
   const leafAnchors = []    // 9 floats por racimo de hoja: pos(3)+verde(3)+otoño(3)
   const petalAnchors = []   // 6 floats por racimo de flor: pos(3)+color(3)
 
-  // Siembra 1–3 sakuras en interiores de manzana: bien adentro (`nn`≤-6, lejos
-  // de la calle) y lejos de cualquier edificio ya colocado (`un`), separadas
-  // entre sí. `En()` (definido arriba) pondera por área, igual que el resto
-  // de la vegetación de la ciudad (`kn`).
-  {
-    const want = 2 + ((rnd() * 2) | 0) // 2..3 (más presencia)
-    for (let guard = 0; sakuras.length < want && guard < 200 && blocks.length; guard++) {
+  // Ciclo de vida (Task 4): años en los que un sakura pasa de plantón a
+  // adulto, envejece, cae y rebrota. Mismos años que usará el bosque.
+  const VIDA_CFG = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+
+  // Busca un punto válido para un sakura: bien adentro de una manzana
+  // (`nn`≤-6, lejos de la calle) y lejos de cualquier edificio ya colocado
+  // (`un`) y de los otros sakuras. Se usa al sembrar y al rebrotar.
+  function puntoSakura() {
+    for (let guard = 0; guard < 200 && blocks.length; guard++) {
       const block = En()
       const tx = block.cx + (rnd() * 2 - 1) * Math.max(0, block.hx - 9)
       const tz = block.cz + (rnd() * 2 - 1) * Math.max(0, block.hz - 9)
       if (nn(block, tx, tz) > -6) continue
       if (un(tx, tz, 9)) continue
       if (sakuras.some((s) => Math.hypot(tx - s.x, tz - s.z) < 16)) continue
-      const gy = ln(tx, tz)
+      return { tx, tz, gy: ln(tx, tz) }
+    }
+    return null
+  }
+
+  // Siembra 1–3 sakuras en interiores de manzana. `En()` (definido arriba)
+  // pondera por área, igual que el resto de la vegetación de la ciudad (`kn`).
+  {
+    const want = 2 + ((rnd() * 2) | 0) // 2..3 (más presencia)
+    for (let guard = 0; sakuras.length < want && guard < 200 && blocks.length; guard++) {
+      const p = puntoSakura()
+      if (!p) continue
+      const { tx, tz, gy } = p
+      const origin = new THREE.Vector3(tx, gy - 0.6, tz)
       const t = arboles.createTree({
         species: 'sakura',
-        origin: new THREE.Vector3(tx, gy - 0.6, tz),
+        origin,
         dir: new THREE.Vector3((rnd() - 0.5) * 0.5, 1, (rnd() - 0.5) * 0.5).normalize(),
         rnd,
       })
-      t.setGrowth(99)   // adulto: el ciclo de vida real llega en la Task 4
+      // Ciclo de vida: arranca como plantón (Task 4). `origin` queda guardado
+      // porque la posición real vive HORNEADA en la geometría (`growSkeleton`
+      // la usa como punto de partida); para reubicar el árbol al rebrotar,
+      // `group.position` se usa como un DESPLAZAMIENTO relativo a este punto.
+      t.vida = createTreeLife(VIDA_CFG, rnd)
+      t.setGrowth(t.vida.growth)
+      t.origin = origin
+      t.perch = null   // un plantón no ofrece posadero (se registra al crecer)
       scene.add(t.group)
-      t.x = tx; t.z = tz
+      t.x = tx; t.z = tz; t.gy = gy
       sakuras.push(t)
-      // Copa como posadero (mismo formato que las cimas de edificio, línea
-      // ~444: normalizado por R_CITY, `h` = altura absoluta sobre `we`).
-      poiPerch.push({ x: tx / R_CITY, z: tz / R_CITY, h: (gy + SPECIES.sakura.form.len * 0.55) - we })
       // Semillas de nieve sobre la copa: un vértice de cada cinco de la
       // corteza ya crecida (mismo muestreo que usaba el tronco combinado).
       const bp = t.barkGeometry.attributes.position
@@ -1711,6 +1731,8 @@ export function createCityScene(container, cfg, agentNames = []) {
     const step = dt || 0.016
     clock += step
     draw.uniforms.uT.value = clock
+    // Eventos del ciclo de vida de los árboles (caída), para el registro.
+    const treeEvents = []
 
     // El ecosistema pinta la ciudad: tinte de la hora, niebla y neblina del
     // clima — mismo tratamiento que el bosque (`scene.js`), sin manto de
@@ -1762,7 +1784,49 @@ export function createCityScene(container, cfg, agentNames = []) {
       // fallback local que usa el bosque).
       const seasonT = eco.seasonT != null ? eco.seasonT : (clock / 210 + 0.35) % 1
       const phen = phenology({ seasonT, rain: eco.rain, wind: eco.wind || 0 }, SPECIES.sakura.curve)
-      for (const t of sakuras) t.update(phen, clock)
+      for (const t of sakuras) {
+        const ev = updateTreeLife(t.vida, VIDA_CFG, step, seasonT)
+        t.setGrowth(t.vida.growth)
+        // El vigor recorta la hoja: un árbol viejo o recién nacido sostiene
+        // menos copa. `leafShown` (no solo `leaf`) porque `Tree.update` la
+        // prefiere cuando está presente (ver tree/index.js).
+        t.update({
+          ...phen,
+          leaf: phen.leaf * t.vida.vigor,
+          leafShown: phen.leafShown * t.vida.vigor,
+        }, clock)
+        if (t.vida.stage === 'fallen') t.group.rotation.z = t.vida.tilt * Math.PI * 0.42
+
+        // Un plantón no ofrece posadero: se registra recién al dejar de serlo.
+        if (!t.perch && t.vida.stage !== 'sapling' && t.vida.stage !== 'fallen') {
+          t.perch = { x: t.x / R_CITY, z: t.z / R_CITY, h: (t.gy + SPECIES.sakura.form.len * 0.55) - we }
+          poiPerch.push(t.perch)
+        }
+
+        if (ev.cayo) {
+          // Se va el posadero del árbol que cayó, y las aves que estaban ahí
+          // se sueltan: si no, quedan flotando en el vacío.
+          const k = poiPerch.indexOf(t.perch)
+          if (k >= 0) poiPerch.splice(k, 1)
+          for (const a of perchAgents) {
+            if (a.target === t.perch) { a.target = null; a.mode = 'roam'; a.timer = 0 }
+          }
+          t.perch = null
+          treeEvents.push({ type: 'treeLife', kind: 'fall' })
+        }
+
+        if (ev.rebroto) {
+          // Rebrota en otro punto de la manzana: la posición real vive
+          // horneada en la geometría, así que se mueve por DESPLAZAMIENTO
+          // relativo al origen con el que se generó el árbol.
+          const p = puntoSakura()
+          if (p) {
+            t.group.position.set(p.tx - t.origin.x, (p.gy - 0.6) - t.origin.y, p.tz - t.origin.z)
+            t.x = p.tx; t.z = p.tz; t.gy = p.gy
+          }
+          t.group.rotation.z = 0
+        }
+      }
       anclasHoja(phen.autumn)
       litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
         { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
@@ -1810,7 +1874,7 @@ export function createCityScene(container, cfg, agentNames = []) {
     trails.update(worldPos)
 
     stage.render(step)
-    return []
+    return treeEvents
   }
 
   // "Sacudir" la ciudad: empujón radial hacia afuera para cada agente,
