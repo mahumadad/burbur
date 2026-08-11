@@ -26,6 +26,17 @@ const overlay = document.getElementById('overlay')
 const app = document.getElementById('app')
 let running = false
 
+// La semilla de la puerta late en los colores de los 6 mundos que hay adentro
+// (acentos del registry), pasando suave de uno al otro — un guiño a lo que espera.
+const seedEl = document.querySelector('.seed')
+let seedTimer = null
+if (seedEl) {
+  const accents = ['#b6d184', '#aacdff', '#fab75e', '#c9a6ff', '#f2a0c8', '#9cc47a']
+  let ci = 0
+  seedEl.style.color = accents[0]
+  seedTimer = setInterval(() => { seedEl.style.color = accents[ci = (ci + 1) % accents.length] }, 3200)
+}
+
 async function start() {
   if (running) return
   running = true
@@ -33,6 +44,7 @@ async function start() {
   // el overlay se saca del DOM al terminar la animación (~1.3s).
   overlay.classList.add('leaving')
   setTimeout(() => overlay.classList.add('hidden'), 1300)
+  if (seedTimer) clearInterval(seedTimer)
 
   // iOS silencia el Web Audio con el switch de silencio; esto lo desbloquea
   // DENTRO del gesto del tap (debe ir antes del primer await).
