@@ -52,6 +52,11 @@ const TOWERS = 1
 // de pasto y flores. Valores de paridad = 1 (no expuestos todavía).
 const GRASS = 1
 const FLOWERS = 1
+// Alto/tamaño del pasto y las flores de la ciudad. Recortados respecto al
+// bosque: a la escala de los edificios, el pasto y las flores a tamaño de
+// campo abierto se salían de proporción (demasiado altos).
+const GRASS_H = 0.6
+const FLOR_ESC = 0.6
 
 // Mundo CIUDAD ("Block ecosystem"). Usa el stage compartido; el suelo es el
 // puerto fiel de `pn`/`mn`/`ln` del bundle original: retícula 150×150 con
@@ -717,7 +722,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       const g = 0.14 + 0.86 * clamp(m * 1.05 + h * 0.9, 0, 1)
       if (rnd() > g) continue
       const gy = ln(d, f)
-      const v = (1.6 + rnd() * 1.7) * (0.8 + 0.55 * Math.max(m, h * 0.8))
+      const v = (1.6 + rnd() * 1.7) * (0.8 + 0.55 * Math.max(m, h * 0.8)) * GRASS_H
       const y = fbm(d * 0.02 + 51, f * 0.02 + 13, 2) * 12.566 + (rnd() - 0.5) * 1.4
       const b = 0.25 + rnd() * 0.7
       const x = Math.cos(y) * b
@@ -888,7 +893,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       const x = cx + Math.cos(ang) * dist
       const z = cz + Math.sin(ang) * dist
       if (an(x, z) > -1.1 || un(x, z, 0.4)) continue
-      it(x, ln(x, z), z, 0.45 + rnd() * 0.6, color, 1)
+      it(x, ln(x, z), z, (0.45 + rnd() * 0.6) * FLOR_ESC, color, 1)
     }
   }
   function kn() {
@@ -970,7 +975,7 @@ export function createCityScene(container, cfg, agentNames = []) {
       const N = M.cx + (rnd() * 2 - 1) * (M.hx - 2)
       const P = M.cz + (rnd() * 2 - 1) * (M.hz - 2)
       if (nn(M, N, P) > -1.2 || un(N, P, 0.4)) continue
-      it(N, ln(N, P), P, 0.5 + rnd() * 0.7, rt(), 1)
+      it(N, ln(N, P), P, (0.5 + rnd() * 0.7) * FLOR_ESC, rt(), 1)
     }
     // Flores sueltas (sin tallo) esparcidas por manzanas al azar.
     const F = Math.round(320 * e)
