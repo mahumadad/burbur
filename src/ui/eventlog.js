@@ -67,5 +67,12 @@ export function createEventLog(accent = '#8fe04a', max = 14) {
     while (rows.length > max) rows.pop().remove()
   }
 
-  return { push, pill, box }
+  // El REGISTRO es por mundo: al cambiar de mundo se vacía (los eventos del
+  // bosque no tienen sentido en la célula) y la píldora vuelve a "—".
+  function clear() {
+    while (rows.length) rows.pop().remove()
+    nowEl.textContent = '—'
+  }
+
+  return { push, clear, pill, box }
 }
