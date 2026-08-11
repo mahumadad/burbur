@@ -227,7 +227,7 @@ export const CONFIG = {
     trapRadius: 0.05,
     fauna: 10,              // agentes visibles de fauna del suelo
     litter: 900,            // puntos de hojarasca
-    logDither: 7200,        // puntos de textura del tronco
+    logDither: 11000,        // puntos de textura del tronco
   },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos

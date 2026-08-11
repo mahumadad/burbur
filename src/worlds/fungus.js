@@ -146,7 +146,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
     return Math.abs(v) <= logEdgeAt(u, Math.sign(v) || 1)
   }
   function bump(u, v) {
-    return (noise2(u * 2.3 + 5, v * 4.1) - 0.5) * logR * 0.4 * R * LOG_HEIGHT_SCALE
+    // Relieve SUTIL: antes era enorme (±4 unidades) y la superficie se plegaba
+    // sobre sí misma, dejando huecos negros vistos en ángulo. Ahora es un
+    // rugoso leve de corteza, no montañas.
+    return (noise2(u * 2.3 + 5, v * 4.1) - 0.5) * logR * 0.09 * R * LOG_HEIGHT_SCALE
   }
   // Altura de la superficie del tronco en coords (u = a lo largo del eje,
   // v = perpendicular). El domo semicircular por el radio LOCAL + relieve.
@@ -181,7 +184,11 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const lr = logRAt(Math.max(-halfLen, Math.min(halfLen, u)))
       for (let j = 0; j <= NV; j++) {
         const v = (-1 + 2 * (j / NV)) * (logR + 0.02)
-        if (!insideLog(u, v)) continue
+        // Borde SUAVE para el cuerpo sólido (no el irregular con ruido): así la
+        // malla no descarta celdas interiores y no quedan huecos negros. La
+        // silueta mordida queda para el dither/musgo de encima.
+        const over = Math.max(0, Math.abs(u) - halfLen)
+        if (Math.hypot(over, v) > logRAt(Math.max(-halfLen, Math.min(halfLen, u)))) continue
         const [x, z] = uvToWorld(u, v)
         vertOf[i * cols + j] = vc++
         pos.push(x * R, surfaceYUV(u, v), z * R)
@@ -242,7 +249,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
       let col, size
       // El musgo cubre casi todo el lomo (un tronco caído en sombra húmeda), más
       // tupido en el flanco -v; la corteza y la tierra asoman donde ralea.
-      const mossThresh = v < -lr * 0.1 ? 0.42 : 0.58
+      const mossThresh = v < -lr * 0.1 ? 0.36 : 0.5
       if (mossN > mossThresh) {
         // MUSGO como PELUSA: matitas verticales cortas y densas — un tallo verde
         // oscuro en la base que aclara hacia la punta, con leve inclinación. Es
