@@ -2,42 +2,118 @@
 // El modelo deja `memory` y `state` como gancho para un futuro cerebro (LLM /
 // generative_agents), aunque hoy no se usen.
 
-/** Censo del bosque, por tipo. Contenido propio inspirado en un bosque templado. */
+/** Censo del bosque: FAUNA de la zona CENTRO de Chile (bosque esclerófilo/matorral). */
 export const FOREST_CENSUS = [
-  // flying_animal (mayoría en un bosque)
-  { name: 'green woodpecker', type: 'flying_animal' },
-  { name: 'tawny owl', type: 'flying_animal', night: true },
-  { name: 'carrion crow', type: 'flying_animal' },
-  { name: 'jay', type: 'flying_animal' },
-  { name: 'blackbird', type: 'flying_animal', dawn: true },
-  { name: 'wren', type: 'flying_animal' },
-  { name: 'robin', type: 'flying_animal' },
-  { name: 'nuthatch', type: 'flying_animal' },
-  { name: 'buzzard', type: 'flying_animal' },
-  { name: 'goldfinch', type: 'flying_animal' },
-  { name: 'magpie', type: 'flying_animal' },
-  { name: 'cuckoo', type: 'flying_animal' },
-  { name: 'nightjar', type: 'flying_animal', night: true },
-  { name: 'stock dove', type: 'flying_animal' },
-  { name: 'sparrowhawk', type: 'flying_animal' },
-  // walking_animal
-  { name: 'roe deer', type: 'walking_animal' },
-  { name: 'badger', type: 'walking_animal', night: true },
-  { name: 'fox', type: 'walking_animal', night: true },
-  { name: 'red squirrel', type: 'walking_animal' },
-  { name: 'wood mouse', type: 'walking_animal', night: true },
-  { name: 'common toad', type: 'walking_animal' },
-  { name: 'pheasant', type: 'walking_animal' },
-  // static_object (no se mueven pero suenan)
-  { name: 'old oak', type: 'static_object' },
-  { name: 'the stream', type: 'static_object' },
-  { name: 'leaf litter', type: 'static_object' },
-  { name: 'midges', type: 'static_object' },
+  // aves (flying_animal)
+  { name: 'zorzal', type: 'flying_animal', dawn: true },
+  { name: 'chincol', type: 'flying_animal' },
+  { name: 'diuca', type: 'flying_animal' },
+  { name: 'tordo', type: 'flying_animal' },
+  { name: 'loica', type: 'flying_animal' },
+  { name: 'queltehue', type: 'flying_animal' },
+  { name: 'tiuque', type: 'flying_animal' },
+  { name: 'jote', type: 'flying_animal' },
+  { name: 'picaflor', type: 'flying_animal' },
+  { name: 'chercán', type: 'flying_animal' },
+  { name: 'pitío', type: 'flying_animal' },
+  { name: 'torcaza', type: 'flying_animal' },
+  { name: 'cachaña', type: 'flying_animal' },
+  { name: 'tucúquere', type: 'flying_animal', night: true },
+  { name: 'lechuza', type: 'flying_animal', night: true },
+  // mamíferos y reptiles (walking_animal)
+  { name: 'zorro chilla', type: 'walking_animal', night: true },
+  { name: 'zorro culpeo', type: 'walking_animal', night: true },
+  { name: 'quique', type: 'walking_animal', night: true },
+  { name: 'chingue', type: 'walking_animal', night: true },
+  { name: 'degú', type: 'walking_animal' },
+  { name: 'ratoncito', type: 'walking_animal', night: true },
+  { name: 'liebre', type: 'walking_animal' },
+  { name: 'lagartija', type: 'walking_animal' },
+  // objetos que no se mueven pero suenan (incluye bichitos)
+  { name: 'el viejo peumo', type: 'static_object' },
+  { name: 'el estero', type: 'static_object' },
+  { name: 'la hojarasca', type: 'static_object' },
+  { name: 'los tábanos', type: 'static_object' },
+  { name: 'los abejorros', type: 'static_object' },
+  // personas (raras)
+  { name: 'arriero', type: 'human' },
+  { name: 'excursionista', type: 'human' },
+  { name: 'ciclista de montaña', type: 'human' },
+  { name: 'campesino', type: 'human' },
+]
+
+/**
+ * Censo de la célula (un macrófago). Los `organelle` e `invader` se mueven y
+ * salen a escena; las `structure` son el paisaje: suenan y se narran, pero no
+ * deambulan. Ver `docs/superpowers/specs/2026-08-11-diseno-mundo-celula.md` §2.
+ */
+export const CELL_CENSUS = [
+  // organelle — los individuos con jaula, estela y nombre (móviles: sin artículo,
+  // como la fauna del bosque)
+  { name: 'mitocondria', type: 'organelle' },
+  { name: 'vesícula de transporte', type: 'organelle' },
+  { name: 'lisosoma', type: 'organelle' },
+  { name: 'endosoma temprano', type: 'organelle' },
+  { name: 'endosoma tardío', type: 'organelle' },
+  { name: 'autofagosoma', type: 'organelle' },
+  { name: 'peroxisoma', type: 'organelle' },
+  { name: 'gránulo secretor', type: 'organelle' },
+  { name: 'fagosoma', type: 'organelle' },
+  // motor — caminan por los rieles
+  { name: 'kinesina', type: 'motor' },
+  { name: 'dineína', type: 'motor' },
+  // invader — llegan del sustrato
+  { name: 'bacteria', type: 'invader' },
+  { name: 'virión', type: 'invader' },
+  // structure — el paisaje: no deambula. Con artículo, como los estáticos del
+  // bosque ("el arroyo"): son también las CLAVES del léxico por nombre.
+  { name: 'el núcleo', type: 'structure', static: true },
+  { name: 'el nucleolo', type: 'structure', static: true },
+  { name: 'el aparato de Golgi', type: 'structure', static: true },
+  { name: 'el retículo rugoso', type: 'structure', static: true },
+  { name: 'el retículo liso', type: 'structure', static: true },
+  { name: 'el centrosoma', type: 'structure', static: true },
+  { name: 'la corteza de actina', type: 'structure', static: true },
+  { name: 'la adhesión focal', type: 'structure', static: true },
+  { name: 'la fibra de estrés', type: 'structure', static: true },
+  { name: 'el poro nuclear', type: 'structure', static: true },
+  { name: 'el proteasoma', type: 'structure', static: true },
+  { name: 'la bomba de iones', type: 'structure', static: true },
+  // signal — recorren la célula sin ser objetos
+  { name: 'la onda de calcio', type: 'signal', static: true },
+]
+
+/** Censo del estanque, por tipo. Fauna de humedal chilena, en español (coherente
+ * con el bosque). Móviles sin artículo; estáticos con artículo. */
+export const POND_CENSUS = [
+  // flying_animal — aves de humedal (mayoría)
+  { name: 'garza cuca', type: 'flying_animal' },
+  { name: 'cisne de cuello negro', type: 'flying_animal' },
+  { name: 'tagua', type: 'flying_animal' },
+  { name: 'pidén', type: 'flying_animal' },
+  { name: 'pato jergón', type: 'flying_animal' },
+  { name: 'martín pescador', type: 'flying_animal' },
+  { name: 'hualas', type: 'flying_animal' },
+  { name: 'siete colores', type: 'flying_animal', dawn: true },
+  { name: 'trile', type: 'flying_animal', dawn: true },
+  { name: 'run-run', type: 'flying_animal' },
+  { name: 'pato colorado', type: 'flying_animal' },
+  { name: 'yeco', type: 'flying_animal' },
+  { name: 'garza grande', type: 'flying_animal' },
+  // walking_animal — de la ribera
+  { name: 'coipo', type: 'walking_animal', night: true },
+  { name: 'huillín', type: 'walking_animal', night: true },
+  { name: 'rana chilena', type: 'walking_animal' },
+  { name: 'culebra de cola larga', type: 'walking_animal' },
+  // static_object — el paisaje: no deambula pero suena
+  { name: 'el juncal', type: 'static_object' },
+  { name: 'el agua quieta', type: 'static_object' },
+  { name: 'los nenúfares', type: 'static_object' },
+  { name: 'los mosquitos', type: 'static_object' },
   // human (raros)
-  { name: 'forager', type: 'human' },
-  { name: 'hiker', type: 'human' },
-  { name: 'mountain biker', type: 'human' },
-  { name: 'dog walker', type: 'human' },
+  { name: 'el pescador', type: 'human' },
+  { name: 'la kayakista', type: 'human' },
+  { name: 'el observador de aves', type: 'human' },
 ]
 
 /** Censo de ciudad: fauna urbana + actores humanos (según ng.city del bundle). */
@@ -68,14 +144,24 @@ export const CITY_CENSUS = [
  * Construye el censo del mundo y asigna identidad a los agentes VISIBLES.
  * Devuelve { census, visible } donde `visible[i]` = { name, type, idx, memory, state }.
  */
-export function createCensus(source, visibleCount, rand = Math.random) {
+export function createCensus(source, visibleCount, rand = Math.random, isAerial = null) {
   const census = source.map((a) => ({ ...a, memory: [], state: 'move' }))
   // A cada agente visible se le da una identidad del censo (para la etiqueta al
-  // pasar el mouse y para las interacciones). Se prefieren tipos que "se mueven".
-  const movers = census.filter((a) => a.type !== 'static_object')
+  // pasar el mouse y para las interacciones). Se prefieren tipos que "se mueven":
+  // el bosque los marca con el tipo `static_object`, los demás mundos con `static`.
+  const movers = census.filter((a) => !(a.static ?? a.type === 'static_object'))
+  // La LOCOMOCIÓN manda: si el mundo declara qué slots son AÉREOS (los que se
+  // posan alto o cruzan el cielo) y tiene aves, esos slots solo reciben aves
+  // (`flying_animal`) y el resto, animales de tierra o personas. Así ningún zorro
+  // termina volando. Sin `isAerial` —o sin aves, p. ej. la célula— todos salen
+  // del mismo conjunto de móviles (comportamiento base, intacto).
+  const fliers = movers.filter((a) => a.type === 'flying_animal')
+  const walkers = movers.filter((a) => a.type !== 'flying_animal')
+  const split = isAerial && fliers.length > 0 && walkers.length > 0
   const visible = []
   for (let i = 0; i < visibleCount; i++) {
-    const src = movers[(rand() * movers.length) | 0]
+    const pool = split ? (isAerial(i) ? fliers : walkers) : movers
+    const src = pool[(rand() * pool.length) | 0]
     visible.push({ name: src.name, type: src.type, idx: i, memory: [], state: 'move' })
   }
   return { census, visible }

@@ -48,7 +48,7 @@ export function createEventLog(accent = '#8fe04a', max = 14) {
 
   const box = document.createElement('div')
   box.className = 'evlog'
-  box.innerHTML = `<h4>EVENTS LOG</h4><div data-f="rows"></div>`
+  box.innerHTML = `<h4>REGISTRO</h4><div data-f="rows"></div>`
   document.body.appendChild(box)
   const rowsEl = box.querySelector('[data-f="rows"]')
 
@@ -67,5 +67,12 @@ export function createEventLog(accent = '#8fe04a', max = 14) {
     while (rows.length > max) rows.pop().remove()
   }
 
-  return { push, pill, box }
+  // El REGISTRO es por mundo: al cambiar de mundo se vacía (los eventos del
+  // bosque no tienen sentido en la célula) y la píldora vuelve a "—".
+  function clear() {
+    while (rows.length) rows.pop().remove()
+    nowEl.textContent = '—'
+  }
+
+  return { push, clear, pill, box }
 }

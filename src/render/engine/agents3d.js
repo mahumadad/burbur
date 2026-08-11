@@ -27,6 +27,38 @@ export function createAgentKit(rc) {
     geometry.dispose()
     return fatLine(arr, color)
   }
+
+  // ─── Jaulas prismáticas ─────────────────────────────────────────────────
+  /** Caja de aristas gruesas (cubo si w=h=d). */
+  function boxCage(w, h, d, color) {
+    return edgesOf(new THREE.BoxGeometry(w, h, d), color)
+  }
+  /**
+   * Paralelepípedo alto ("caja con estantes"): las aristas de la caja + `rungs`
+   * travesaños horizontales (rectángulos internos) a alturas repartidas.
+   */
+  function parallelepipedCage(w, h, d, color, rungs = 2) {
+    const g = new THREE.Group()
+    g.add(edgesOf(new THREE.BoxGeometry(w, h, d), color))
+    const hw = w / 2, hd = d / 2, seg = []
+    const c = [[-hw, hd], [hw, hd], [hw, -hd], [-hw, -hd]] // esquinas en XZ
+    for (let r = 1; r <= rungs; r++) {
+      const y = -h / 2 + (h * r) / (rungs + 1)
+      for (let i = 0; i < 4; i++) {
+        const a = c[i], b = c[(i + 1) % 4]
+        seg.push(a[0], y, a[1], b[0], y, b[1])
+      }
+    }
+    g.add(fatLine(seg, color))
+    return g
+  }
+  /**
+   * Pirámide cortada (frustum de base cuadrada): `CylinderGeometry` con 4
+   * segmentos radiales → 8 aristas de los cuadrados + 4 diagonales laterales.
+   */
+  function frustumCage(bottom, top, h, color) {
+    return edgesOf(new THREE.CylinderGeometry(top, bottom, h, 4), color)
+  }
   function ringLoop(radius, segments, color) {
     const pos = []
     for (let i = 0; i < segments; i++) {
@@ -40,28 +72,37 @@ export function createAgentKit(rc) {
   const pick = (arr) => arr[(Math.random() * arr.length) | 0]
 
   /**
-   * Criatura interna: núcleo naranja + 3–4 satélites en direcciones FIJAS
-   * (por eso se lee igual desde cualquier ángulo), unidos por enlaces.
+   * Molécula interna: núcleo (cols[0]) + 3–5 satélites en direcciones FIJAS
+   * (se lee igual desde cualquier ángulo), coloreados con el resto del set.
+   * Enlaces núcleo→satélite y algunos satélite↔satélite para que se lea como
+   * molécula (no como estrella). `cols[0]` es el color de especie del núcleo.
    */
-  function creature(t) {
+  function creature(t, cols = [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyanSat]) {
     const g = new THREE.Group()
-    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.6 * t, 16, 12),
-      new THREE.MeshBasicMaterial({ color: PALETTE.orange })))
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.66 * t, 16, 12),
+      new THREE.MeshBasicMaterial({ color: cols[0] })))
     const dirs = [
       new THREE.Vector3(1, 0.5, 0.3), new THREE.Vector3(-0.8, -0.4, 0.6),
       new THREE.Vector3(0.25, -0.95, -0.55), new THREE.Vector3(0.7, 0.6, -0.7),
+      new THREE.Vector3(-0.55, 0.85, 0.2),
     ]
-    const cols = [PALETTE.orange, PALETTE.magenta, PALETTE.white, PALETTE.cyanSat]
-    const k = 3 + (Math.random() < 0.5 ? 1 : 0)
-    const seg = []
+    const sat = cols.length > 1 ? cols.slice(1) : cols
+    const k = 3 + ((Math.random() * 3) | 0) // 3..5
+    const pts = []
     for (let i = 0; i < k; i++) {
       const p = dirs[i].clone().normalize().multiplyScalar((1.5 + Math.random() * 0.45) * t)
       const s = new THREE.Mesh(
-        new THREE.SphereGeometry((0.3 + Math.random() * 0.12) * t, 12, 10),
-        new THREE.MeshBasicMaterial({ color: cols[(i + ((Math.random() * 4) | 0)) % 4] }))
+        new THREE.SphereGeometry((0.34 + Math.random() * 0.14) * t, 12, 10),
+        new THREE.MeshBasicMaterial({ color: sat[i % sat.length] }))
       s.position.copy(p)
       g.add(s)
-      seg.push(0, 0, 0, p.x, p.y, p.z)
+      pts.push(p)
+    }
+    const seg = []
+    for (const p of pts) seg.push(0, 0, 0, p.x, p.y, p.z) // núcleo→satélite
+    for (let i = 0; i + 1 < pts.length; i += 2) {           // algunos satélite↔satélite
+      const a = pts[i], b = pts[i + 1]
+      seg.push(a.x, a.y, a.z, b.x, b.y, b.z)
     }
     g.add(fatLine(seg, PALETTE.bond))
     return g
@@ -85,7 +126,10 @@ export function createAgentKit(rc) {
     for (const m of fatMaterials) m.resolution.set(w, h)
   }
 
-  return { fatLine, edgesOf, ringLoop, creature, wedge, pick, fatMaterials, setResolution }
+  return {
+    fatLine, edgesOf, ringLoop, boxCage, parallelepipedCage, frustumCage,
+    creature, wedge, pick, fatMaterials, setResolution,
+  }
 }
 
 // ─── MOTION: rodado/planeo/giro de los agentes, solo por flags ────────────
