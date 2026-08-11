@@ -6,6 +6,7 @@ import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
+import { createFishRender } from './pond/fish.js'
 import { noise2, fbm } from './noise.js'
 
 // Mundo AGUA (pond). Calca el mundo de agua de murmur.living: ISLAS de arena
@@ -161,7 +162,15 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
-  // ─── AGUA (zt): plano semitransparente con glow azul ──────────────────────
+  // ─── AGUA (zt): plano con glow azul + shimmer animado + WAKE ──────────────
+  // Base fiel a murmur (vertex-color del campo Y/Mt/Nt) + mejoras: brillos que
+  // se deslizan (movimiento) y anillos de estela donde cruzan agentes/peces.
+  const RIPPLES = 14
+  const waterUniforms = {
+    uTime: { value: 0 },
+    // x, z, radio, fuerza — sembrados en la superficie por los elementos que pasan.
+    uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, 0)) },
+  }
   {
     const geo = new THREE.PlaneGeometry(R * 2.4, R * 2.4, 150, 150)
     geo.rotateX(-Math.PI / 2)
@@ -175,11 +184,43 @@ export function createPond(container, cfg, agentNames = []) {
       cols[i * 3] = c[0]; cols[i * 3 + 1] = c[1]; cols[i * 3 + 2] = c[2]
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
-    const waterMat = new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.58, depthWrite: false, fog: false,
+    const waterMat = new THREE.ShaderMaterial({
+      uniforms: waterUniforms,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      vertexShader: `
+        attribute vec3 color;
+        varying vec2 vXZ; varying vec3 vCol;
+        void main() {
+          vXZ = position.xz; vCol = color;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        precision mediump float;
+        #define N ${RIPPLES}
+        uniform float uTime; uniform vec4 uRipples[N];
+        varying vec2 vXZ; varying vec3 vCol;
+        void main() {
+          // Shimmer: reflejos que se deslizan sobre la superficie.
+          float w = sin(vXZ.x * 0.09 + uTime * 0.7) * sin(vXZ.y * 0.075 - uTime * 0.55)
+                  + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35);
+          float glint = smoothstep(0.75, 1.4, w);
+          // Wake: anillos que se expanden donde pasa un elemento.
+          float wake = 0.0;
+          for (int i = 0; i < N; i++) {
+            vec4 r = uRipples[i];
+            if (r.w <= 0.001) continue;
+            float d = distance(vXZ, r.xy);
+            wake += smoothstep(2.4, 0.0, abs(d - r.z)) * r.w;
+          }
+          wake = min(wake, 1.3);
+          vec3 col = vCol + glint * vec3(0.20, 0.42, 0.70) + wake * vec3(0.25, 0.50, 0.85);
+          float lum = dot(vCol, vec3(0.5, 0.6, 0.7));
+          float a = clamp(0.22 + lum * 2.2 + glint * 0.12 + wake * 0.42, 0.0, 0.9);
+          gl_FragColor = vec4(col, a);
+        }`,
     })
     const water = new THREE.Mesh(geo, waterMat)
-    water.renderOrder = 0
+    water.renderOrder = 1
     scene.add(water)
   }
 
@@ -345,6 +386,9 @@ export function createPond(container, cfg, agentNames = []) {
   }
   const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial)
 
+  // Cardúmenes de peces bajo el agua (boids). state.fish expone posiciones.
+  const fish = createFishRender(scene, cfg, q)
+
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
   const LR = mt * 0.92
@@ -366,6 +410,31 @@ export function createPond(container, cfg, agentNames = []) {
   const _proj = new THREE.Vector3()
   let ptrX = null, ptrY = null, _lx = 0, _ly = 0
 
+  // Wake: pool de ondas que se expanden y desvanecen; se siembran donde un
+  // elemento cruza/roza la superficie (agentes cerca del nivel, peces al tope).
+  let rippleHead = 0, rippleTimer = 0
+  function spawnRipple(x, z, str) {
+    waterUniforms.uRipples.value[rippleHead].set(x, z, 0.5, str)
+    rippleHead = (rippleHead + 1) % RIPPLES
+  }
+  function updateRipples(step) {
+    for (const r of waterUniforms.uRipples.value) {
+      if (r.w <= 0.001) continue
+      r.z += 9 * step       // expandir el radio
+      r.w = Math.max(0, r.w - 0.5 * step) // desvanecer
+    }
+    rippleTimer -= step
+    if (rippleTimer <= 0) {
+      for (let t = 0; t < 5; t++) {
+        const i = q() * n | 0
+        if (Math.abs(worldPos[i * 3 + 1] - ht) < 1.6) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 1.0); break }
+      }
+      const f = fish.state.fish
+      if (f.length) { const k = q() * f.length | 0; if (f[k].y > ht - 2.2) spawnRipple(f[k].x * mt, f[k].z * mt, 0.5) }
+      rippleTimer = 0.16 + q() * 0.2
+    }
+  }
+
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
     hazeUniforms.uProj.value = m.proj
@@ -378,6 +447,7 @@ export function createPond(container, cfg, agentNames = []) {
     const step = dt || 0.016
     clock += step
     pointUniforms.uT.value = clock
+    waterUniforms.uTime.value = clock
     if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0028
 
     mapPositions(step, clock)
@@ -432,6 +502,8 @@ export function createPond(container, cfg, agentNames = []) {
       stage.labelEl.style.opacity = '0'
     }
 
+    fish.update(step, clock)
+    updateRipples(step)
     trails.update(worldPos)
     stage.render(step)
     return []
@@ -447,6 +519,7 @@ export function createPond(container, cfg, agentNames = []) {
       r.vz += (r.z / m) * k + (Math.random() - 0.5) * k * 1.5
       r.state = 'move'; r.stateT = 1.2 + Math.random() * 1.5
     }
+    fish.scatter(strength * 1.5)
   }
 
   return {
