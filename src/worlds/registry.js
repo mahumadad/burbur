@@ -1,8 +1,8 @@
 import { createScene } from '../render/scene.js'
+import { createCityScene } from '../render/city.js'
 import { createPond } from '../render/pond.js'
-import { createStubWorld } from './stub.js'
 import { createCellScene } from './cell.js'
-import { FOREST_CENSUS, POND_CENSUS, CELL_CENSUS } from '../sim/agents.js'
+import { FOREST_CENSUS, CITY_CENSUS, POND_CENSUS, CELL_CENSUS } from '../sim/agents.js'
 import { CELL_LEXICON } from '../sim/narrator.js'
 import { FOREST_PROFILE, CELL_PROFILE } from '../sim/ecosystem.js'
 
@@ -12,6 +12,20 @@ import { FOREST_PROFILE, CELL_PROFILE } from '../sim/ecosystem.js'
 //
 // Ids y colores de acento EXACTOS del bundle de murmur (tabla `hg`):
 //   land #b6d184 · water #aacdff · city #fab75e
+
+// La ciudad NO tiene un subconjunto de agentes que vuele de verdad: todos se
+// mueven a la altura de tráfico o dentro de su manzana (ver `moveAgents` en
+// `render/city.js`), a diferencia de los perchers/sky del bosque o las garzas
+// del estanque. Para que las aves del censo (paloma, tórtola, etc.) igual se
+// repartan entre los agentes visibles en la MISMA proporción que tienen en
+// CITY_CENSUS —y no terminen nombrando un auto "paloma"— se marca aérea una
+// FRACCIÓN fija de los slots (los primeros `count*ratio`), de tamaño igual a
+// la proporción de `flying_animal` sobre el total de móviles del censo.
+const CITY_MOVERS = CITY_CENSUS.filter((a) => a.type !== 'static_object')
+const CITY_FLIER_RATIO = CITY_MOVERS.length
+  ? CITY_MOVERS.filter((a) => a.type === 'flying_animal').length / CITY_MOVERS.length
+  : 0
+
 export const WORLDS = [
   {
     id: 'land', label: 'Plot ecosystem', name: 'Bosque', accent: '#b6d184', ready: true,
@@ -40,11 +54,14 @@ export const WORLDS = [
     build: (container, cfg, names) => createPond(container, cfg, names),
   },
   {
-    id: 'city', label: 'Block ecosystem', name: 'Ciudad', accent: '#fab75e', ready: false,
-    census: FOREST_CENSUS, ecosystem: FOREST_PROFILE,
+    id: 'city', label: 'Block ecosystem', name: 'Ciudad', accent: '#fab75e', ready: true,
+    census: CITY_CENSUS, ecosystem: FOREST_PROFILE,
     // Ciudad: cae lluvia, pero nada de grillos ni búhos.
     audio: { rain: true, insects: false, owl: false },
-    build: (container, cfg) => createStubWorld(container, cfg, { accent: '#fab75e', label: 'Block' }),
+    // Sin percha real (ver CITY_FLIER_RATIO arriba): los primeros slots, en la
+    // proporción de aves del censo, reciben nombres de `flying_animal`.
+    aerial: (i, cfg) => i < Math.round(cfg.fireflies.count * CITY_FLIER_RATIO),
+    build: (container, cfg, names) => createCityScene(container, cfg, names),
   },
   // Célula: mundo propio (no viene del bundle de murmur). El acento violeta es
   // diseño nuestro; no colisiona con land/water/city.
