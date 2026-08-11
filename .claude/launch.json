@@ -2,6 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     { "name": "murmur-dev", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5173 },
-    { "name": "murmur-verify", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--", "--port", "5199", "--strictPort"], "port": 5199 }
+    { "name": "murmur-verify", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--", "--port", "5199", "--strictPort"], "port": 5199 },
+    { "name": "micelio-dev", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--", "--port", "5217", "--strictPort"], "port": 5217 }
   ]
 }

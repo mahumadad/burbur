@@ -42,8 +42,10 @@ const C_BARK = [0.24, 0.15, 0.09]
 const C_SAPWOOD = [0.86, 0.78, 0.56]
 const C_HEARTWOOD = [0.40, 0.21, 0.10]
 const C_LITTER = [0.42, 0.36, 0.17]
-// La red: blancos/cian (spec §10). Pleurotus=colonia 0, Trametes=colonia 1.
-const C_COLONY = [rgb(PALETTE.white), rgb(PALETTE.cyanSat)]
+// La red: dos micelios reales, no colores de dato. Pleurotus = blanco cálido
+// crema (colonia 0); Trametes = gris-azulado pálido (colonia 1). Más orgánico
+// que blanco/cian puros.
+const C_COLONY = [[1.0, 0.95, 0.82], [0.66, 0.82, 0.86]]
 const FAUNA_COLORS = [PALETTE.yellow, PALETTE.orange, PALETTE.bond]
 
 // Cuánto se levanta el tronco en Y por unidad de radio (mundo). Puramente
@@ -74,8 +76,10 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // se toca el DOF global de otros mundos— así el fondo se disuelve sin perder
   // el mapa. La auto-rotación queda TAL CUAL la deja el stage: esto no es un
   // microscopio, un tronco sí puede girar lento.
-  draw.uniforms.uFocus.value = 55
-  draw.uniforms.uAperture.value = 1.1
+  // Macro suave: con la apertura muy alta el fondo se disolvía tanto que las
+  // líneas finas de la red desaparecían. Bajamos para que el detalle se lea.
+  draw.uniforms.uFocus.value = 75
+  draw.uniforms.uAperture.value = 0.5
 
   // ─── Sustrato: el tronco podrido + su despensa (puro, de sim/decay.js) ────
   const sub = createSubstrate(cc.substrate, rnd)
@@ -107,66 +111,87 @@ export function createFungusScene(container, cfg, agentNames = []) {
     return clamp01(1 - (rr - EDGE_FADE_START) / (EDGE_FADE_END - EDGE_FADE_START))
   }
 
-  // ─── TRONCO: dither de puntos por capa (rejection sampling sobre la cápsula) ─
-  {
-    const alongHalf = halfLen + logR
-    const acrossHalf = logR
-    let placed = 0
-    const maxAttempts = cc.logDither * 6
-    for (let a = 0; a < maxAttempts && placed < cc.logDither; a++) {
-      const u = (rnd() * 2 - 1) * alongHalf
-      const v = (rnd() * 2 - 1) * acrossHalf
-      const x = logAx * u + logPx * v
-      const z = logAz * u + logPz * v
-      const res = resourceAt(sub, x, z)
-      if (res.layer !== 'bark' && res.layer !== 'sapwood' && res.layer !== 'heartwood') continue
-      placed++
-      const col = res.layer === 'bark' ? C_BARK : res.layer === 'sapwood' ? C_SAPWOOD : C_HEARTWOOD
-      const y = surfaceY(x, z) + 0.15
-      const fade = edgeFade(x, z)
-      draw.pushPoint(x * R, y, z * R, tint(col, fade), 0.5 + rnd() * 0.7, 0)
-    }
+  // Altura de la superficie del tronco en coords (u = a lo largo del eje,
+  // v = perpendicular). El domo semicircular por |v| da el lomo redondeado.
+  function surfaceYUV(u, v) {
+    const uc = Math.max(-halfLen, Math.min(halfLen, u))
+    const overEnd = u - uc                 // >0 más allá de la punta redondeada
+    const rad = Math.hypot(overEnd, v)
+    return domeHeight(rad)
+  }
+  function uvToWorld(u, v) {
+    return [logAx * u + logPx * v, logAz * u + logPz * v]
   }
 
-  // ─── TRONCO: wireframe — 3 anillos concéntricos (una capa cada uno) + la
-  // línea de cresta central. Un anillo a distancia radial `rad` del eje es
-  // exactamente el contorno iso-radial de decay.js: dos tramos rectos más dos
-  // semicírculos en las puntas (la misma cápsula 2D, vista de perfil). ─────
-  function stadiumRing(rad, color) {
-    if (rad <= 1e-4) {
-      // Degenerado: la cresta central es solo el segmento del eje.
-      const x0 = logAx * -halfLen, z0 = logAz * -halfLen
-      const x1 = logAx * halfLen, z1 = logAz * halfLen
-      const y = domeHeight(0)
-      draw.pushLine(x0 * R, y, z0 * R, x1 * R, y, z1 * R,
-        tint(color, edgeFade(x0, z0)), tint(color, edgeFade(x1, z1)))
-      return
-    }
-    const straightSegs = 18, arcSegs = 12
-    const pts = []
-    for (let i = 0; i <= straightSegs; i++) pts.push([-halfLen + (2 * halfLen) * (i / straightSegs), -rad])
-    for (let i = 1; i <= arcSegs; i++) {
-      const ang = -Math.PI / 2 + Math.PI * (i / arcSegs)
-      pts.push([halfLen + Math.cos(ang) * rad, Math.sin(ang) * rad])
-    }
-    for (let i = 1; i <= straightSegs; i++) pts.push([halfLen - (2 * halfLen) * (i / straightSegs), rad])
-    for (let i = 1; i <= arcSegs; i++) {
-      const ang = Math.PI / 2 + Math.PI * (i / arcSegs)
-      pts.push([-halfLen + Math.cos(ang) * rad, Math.sin(ang) * rad])
-    }
-    const y = domeHeight(rad)
-    for (let i = 0; i < pts.length; i++) {
-      const [u0, v0] = pts[i], [u1, v1] = pts[(i + 1) % pts.length]
-      const x0 = logAx * u0 + logPx * v0, z0 = logAz * u0 + logPz * v0
-      const x1 = logAx * u1 + logPx * v1, z1 = logAz * u1 + logPz * v1
-      draw.pushLine(x0 * R, y, z0 * R, x1 * R, y, z1 * R,
-        tint(color, edgeFade(x0, z0)), tint(color, edgeFade(x1, z1)))
+  // ─── TRONCO: se ve como un tronco CAÍDO, no como un corte transversal. Desde
+  // arriba la superficie es CORTEZA (parda, texturada, con grietas a lo largo);
+  // los anillos de crecimiento solo asoman en los EXTREMOS cortados. (Antes las
+  // capas de decay.js se pintaban como bandas radiales a lo largo de todo el
+  // lomo — leía como mirar por el hueco del tronco.) ────────────────────────
+  {
+    // (a) Piel de corteza: dither denso y fino de puntos pardos sobre el lomo,
+    // con vetas más oscuras en los surcos (bandas a lo largo del eje).
+    let placed = 0
+    const maxAttempts = cc.logDither * 4
+    for (let a = 0; a < maxAttempts && placed < cc.logDither; a++) {
+      const u = (rnd() * 2 - 1) * (halfLen + logR)
+      const v = (rnd() * 2 - 1) * logR
+      if (Math.hypot(Math.max(0, Math.abs(u) - halfLen), v) > logR) continue
+      placed++
+      const [x, z] = uvToWorld(u, v)
+      // Surcos longitudinales: el color se oscurece en franjas de v (la corteza
+      // agrietada). Un poco de variación por punto para que no sea liso.
+      const furrow = 0.5 + 0.5 * Math.abs(Math.sin(v / logR * 7 + Math.sin(u * 3)))
+      const shade = (0.55 + furrow * 0.5) * (0.85 + rnd() * 0.3)
+      const y = surfaceYUV(u, v) + 0.15
+      draw.pushPoint(x * R, y, z * R, tint(C_BARK, shade * edgeFade(x, z)), 0.28 + rnd() * 0.4, 0)
     }
   }
-  stadiumRing(logR, C_BARK)
-  stadiumRing(logR * (1 - cc.substrate.barkFrac), C_SAPWOOD)
-  stadiumRing(logR * (1 - cc.substrate.barkFrac - cc.substrate.sapwoodFrac), C_HEARTWOOD)
-  stadiumRing(0, C_HEARTWOOD)
+  {
+    // (b) Grietas de la corteza: líneas onduladas a lo largo del eje sobre el lomo.
+    const cracks = 26
+    for (let c = 0; c < cracks; c++) {
+      const v = (rnd() * 2 - 1) * logR * 0.92
+      const phase = rnd() * 6.28, amp = logR * 0.06
+      let prev = null
+      const segs = 22
+      for (let i = 0; i <= segs; i++) {
+        const u = -halfLen - logR * 0.3 + (2 * halfLen + logR * 0.6) * (i / segs)
+        const vv = v + Math.sin(u * 6 + phase) * amp
+        if (Math.hypot(Math.max(0, Math.abs(u) - halfLen), vv) > logR * 0.98) { prev = null; continue }
+        const [x, z] = uvToWorld(u, vv)
+        const y = surfaceYUV(u, vv) + 0.2
+        if (prev) draw.pushLine(prev[0] * R, prev[1], prev[2] * R, x * R, y, z * R,
+          tint(C_BARK, 0.35 * edgeFade(prev[3], prev[4])), tint(C_BARK, 0.35 * edgeFade(x, z)))
+        prev = [x, y, z, x, z]
+      }
+    }
+  }
+  {
+    // (c) Anillos de crecimiento en los DOS extremos cortados: círculos
+    // concéntricos (duramen → albura → corteza) en el disco de la cara cortada,
+    // que en la vista 3/4 se leen como los anillos de un tronco.
+    const barkStart = logR * (1 - cc.substrate.barkFrac)
+    const sapStart = logR * (1 - cc.substrate.barkFrac - cc.substrate.sapwoodFrac)
+    const ringColor = (rad) => rad >= barkStart ? C_BARK : rad >= sapStart ? C_SAPWOOD : C_HEARTWOOD
+    for (const endU of [-halfLen, halfLen]) {
+      const seg = 30
+      for (const rad of [logR * 0.94, barkStart, (sapStart + barkStart) / 2, sapStart, sapStart * 0.6, sapStart * 0.3]) {
+        const col = ringColor(rad + 1e-4)
+        let prev = null
+        for (let i = 0; i <= seg; i++) {
+          const ang = (i / seg) * Math.PI * 2
+          // El anillo vive en el plano de la cara (perpendicular al eje): v y ALTURA.
+          const v = Math.cos(ang) * rad
+          const yr = domeHeight(0) + Math.sin(ang) * rad * R * LOG_HEIGHT_SCALE
+          const [x, z] = uvToWorld(endU, v)
+          if (prev) draw.pushLine(prev[0] * R, prev[1], prev[2] * R, x * R, Math.max(0, yr), z * R,
+            tint(col, 0.8 * edgeFade(x, z)), tint(col, 0.8 * edgeFade(x, z)))
+          prev = [x, Math.max(0, yr), z]
+        }
+      }
+    }
+  }
 
   // ─── HOJARASCA: dither disperso fuera del tronco (layer === 'litter') ─────
   {
@@ -197,10 +222,24 @@ export function createFungusScene(container, cfg, agentNames = []) {
   const seed0 = { x: logAx * -seedT + logPx * seedV, z: logAz * -seedT + logPz * seedV, colony: 0 }
   const seed1 = { x: logAx * seedT + logPx * -seedV, z: logAz * seedT + logPz * -seedV, colony: 1 }
   const net = createNetwork(cc.mycelium, [seed0, seed1], rnd)
+  // Pre-crecer: el mundo abre con un tronco YA colonizado, no con dos puntas
+  // solas que tardarían un minuto en leerse. Se corre la simulación real con un
+  // field de humedad plena antes del primer frame (~la mitad del presupuesto).
+  {
+    const warmField = { resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon), moisture: 0.9 }
+    for (let i = 0; i < 700; i++) updateNetwork(net, cc.mycelium, 1 / 30, rnd, warmField)
+  }
 
-  const netMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 })
-  const netBuf = createLineBuffer(cc.mycelium.maxEdges, netMat)
+  // Dos registros visuales del micelio (spec §10). La red se dibuja con capacidad
+  // para bundlear los cordones (una arista gruesa = varias líneas paralelas), y
+  // aparte los frentes plumosos que salen de cada punta.
+  const CORD_W = 0.06                 // grosor a partir del cual una arista es cordón
+  const netMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })
+  const netBuf = createLineBuffer(cc.mycelium.maxEdges * 3, netMat)
   scene.add(netBuf.mesh)
+  const frontMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 })
+  const frontBuf = createLineBuffer(cc.mycelium.maxTips * 6, frontMat)
+  scene.add(frontBuf.mesh)
   const tipsCloud = createPointCloud(cc.mycelium.maxTips, draw.pointMaterial)
   scene.add(tipsCloud.mesh)
 
@@ -210,37 +249,71 @@ export function createFungusScene(container, cfg, agentNames = []) {
       if (!e.alive) continue
       const a = net.nodes[e.a], b = net.nodes[e.b]
       const base = C_COLONY[e.colony] || C_COLONY[0]
-      // Los cordones gruesos (más flujo acumulado) se leen más brillantes que
-      // el frente difuso recién tendido (spec §10).
-      const bright = Math.min(1, 0.32 + e.width * 6)
-      const fa = edgeFade(a.x, a.z) * bright
-      const fb = edgeFade(b.x, b.z) * bright
-      const ya = surfaceY(a.x, a.z) + 0.4, yb = surfaceY(b.x, b.z) + 0.4
-      netBuf.push(a.x * R, ya, a.z * R, b.x * R, yb, b.z * R, tint(base, fa), tint(base, fb))
+      const ax = a.x * R, az = a.z * R, bx = b.x * R, bz = b.z * R
+      const ya = surfaceY(a.x, a.z) + 0.35, yb = surfaceY(b.x, b.z) + 0.35
+      const fa = edgeFade(a.x, a.z), fb = edgeFade(b.x, b.z)
+      if (e.width >= CORD_W) {
+        // CORDÓN (rizomorfo): haz de 3 hifas paralelas, brillante. Los cordones
+        // son las "autopistas" que consolidan el territorio ganado.
+        const bright = Math.min(1, 0.7 + e.width * 5)
+        let dx = bx - ax, dz = bz - az
+        const d = Math.hypot(dx, dz) || 1
+        const px = (-dz / d), pz = (dx / d)      // perpendicular en el plano
+        const off = Math.min(1.6, 0.5 + e.width * 8)
+        for (const s of [-off, 0, off]) {
+          netBuf.push(ax + px * s, ya, az + pz * s, bx + px * s, yb, bz + pz * s,
+            tint(base, fa * bright), tint(base, fb * bright))
+        }
+      } else {
+        // MALLA FINA: la trama difusa entre cordones, tenue.
+        const dim = 0.4 + e.width * 6
+        netBuf.push(ax, ya, az, bx, yb, bz, tint(base, fa * dim), tint(base, fb * dim))
+      }
     }
     netBuf.commit()
   }
+
+  // Frente de avance PLUMOSO: de cada punta salen 3–4 hifas cortas y finas
+  // abriéndose en abanico hacia adelante — el borde difuso que se ve al levantar
+  // una corteza. Dinámico: se redibuja cada frame con las puntas.
+  function drawFront() {
+    frontBuf.begin()
+    for (const t of net.tips) {
+      if (!t.alive) continue
+      const base = C_COLONY[t.colony] || C_COLONY[0]
+      const fade = edgeFade(t.x, t.z) * 0.6
+      const x0 = t.x * R, z0 = t.z * R, y0 = surfaceY(t.x, t.z) + 0.5
+      const n = 3 + ((rnd() * 2) | 0)
+      for (let k = 0; k < n; k++) {
+        const a = t.ang + (rnd() - 0.5) * 1.1
+        const len = (0.4 + rnd() * 0.5) * cc.mycelium.stepLen * R * 2.2
+        frontBuf.push(x0, y0, z0, x0 + Math.cos(a) * len, y0, z0 + Math.sin(a) * len,
+          tint(base, fade), tint(base, 0))
+      }
+    }
+    frontBuf.commit()
+  }
+
   function drawTips() {
     const tp = tipPositions(net)
     for (let i = 0; i < cc.mycelium.maxTips; i++) {
       if (i < tp.length) {
         const t = tp[i]
         const base = C_COLONY[t.colony] || C_COLONY[0]
-        // Las puntas son el latido visual del mundo: más claras que la red,
-        // sin el atenuado por grosor de las aristas.
+        // Spitzenkörper: la punta apical brilla (el latido visual del mundo).
         const glow = [
-          base[0] + (1 - base[0]) * 0.4,
-          base[1] + (1 - base[1]) * 0.4,
-          base[2] + (1 - base[2]) * 0.4,
+          base[0] + (1 - base[0]) * 0.5,
+          base[1] + (1 - base[1]) * 0.5,
+          base[2] + (1 - base[2]) * 0.5,
         ]
         const fade = edgeFade(t.x, t.z)
         tipsCloud.pos[i * 3] = t.x * R
-        tipsCloud.pos[i * 3 + 1] = surfaceY(t.x, t.z) + 0.7
+        tipsCloud.pos[i * 3 + 1] = surfaceY(t.x, t.z) + 0.6
         tipsCloud.pos[i * 3 + 2] = t.z * R
         tipsCloud.col[i * 3] = glow[0] * fade
         tipsCloud.col[i * 3 + 1] = glow[1] * fade
         tipsCloud.col[i * 3 + 2] = glow[2] * fade
-        tipsCloud.size[i] = 0.9
+        tipsCloud.size[i] = 0.7
       } else {
         tipsCloud.pos[i * 3 + 1] = -9999 // slot sin punta: aparcado (convención del repo)
       }
@@ -308,6 +381,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     }
     updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
     drawNetwork()
+    drawFront()
     drawTips()
 
     // ─── Fauna del suelo: deambula libre, contenida en el disco ───────────
