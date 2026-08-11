@@ -247,6 +247,9 @@ export const CONFIG = {
       downMin: 0.7, downMax: 1.6, downDur: 0.4, spindleGap: 2.6, spindleDur: 1.0,
       syncPull: 1.6,
     },
+    // Shock del botón AGITAR: una descarga que enciende TODO el sistema a la vez
+    // (`dur` segundos de fogonazo) y después resetea y calma la red.
+    shock: { dur: 0.7, flash: 1.0 },
     // Arbor dendrítico: árbol ramificado en el plano, congelado en el build.
     dendrite: { levels: 3, branches: 3, len: 0.16, lenDecay: 0.62, spread: 1.2, jitter: 0.22, spines: 4 },
     neuropil: 3800,     // puntos de fondo (la maraña de procesos que no se dibuja)
