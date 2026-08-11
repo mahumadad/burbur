@@ -95,38 +95,107 @@ export function createCellScene(container, cfg, agentNames = []) {
   const adhesions = []
 
   // ─── NÚCLEO, NUCLEOLO, ER Y GOLGI: el paisaje interior, estático ──────────
+  // Recetas de spec §4.2bis, extraídas de los modelos 3D de referencia.
   {
     const NR = cc.nucleusR * R
-    // Núcleo: esfera de wireframe + cromatina enredada dentro.
-    const sphere = new THREE.SphereGeometry(NR, 18, 12)
-    const wire = new THREE.WireframeGeometry(sphere)
-    const nucLines = new THREE.LineSegments(wire,
-      new THREE.LineBasicMaterial({ color: PALETTE.white, transparent: true, opacity: 0.22 }))
-    nucLines.position.y = H * 0.25
-    scene.add(nucLines)
-    sphere.dispose()
-
-    // Poros nucleares: anillitos sobre la superficie.
-    for (let i = 0; i < 14; i++) {
-      const a = rnd() * Math.PI * 2, b = Math.acos(rnd() * 2 - 1)
-      const ring = kit.ringLoop(NR * 0.09, 10, PALETTE.cyanEye)
-      ring.position.set(
-        Math.sin(b) * Math.cos(a) * NR,
-        H * 0.25 + Math.cos(b) * NR,
-        Math.sin(b) * Math.sin(a) * NR,
-      )
-      ring.lookAt(0, H * 0.25, 0)
-      scene.add(ring)
+    const NY = H * 0.25
+    // Núcleo: DOBLE envoltura (la membrana nuclear real es una bicapa doble
+    // continua con el ER). Dos esferas wireframe casi pegadas.
+    for (const [rr, op] of [[NR, 0.22], [NR * 1.045, 0.12]]) {
+      const sphere = new THREE.SphereGeometry(rr, 18, 12)
+      const wire = new THREE.WireframeGeometry(sphere)
+      const nucLines = new THREE.LineSegments(wire,
+        new THREE.LineBasicMaterial({ color: PALETTE.white, transparent: true, opacity: op }))
+      nucLines.position.y = NY
+      scene.add(nucLines)
+      sphere.dispose()
     }
-    // Cromatina: hebras que serpentean dentro del núcleo.
-    for (let i = 0; i < 26; i++) {
+
+    // Poros nucleares: anillos ESTÁTICOS sobre la envoltura (una célula real
+    // tiene miles; mostramos decenas). Círculos tangentes a la esfera, en el
+    // acumulador — no un mesh por poro.
+    const PORE_COL = rgb(PALETTE.cyanEye)
+    for (let i = 0; i < cc.pores; i++) {
+      const a = rnd() * Math.PI * 2, b = Math.acos(rnd() * 2 - 1)
+      const nx = Math.sin(b) * Math.cos(a), ny = Math.cos(b), nz = Math.sin(b) * Math.sin(a)
+      // Base tangente al punto (nx,ny,nz) de la esfera.
+      const ux = -nz, uy = 0, uz = nx
+      const um = Math.hypot(ux, uz) || 1
+      const t1 = [ux / um, uy, uz / um]
+      const t2 = [ny * t1[2] - nz * t1[1], nz * t1[0] - nx * t1[2], nx * t1[1] - ny * t1[0]]
+      const pr = NR * 0.07
+      const cx = nx * NR * 1.02, cy = NY + ny * NR * 1.02, cz = nz * NR * 1.02
+      for (let s = 0; s < 8; s++) {
+        const q0 = (s / 8) * Math.PI * 2, q1 = ((s + 1) / 8) * Math.PI * 2
+        draw.pushLine(
+          cx + (Math.cos(q0) * t1[0] + Math.sin(q0) * t2[0]) * pr,
+          cy + (Math.cos(q0) * t1[1] + Math.sin(q0) * t2[1]) * pr,
+          cz + (Math.cos(q0) * t1[2] + Math.sin(q0) * t2[2]) * pr,
+          cx + (Math.cos(q1) * t1[0] + Math.sin(q1) * t2[0]) * pr,
+          cy + (Math.cos(q1) * t1[1] + Math.sin(q1) * t2[1]) * pr,
+          cz + (Math.cos(q1) * t1[2] + Math.sin(q1) * t2[2]) * pr,
+          PORE_COL, PORE_COL,
+        )
+      }
+    }
+    // Cromatina: hebras que serpentean dentro del núcleo, densas.
+    for (let i = 0; i < 40; i++) {
       let x = (rnd() - 0.5) * NR, y = (rnd() - 0.5) * NR, z = (rnd() - 0.5) * NR
-      for (let k = 0; k < 7; k++) {
-        const nx = x + (rnd() - 0.5) * NR * 0.5
-        const ny = y + (rnd() - 0.5) * NR * 0.5
-        const nz = z + (rnd() - 0.5) * NR * 0.5
-        draw.pushLine(x, H * 0.25 + y, z, nx, H * 0.25 + ny, nz, C_CHROMATIN, C_CHROMATIN)
-        x = nx; y = ny; z = nz
+      for (let k = 0; k < 8; k++) {
+        const nx2 = x + (rnd() - 0.5) * NR * 0.5
+        const ny2 = y + (rnd() - 0.5) * NR * 0.5
+        const nz2 = z + (rnd() - 0.5) * NR * 0.5
+        draw.pushLine(x, NY + y, z, nx2, NY + ny2, nz2, C_CHROMATIN, C_CHROMATIN)
+        x = nx2; y = ny2; z = nz2
+      }
+    }
+
+    // Filamentos intermedios: jaula de lazos ondulados alrededor del núcleo
+    // (el "muelle" del modelo de citoesqueleto). Sostienen el núcleo.
+    const IF_COL = [0.72, 0.70, 0.82]
+    for (let i = 0; i < cc.ifLoops; i++) {
+      const lr = NR * (1.12 + rnd() * 0.35)
+      const ly = NY + (rnd() - 0.5) * NR * 0.9
+      const phase = rnd() * Math.PI * 2
+      const segs = 26
+      let px = null, py = null, pz = null
+      for (let s = 0; s <= segs; s++) {
+        const a = (s / segs) * Math.PI * 2
+        const wob = 1 + Math.sin(a * 7 + phase) * 0.06
+        const x = Math.cos(a) * lr * wob
+        const z = Math.sin(a) * lr * wob
+        const y = ly + Math.sin(a * 5 + phase * 1.7) * NR * 0.08
+        if (px !== null) draw.pushLine(px, py, pz, x, y, z, IF_COL, IF_COL)
+        px = x; py = y; pz = z
+      }
+    }
+
+    // Centrosoma: DOS centriolos ortogonales, cada uno un barril de 9 líneas,
+    // en el origen de los rieles + material pericentriolar (puntos).
+    {
+      const ox = cc.rails.originX * R, oz = cc.rails.originZ * R
+      const cy = H * 0.15
+      const br = R * 0.018, bl = R * 0.045
+      const CEN_COL = rgb(PALETTE.cyanEye)
+      for (let s = 0; s < 9; s++) {
+        const a = (s / 9) * Math.PI * 2
+        // Barril 1: eje vertical. Barril 2: eje horizontal, desplazado.
+        draw.pushLine(
+          ox + Math.cos(a) * br, cy, oz + Math.sin(a) * br,
+          ox + Math.cos(a) * br, cy + bl, oz + Math.sin(a) * br,
+          CEN_COL, CEN_COL,
+        )
+        draw.pushLine(
+          ox + bl * 0.8, cy + bl * 0.5 + Math.cos(a) * br, oz + Math.sin(a) * br,
+          ox + bl * 1.8, cy + bl * 0.5 + Math.cos(a) * br, oz + Math.sin(a) * br,
+          CEN_COL, CEN_COL,
+        )
+      }
+      for (let i = 0; i < 40; i++) {
+        const a = rnd() * Math.PI * 2
+        const r = Math.pow(rnd(), 0.5) * R * 0.05
+        draw.pushPoint(ox + Math.cos(a) * r, cy + (rnd() - 0.2) * bl, oz + Math.sin(a) * r,
+          [0.5, 0.9, 0.85], 0.2, 0)
       }
     }
     // Nucleolo: nube densa de puntos.
@@ -141,46 +210,98 @@ export function createCellScene(container, cfg, agentNames = []) {
       )
     }
 
-    // ER rugoso: red poligonal alrededor del núcleo, salpicada de ribosomas.
+    // ER: continuo con la envoltura nuclear. Dos regímenes reales:
+    //  (a) LÁMINAS rugosas cerca del núcleo — pares de arcos concéntricos
+    //      ("pliegues"), cargadas de ribosomas;
+    //  (b) RED TUBULAR hacia la periferia — nodos unidos de a 3 (las uniones
+    //      de 3 vías del ER liso), un retículo poligonal, no un garabato.
     const erPts = []
-    for (let i = 0; i < 34; i++) {
-      const a = rnd() * Math.PI * 2
-      const r = NR * (1.25 + rnd() * 1.5)
-      let x = Math.cos(a) * r, z = Math.sin(a) * r
-      for (let k = 0; k < 5; k++) {
-        const nx = x + (rnd() - 0.5) * R * 0.16
-        const nz = z + (rnd() - 0.5) * R * 0.16
-        const y = H * 0.1 + rnd() * H * 0.3
-        draw.pushLine(x, y, z, nx, y, nz, C_ER, C_ER)
-        erPts.push([x, y, z])
-        x = nx; z = nz
+    // (a) Láminas: 9 sectores de arcos apilados saliendo de la envoltura.
+    for (let i = 0; i < 9; i++) {
+      const a0 = rnd() * Math.PI * 2
+      const span = 0.5 + rnd() * 0.7
+      const y = H * 0.12 + rnd() * H * 0.22
+      for (let sheet = 0; sheet < 3; sheet++) {
+        const rr = NR * (1.06 + sheet * 0.11 + rnd() * 0.04)
+        let px = null, pz = null
+        for (let s = 0; s <= 10; s++) {
+          const a = a0 + (s / 10) * span
+          const x = Math.cos(a) * rr, z = Math.sin(a) * rr
+          if (px !== null) {
+            draw.pushLine(px, y + sheet * H * 0.03, pz, x, y + sheet * H * 0.03, z, C_ER, C_ER)
+            erPts.push([x, y, z, 1]) // 1 = lámina rugosa: aquí van los ribosomas
+          }
+          px = x; pz = z
+        }
       }
     }
-    // Ribosomas: los puntos que dan la densidad del estilo Goodsell.
+    // (b) Red tubular: nodos en dos coronas + conexión a los 3 más cercanos.
+    {
+      const nodes = []
+      for (let i = 0; i < 46; i++) {
+        const a = rnd() * Math.PI * 2
+        const r = NR * 1.55 + rnd() * (R * 0.62 - NR * 1.55)
+        nodes.push([Math.cos(a) * r, H * 0.1 + rnd() * H * 0.24, Math.sin(a) * r])
+      }
+      for (const p of nodes) {
+        const near = nodes
+          .filter((q) => q !== p)
+          .map((q) => [q, (q[0] - p[0]) ** 2 + (q[2] - p[2]) ** 2])
+          .sort((u, v) => u[1] - v[1])
+          .slice(0, 3)
+        for (const [q, d2] of near) {
+          if (d2 > (R * 0.3) ** 2) continue
+          draw.pushLine(p[0], p[1], p[2], q[0], q[1], q[2], C_ER, C_ER)
+          erPts.push([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2, 0])
+        }
+      }
+    }
+    // Ribosomas: la densidad del estilo Goodsell. El .blend de referencia
+    // instancia ~2000 esferas; acá son puntos. 70% sobre el ER rugoso
+    // (láminas), 30% libres en el citosol.
+    const sheets = erPts.filter((p) => p[3] === 1)
     for (let i = 0; i < cc.ribosomes; i++) {
-      const p = erPts[(rnd() * erPts.length) | 0]
-      if (!p) break
-      draw.pushPoint(
-        p[0] + (rnd() - 0.5) * R * 0.1,
-        p[1] + (rnd() - 0.5) * H * 0.3,
-        p[2] + (rnd() - 0.5) * R * 0.1,
-        [0.55, 0.95, 0.9], 0.16, 0,
-      )
+      const onSheet = rnd() < 0.7 && sheets.length
+      if (onSheet) {
+        const p = sheets[(rnd() * sheets.length) | 0]
+        draw.pushPoint(
+          p[0] + (rnd() - 0.5) * R * 0.05,
+          p[1] + (rnd() - 0.5) * H * 0.12,
+          p[2] + (rnd() - 0.5) * R * 0.05,
+          [0.55, 0.95, 0.9], 0.16, 0,
+        )
+      } else {
+        const a = rnd() * Math.PI * 2
+        const r = NR * 1.1 + Math.sqrt(rnd()) * (R * 0.62 - NR * 1.1)
+        draw.pushPoint(Math.cos(a) * r, H * 0.08 + rnd() * H * 0.3, Math.sin(a) * r,
+          [0.45, 0.8, 0.78], 0.13, 0)
+      }
     }
 
-    // Golgi: cisternas apiladas, arcos ligeramente curvos junto al núcleo.
+    // Golgi: cinta de 6 cisternas apiladas con jitter + VESÍCULAS brotando de
+    // los bordes (así funciona de verdad: el borde de la cisterna gemela).
     const gx = NR * 1.5, gz = -NR * 0.7
-    for (let c = 0; c < 5; c++) {
-      const rr = NR * (0.5 + c * 0.07)
+    for (let c = 0; c < 6; c++) {
+      const rr = NR * (0.48 + c * 0.075)
+      const jit = (rnd() - 0.5) * NR * 0.03
+      const y = H * 0.18 + c * H * 0.07
       let px = null, pz = null
       for (let s = 0; s <= 16; s++) {
-        const a = -0.9 + (s / 16) * 1.8
-        const x = gx + Math.cos(a) * rr, z = gz + Math.sin(a) * rr
-        if (px !== null) {
-          const y = H * 0.2 + c * H * 0.08
-          draw.pushLine(px, y, pz, x, y, z, C_GOLGI, C_GOLGI)
-        }
+        const a = -0.95 + (s / 16) * 1.9
+        const x = gx + Math.cos(a) * (rr + jit), z = gz + Math.sin(a) * (rr + jit)
+        if (px !== null) draw.pushLine(px, y, pz, x, y, z, C_GOLGI, C_GOLGI)
         px = x; pz = z
+      }
+      // Vesículas en los dos extremos del arco.
+      for (const aEnd of [-0.95, 0.95]) {
+        for (let v = 0; v < 2; v++) {
+          draw.pushPoint(
+            gx + Math.cos(aEnd) * (rr + jit) + (rnd() - 0.5) * NR * 0.12,
+            y + (rnd() - 0.5) * H * 0.05,
+            gz + Math.sin(aEnd) * (rr + jit) + (rnd() - 0.5) * NR * 0.12,
+            rgb(PALETTE.pink), 0.3, 0,
+          )
+        }
       }
     }
   }
@@ -190,20 +311,39 @@ export function createCellScene(container, cfg, agentNames = []) {
   // ─── MEMBRANA: dos contornos (la bicapa) + un punto por vértice ───────────
   const MV = cc.membrane.verts
   const memMat = new THREE.LineBasicMaterial({ vertexColors: true })
-  const memBuf = createLineBuffer(MV * 2 + 8, memMat)
+  // Bicapa + canales (4 seg c/u) + glicoproteínas (6 seg c/u), por frame.
+  const memBuf = createLineBuffer(MV * 2 + cc.channels * 4 + cc.glycans * 6 + 8, memMat)
+  // Ángulos FIJOS de las proteínas de membrana: viajan con el contorno, no
+  // reaparecen en otro lado cada frame.
+  const channelAngs = Array.from({ length: cc.channels }, () => rnd() * Math.PI * 2)
+  const glycanAngs = Array.from({ length: cc.glycans }, () => rnd() * Math.PI * 2)
   scene.add(memBuf.mesh)
   const memDots = createPointCloud(MV, draw.pointMaterial)
   scene.add(memDots.mesh)
 
   // ─── CORTEZA DE ACTINA: hebras cortas tangenciales al borde interno ───────
   const cortexMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5 })
-  const cortexBuf = createLineBuffer(cc.cortexStrands, cortexMat)
+  // Trenza (2 seg por hebra) + malla dendrítica del lamelipodio.
+  const cortexBuf = createLineBuffer(cc.cortexStrands * 2 + cc.lamelliMesh, cortexMat)
   scene.add(cortexBuf.mesh)
 
   // ─── MICROTÚBULOS: crecen y se derrumban, así que se redibujan cada frame ─
   const railMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 })
-  const railBuf = createLineBuffer(cc.rails.count, railMat)
+  // Cada microtúbulo = 2 líneas casi paralelas (se lee cilindro hueco).
+  const railBuf = createLineBuffer(cc.rails.count * 2, railMat)
   scene.add(railBuf.mesh)
+  // Cuentas de tubulina: dímeros α/β alternados sobre cada riel (colores en
+  // 2 tonos, receta del modelo de citoesqueleto). Siguen al riel al crecer.
+  const mtBeads = createPointCloud(cc.rails.count * cc.mtBeads, draw.pointMaterial)
+  {
+    const A = rgb(PALETTE.cyanSat), B = rgb(PALETTE.blue)
+    for (let i = 0; i < cc.rails.count * cc.mtBeads; i++) {
+      const c = i % 2 === 0 ? A : B
+      mtBeads.col[i * 3] = c[0]; mtBeads.col[i * 3 + 1] = c[1]; mtBeads.col[i * 3 + 2] = c[2]
+      mtBeads.size[i] = 0.32
+    }
+  }
+  scene.add(mtBeads.mesh)
 
   // ─── ATP: los cuantos, que son también el latido sonoro del mundo ─────────
   const atpCloud = createPointCloud(cc.atp.capacity, draw.pointMaterial)
@@ -225,14 +365,47 @@ export function createCellScene(container, cfg, agentNames = []) {
     const kind = KINDS[i % KINDS.length]
     const group = new THREE.Group()
     if (kind === 'mitochondrion') {
-      // Cápsula alargada con crestas: la silueta que se reconoce al instante.
-      const L = 5.2, W = 2.1
-      group.add(kit.edgesOf(new THREE.BoxGeometry(L, W, W), PALETTE.orange))
+      // Cápsula con CRESTAS transversales onduladas (receta del modelo usdz,
+      // spec §4.2bis): anillos en los extremos + largueros curvos + crestas
+      // en zigzag dentro. Nada de caja con barras.
+      const L = 5.4, W = 2.2
+      const body = []
+      // Anillos de los extremos (planos YZ, en x=±L*0.36).
+      for (const ex of [-L * 0.36, L * 0.36]) {
+        for (let s = 0; s < 10; s++) {
+          const a0 = (s / 10) * Math.PI * 2, a1 = ((s + 1) / 10) * Math.PI * 2
+          body.push(ex, Math.cos(a0) * W * 0.5, Math.sin(a0) * W * 0.5,
+            ex, Math.cos(a1) * W * 0.5, Math.sin(a1) * W * 0.5)
+        }
+      }
+      // Largueros: 4 líneas longitudinales que se abomban al centro y se
+      // cierran en los polos de la cápsula.
+      for (let l = 0; l < 4; l++) {
+        const a = (l / 4) * Math.PI * 2
+        const cy0 = Math.cos(a), cz0 = Math.sin(a)
+        let px = -L * 0.5, py = 0, pz = 0
+        for (let s = 1; s <= 6; s++) {
+          const t = s / 6
+          const x = -L * 0.5 + t * L
+          const bulge = Math.sin(t * Math.PI) * W * 0.5
+          const y = cy0 * bulge, z = cz0 * bulge
+          body.push(px, py, pz, x, y, z)
+          px = x; py = y; pz = z
+        }
+      }
+      group.add(kit.fatLine(body, PALETTE.orange))
+      // Crestas: 6 tabiques transversales en zigzag (lamelares, onduladas).
       const cristae = []
-      for (let c = -2; c <= 2; c++) {
-        const x = (c / 2.5) * L * 0.4
-        cristae.push(x, -W / 2, -W / 2, x, W / 2, W / 2)
-        cristae.push(x, W / 2, -W / 2, x, -W / 2, W / 2)
+      for (let c = 0; c < 6; c++) {
+        const x = -L * 0.3 + (c / 5) * L * 0.6
+        const amp = Math.sin(((c + 0.5) / 6) * Math.PI) * W * 0.42
+        let py2 = -amp, pz2 = -W * 0.18
+        for (let s = 1; s <= 4; s++) {
+          const y = -amp + (s / 4) * amp * 2
+          const z = (s % 2 === 0 ? -1 : 1) * W * 0.18
+          cristae.push(x, py2, pz2, x, y, z)
+          py2 = y; pz2 = z
+        }
       }
       group.add(kit.fatLine(cristae, PALETTE.yellow))
     } else if (kind === 'vesicle') {
@@ -297,20 +470,76 @@ export function createCellScene(container, cfg, agentNames = []) {
       memDots.col[i * 3] = col[0]; memDots.col[i * 3 + 1] = col[1]; memDots.col[i * 3 + 2] = col[2]
       memDots.size[i] = 0.5 + lead * 0.5
     }
+    // Proteínas transmembrana (receta del FBX de membrana, spec §4.2bis):
+    // canales = rombo montado a caballo del contorno; glicoproteínas =
+    // espiral corta hacia afuera (el glicocálix). Ángulos fijos: viajan con
+    // la membrana al deformarse.
+    const CHAN = rgb(PALETTE.yellow)
+    for (const ca of channelAngs) {
+      const r = radiusAt(membrane, ca) * R
+      const cx = Math.cos(ca) * r, cz = Math.sin(ca) * r
+      const nx = Math.cos(ca), nz = Math.sin(ca)      // normal (radial)
+      const tx = -nz, tz = nx                          // tangente
+      const s = 1.1
+      memBuf.push(cx + nx * s, 0, cz + nz * s, cx + tx * s, 0, cz + tz * s, CHAN, CHAN)
+      memBuf.push(cx + tx * s, 0, cz + tz * s, cx - nx * s, 0, cz - nz * s, CHAN, CHAN)
+      memBuf.push(cx - nx * s, 0, cz - nz * s, cx - tx * s, 0, cz - tz * s, CHAN, CHAN)
+      memBuf.push(cx - tx * s, 0, cz - tz * s, cx + nx * s, 0, cz + nz * s, CHAN, CHAN)
+    }
+    const GLY = rgb(PALETTE.pink)
+    for (let g = 0; g < glycanAngs.length; g++) {
+      const ga = glycanAngs[g]
+      const r = radiusAt(membrane, ga) * R
+      const nx = Math.cos(ga), nz = Math.sin(ga)
+      const tx = -nz, tz = nx
+      let px = nx * r, pz = nz * r
+      for (let s = 1; s <= 6; s++) {
+        // Zigzag que se abre hacia afuera: la espiral vista desde arriba.
+        const out = r + s * 0.85
+        const side = (s % 2 === 0 ? 1 : -1) * 0.8 * (1 - s / 8)
+        const x = nx * out + tx * side, z = nz * out + tz * side
+        memBuf.push(px, 0.4, pz, x, 0.4, z, GLY, GLY)
+        px = x; pz = z
+      }
+    }
     memBuf.commit()
     memDots.commit()
   }
 
-  function drawCortex() {
+  function drawCortex(front, protrusion) {
     cortexBuf.begin()
+    // Actina cortical: cada hebra es una TRENZA de dos sub-hebras que se
+    // cruzan (la "trenza" del modelo de citoesqueleto), no una raya.
     for (let i = 0; i < cc.cortexStrands; i++) {
       const a = (i / cc.cortexStrands) * Math.PI * 2
       const r = radiusAt(membrane, a) * R
-      const a2 = a + 0.05
+      const da = 0.045
+      const r0 = r * 0.965, r1 = r * 0.90
       cortexBuf.push(
-        Math.cos(a) * r * 0.965, 0, Math.sin(a) * r * 0.965,
-        Math.cos(a2) * r * 0.90, 0, Math.sin(a2) * r * 0.90,
+        Math.cos(a - da) * r0, 0, Math.sin(a - da) * r0,
+        Math.cos(a + da) * r1, 0, Math.sin(a + da) * r1,
         C_CORTEX, C_MEMBRANE,
+      )
+      cortexBuf.push(
+        Math.cos(a + da) * r0, 0, Math.sin(a + da) * r0,
+        Math.cos(a - da) * r1, 0, Math.sin(a - da) * r1,
+        C_CORTEX, C_MEMBRANE,
+      )
+    }
+    // Lamelipodio: malla dendrítica ramificada (~±35° del radio, Arp2/3) bajo
+    // el frente. Su densidad ES la protrusión: sin ATP no hay malla.
+    const half = 0.9
+    const count = Math.floor(cc.lamelliMesh * protrusion)
+    for (let k = 0; k < count; k++) {
+      const a = front + (rnd() * 2 - 1) * half
+      const r = radiusAt(membrane, a) * R
+      const depth = 0.90 - rnd() * 0.10
+      const sign = k % 2 === 0 ? 1 : -1
+      const branch = a + sign * 0.61 // ±35°
+      cortexBuf.push(
+        Math.cos(a) * r * depth, 0, Math.sin(a) * r * depth,
+        Math.cos(branch) * r * (depth - 0.07), 0, Math.sin(branch) * r * (depth - 0.07),
+        C_FRONT, C_CORTEX,
       )
     }
     cortexBuf.commit()
@@ -319,14 +548,28 @@ export function createCellScene(container, cfg, agentNames = []) {
   function drawRails() {
     railBuf.begin()
     const ox = rails.origin.x * R, oz = rails.origin.z * R
-    for (const r of rails.rails) {
-      railBuf.push(
-        ox, H * 0.15, oz,
-        ox + Math.cos(r.ang) * r.len * R, H * 0.15, oz + Math.sin(r.ang) * r.len * R,
-        C_RAIL, C_CORTEX,
-      )
+    const off = 0.38 // separación del par de líneas: se lee cilindro hueco
+    for (let ri = 0; ri < rails.rails.length; ri++) {
+      const r = rails.rails[ri]
+      const dx = Math.cos(r.ang), dz = Math.sin(r.ang)
+      const px = -dz * off, pz = dx * off
+      const ex = ox + dx * r.len * R, ez = oz + dz * r.len * R
+      railBuf.push(ox + px, H * 0.15, oz + pz, ex + px, H * 0.15, ez + pz, C_RAIL, C_CORTEX)
+      railBuf.push(ox - px, H * 0.15, oz - pz, ex - px, H * 0.15, ez - pz, C_RAIL, C_CORTEX)
+      // Cuentas de tubulina: siguen el largo VIVO del riel; las que caen más
+      // allá de la punta se esconden (el riel se derrumba y se lo ve vaciarse).
+      for (let b = 0; b < cc.mtBeads; b++) {
+        const idx = ri * cc.mtBeads + b
+        const t = (b + 0.5) / cc.mtBeads
+        const bx = ox + dx * r.len * R * t, bz = oz + dz * r.len * R * t
+        const visible = r.len * t > cc.rails.minLen * 0.3
+        mtBeads.pos[idx * 3] = bx
+        mtBeads.pos[idx * 3 + 1] = visible ? H * 0.15 : -9999
+        mtBeads.pos[idx * 3 + 2] = bz
+      }
     }
     railBuf.commit()
+    mtBeads.commit()
   }
 
   function drawInvaders() {
@@ -474,7 +717,7 @@ export function createCellScene(container, cfg, agentNames = []) {
 
     // ── Dibujo ──────────────────────────────────────────────────────────────
     drawMembrane(motility.frontAngle)
-    drawCortex()
+    drawCortex(motility.frontAngle, motility.protrusion * (1 - rounding))
     drawRails()
     drawInvaders()
     drawAdhesions()
