@@ -707,13 +707,16 @@ export function createPond(container, cfg, agentNames = []) {
       // Hoja al ras del agua (+3cm para no pelear con el plano) y sigue la marea.
       L.group.position.y = y0 + 0.03 + Math.sin(clock * 0.8 + L.bob) * 0.04
       if (!L.flowerGroup) continue
-      // Floración (alikim): o=0 capullo → o=1 abierto. Al abrir, los pétalos se
-      // inclinan a su th de banda Y SE ENCOGEN → cerrados quedan verticales,
-      // grandes y apretados (capullo gordo).
-      const o = 0.5 - 0.5 * Math.cos((clock / L.period + L.phase) * 6.2832)
+      // Floración (alikim: q = quaternFromETh(e, -th - bloom)): el bloom se SUMA
+      // a la inclinación base de cada banda, no la reemplaza. Así los sépalos
+      // verdes (th grande) siguen abiertos SIEMPRE → el collar de hojas que
+      // envuelve el loto no se pierde al cerrar; sólo los pétalos internos
+      // (th chico) suben a capullo. Al abrir, todos se inclinan +bloom y se encogen.
+      const o = 0.5 - 0.5 * Math.cos((clock / L.period + L.phase) * 6.2832) // 0 cerrado → 1 abierto
+      const bloom = -0.1 + o                        // alikim: [-0.1, 0.9]
       const petScale = 1 - 0.34 * o
       for (const P of L.petals) {
-        const spread = 0.14 + o * (P.th - 0.14)     // capullo vertical → banda abierta
+        const spread = Math.max(0.05, P.th + bloom) // th de banda + bloom; sépalos quedan abiertos
         _pR.setFromAxisAngle(_yAx, P.az)
         _pQ.setFromAxisAngle(_xAx, spread)
         P.m.quaternion.multiplyQuaternions(_pR, _pQ)
