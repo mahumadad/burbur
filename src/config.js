@@ -192,11 +192,16 @@ export const CONFIG = {
   // Mundo MICELIO: la red que crece y se come su propio tronco.
   // Ver docs/superpowers/specs/2026-08-11-diseno-mundo-micelio.md
   fungus: {
-    substrate: { logAngle: 0.6, logHalfLength: 0.72, logRadius: 0.26, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
+    // Tronco más chico y más esbelto que antes: así entra ENTERO en cuadro con
+    // hojarasca alrededor (antes llenaba la pantalla y no se leía como tronco).
+    substrate: { logAngle: 0.6, logHalfLength: 0.52, logRadius: 0.15, barkFrac: 0.18, sapwoodFrac: 0.42, carcasses: 4, litterDensity: 1, gridSize: 48, hardness: { bark: 1.4, sapwood: 0.6, heartwood: 1.8 } },
     // Ajustado al look de placa de cultivo (referencia del usuario): más puntas
     // = borde más plumoso; más ramificación + autotropismo = rosetón radial que
     // se esparce parejo; más widthGain = rizomorfos (cordones) marcados.
-    mycelium: { maxNodes: 1600, maxEdges: 1700, maxTips: 140, stepLen: 0.033, tipSpeed: 0.055, turnRate: 2.0, noise: 0.8, tropism: 0.7, autotropism: 0.75, branchRate: 0.7, fuseRadius: 0.02, widthGain: 0.95, flowDecay: 0.35, pruneBelow: 0.1, pruneRate: 0.22 },
+    mycelium: { maxNodes: 1600, maxEdges: 1700, maxTips: 140, stepLen: 0.033, tipSpeed: 0.055, turnRate: 2.0, noise: 0.8, tropism: 0.7, autotropism: 0.75, branchRate: 0.7, fuseRadius: 0.02, widthGain: 0.95, widthDecay: 0.035, flowDecay: 0.35, pruneBelow: 0.1, pruneRate: 0.5, bound: 0.62 },
+    // Cuánto esfuerzo de forrajeo aplica cada punta por segundo. Es lo que
+    // agota el sustrato y, por lo tanto, lo que hace que la red se remodele.
+    eatRate: 2.2,
     fauna: 10,              // agentes visibles de fauna del suelo
     litter: 900,            // puntos de hojarasca
     logDither: 5200,        // puntos de textura del tronco
