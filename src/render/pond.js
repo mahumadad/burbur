@@ -453,7 +453,7 @@ export function createPond(container, cfg, agentNames = []) {
       dive: params.dive, hover: params.hover, rollMul: params.rollMul,
       spinY: params.spinY, effR: params.effR,
       // Las 2 primeras son garzas: pican al agua a cazar peces.
-      hunter: i < 2, huntCool: 3 + q() * 4, striking: 0, struck: false, targetFish: -1,
+      hunter: i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
     })
     trailColors.push(KIND_COLOR[kind])
   }
@@ -504,6 +504,49 @@ export function createPond(container, cfg, agentNames = []) {
       frogCloud.pos[(b + 2) * 3] = f.x - 0.12; frogCloud.pos[(b + 2) * 3 + 1] = f.y + 0.16; frogCloud.pos[(b + 2) * 3 + 2] = f.z - 0.08
     }
     frogCloud.commit()
+  }
+
+  // ─── TRONCO(S) DE ÁRBOL flotando en el agua ───────────────────────────────
+  const floatLogs = []
+  for (let li = 0; li < 1 + (q() < 0.5 ? 1 : 0); li++) {
+    const g = new THREE.Group()
+    const len = 9 + q() * 7, r0 = 0.7 + q() * 0.5
+    // Tronco: cilindro ahusado, madera mojada oscura, tumbado.
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(r0 * 0.55, r0, len, 8, 1),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(0.14, 0.11, 0.085), fog: true }),
+    )
+    trunk.rotation.z = Math.PI / 2
+    g.add(trunk)
+    // Aristas hueso (madera vieja lavada) + un par de muñones de rama.
+    g.add(new THREE.LineSegments(new THREE.WireframeGeometry(trunk.geometry),
+      new THREE.LineBasicMaterial({ color: 0xb9b09a, transparent: true, opacity: 0.5, fog: true })))
+    for (let b = 0; b < 2 + (q() * 2 | 0); b++) {
+      const at = (q() - 0.5) * len * 0.8, ang = q() * 6.2832, bl = 1.2 + q() * 2
+      const bx = Math.cos(ang) * bl, by = Math.abs(Math.sin(ang)) * bl
+      const stub = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(at, 0, 0), new THREE.Vector3(at + bx * 0.3, by, bx)]),
+        new THREE.LineBasicMaterial({ color: 0xa89a80, fog: true }))
+      g.add(stub)
+    }
+    const a = q() * 6.2832, rr = 6 + q() * (mt * 0.7)
+    g.position.set(Math.cos(a) * rr, ht + 0.15, Math.sin(a) * rr)
+    g.rotation.y = q() * 6.2832
+    scene.add(g)
+    floatLogs.push({ g, drift: q() * 6.2832, spin: (q() - 0.5) * 0.06, phase: q() * 6.2832 })
+  }
+  function updateLogs(step, t) {
+    for (const L of floatLogs) {
+      // Deriva lenta + cabeceo + giro suave; se mantiene dentro de la laguna.
+      const sp = 0.6
+      L.g.position.x += Math.cos(L.drift) * sp * step
+      L.g.position.z += Math.sin(L.drift) * sp * step
+      const rr = Math.hypot(L.g.position.x, L.g.position.z)
+      if (rr > mt * 0.85) L.drift += Math.PI + (q() - 0.5)
+      L.g.position.y = ht + 0.15 + Math.sin(t * 0.9 + L.phase) * 0.12
+      L.g.rotation.y += L.spin * step
+      L.g.rotation.x = Math.sin(t * 0.7 + L.phase) * 0.05
+    }
   }
 
   // AGENTES EXTRA (decorativos): más vida en la laguna sin tocar el swarm/censo
@@ -582,15 +625,23 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
-  // Garzas: unos pocos agentes pican al agua y atrapan un pez (→ depredación).
+  // Garzas: la mayor parte del tiempo VUELAN o se POSAN en una piedra; sólo de
+  // vez en cuando bajan a pescar. Estados: 'fly' | 'perch' | 'strike'.
+  function heronPerch() {
+    const L = lobes[q() * lobes.length | 0]
+    const ang = q() * 6.2832, t = 0.2 + q() * 0.5
+    const px = L.x + Math.cos(ang) * L.rx * t, pz = L.z + Math.sin(ang) * L.rz * t
+    const top = lobeTop(px, pz)
+    return { x: px, z: pz, y: (top > -Infinity ? top : ht) + 1.2 }
+  }
   function huntHerons(step, predations) {
     const F = fish.state.fish
     for (let i = 0; i < n; i++) {
       const a = agents[i]
       if (!a.hunter) continue
-      if (a.striking > 0) {
+      a.stateT -= step
+      if (a.hstate === 'strike') {
         a.striking -= step
-        // Picado: la garza baja al agua y vuelve (parábola en el tiempo).
         const k = Math.max(0, 1 - Math.abs(a.striking / 0.7 - 0.5) * 2)
         worldPos[i * 3 + 1] = ht + 1.5 - k * 4.2
         const f = F[a.targetFish]
@@ -606,16 +657,29 @@ export function createPond(container, cfg, agentNames = []) {
             }
           }
         }
-        if (a.striking <= 0) { a.striking = 0; a.huntCool = 5 + q() * 6 }
-      } else {
-        a.huntCool -= step
-        if (a.huntCool <= 0) {
-          let best = -1, bestD = 45
-          for (let fi = 0; fi < F.length; fi++) {
-            const d = Math.hypot(F[fi].x * mt - worldPos[i * 3], F[fi].z * mt - worldPos[i * 3 + 2])
-            if (d < bestD) { bestD = d; best = fi }
-          }
-          if (best >= 0) { a.striking = 0.7; a.struck = false; a.targetFish = best } else a.huntCool = 1 + q()
+        if (a.striking <= 0) { a.hstate = 'fly'; a.stateT = 6 + q() * 8 }
+      } else if (a.hstate === 'perch') {
+        // Quieta sobre la piedra (con leve balanceo). No deambula.
+        worldPos[i * 3] += (a.perch.x - worldPos[i * 3]) * 0.12
+        worldPos[i * 3 + 2] += (a.perch.z - worldPos[i * 3 + 2]) * 0.12
+        worldPos[i * 3 + 1] = a.perch.y + Math.sin(clock * 1.3 + a.idx) * 0.08
+        roamers[i].x = worldPos[i * 3] / LR; roamers[i].z = worldPos[i * 3 + 2] / LR
+        roamers[i].vx *= 0.8; roamers[i].vz *= 0.8
+        if (a.stateT <= 0) { a.hstate = 'fly'; a.stateT = 5 + q() * 7 }
+      } else { // 'fly' — vuela normal; al terminar decide qué hacer
+        if (a.stateT <= 0) {
+          const r = q()
+          if (r < 0.35) {            // posarse en una piedra
+            a.hstate = 'perch'; a.perch = heronPerch(); a.stateT = 5 + q() * 8
+          } else if (r < 0.5) {      // ir a pescar (ocasional)
+            let best = -1, bestD = 55
+            for (let fi = 0; fi < F.length; fi++) {
+              const d = Math.hypot(F[fi].x * mt - worldPos[i * 3], F[fi].z * mt - worldPos[i * 3 + 2])
+              if (d < bestD) { bestD = d; best = fi }
+            }
+            if (best >= 0) { a.hstate = 'strike'; a.striking = 0.7; a.struck = false; a.targetFish = best }
+            else a.stateT = 2 + q() * 3
+          } else { a.stateT = 4 + q() * 6 } // seguir volando
         }
       }
     }
@@ -729,6 +793,7 @@ export function createPond(container, cfg, agentNames = []) {
     huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
     updateBugs(step, clock)
     updateFrogs(step)
+    updateLogs(step, clock)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
