@@ -3,6 +3,7 @@ import { createStage } from './stage.js'
 import { createDraw } from './engine/points.js'
 import { cityGrid } from './cityGrid.js'
 import { fbm } from './noise.js'
+import { createBoxBuilder } from './boxbuilder.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -59,6 +60,9 @@ export function createCityScene(container, cfg, agentNames = []) {
   // tareas de edificios (P4/P5) lo van llenando; acá arranca vacío porque
   // el suelo (mn/fn) ya tiene que poder leerlo aunque todavía no haya nada.
   const placed = []
+  // `w` del original: puntos a evitar por el polvo suelto de manzana/calle
+  // (P6, pendiente). Lo llenan yn (torres) y, más adelante, Sn/wn.
+  const dustAvoid = []
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v))
   // `St(a,b,x)` del original: smoothstep clásico.
@@ -287,12 +291,156 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   pn()
 
-  // ─── EDIFICIOS: torres translúcidas en capas ("matrix") ────────────────
-  // Cada torre es una pila de losas finas (pisos), no una caja sólida.
-  // El glow no usa luces ni post-proceso: es la superposición de losas
-  // semitransparentes con blending aditivo (igual que el resto del proyecto),
-  // más el wireframe + nube de puntos por vértice que funde la silueta con
-  // el punteado del suelo, tal como hacen las rocas del bosque (scene.js).
+  // ─── EDIFICIOS (torres): puerto fiel de `yn` (constructor, 3 arquetipos)
+  // y `bn` (colocación por bloque) ─────────────────────────────────────────
+  // A diferencia de una interpretación en losas translúcidas apiladas, la
+  // torre real es un conjunto SÓLIDO de cajas armado con el box builder
+  // (`gn`/createBoxBuilder): el look "matrix" en capas lo da enteramente
+  // `finish(tint,'lichen')` (malla MeshBasicMaterial opacity .42 depthWrite
+  // false + nube de puntos ámbar), no un material aditivo aparte. Tres
+  // arquetipos elegidos por `m=rnd()`:
+  //   m<.36  columnata: losa base + columnas perimetrales + N pisos con
+  //          columnas cortas entre losas + remate.
+  //   m<.64  racimo de pilares: grid de pilares con "capitel" (aro ancho) +
+  //          aros de piso apilados + cornisa perimetral arriba.
+  //   else   muros con aletas: N muros paralelos en Z con aletas verticales
+  //          + un muro central (a veces doble, más bajo).
+  // Remates comunes a los tres: caja de techo (70% prob.) y antena (60%).
+  function spawnTower(block) {
+    const t = block.hx * 2, n = block.hz * 2
+    const r = Math.min(t - 6, 10 + rnd() * 16)
+    const i = Math.min(n - 6, 9 + rnd() * 13)
+    if (r < 7 || i < 7) return false
+
+    // Hasta 8 intentos de ubicar la torre sin pisar otra ya colocada.
+    let a = 0, o = 0, ok = false
+    for (let c = 0; c++ < 8 && !ok; ) {
+      a = block.cx + (rnd() - 0.5) * (t - r - 5)
+      o = block.cz + (rnd() - 0.5) * (n - i - 5)
+      ok = true
+      for (let l = 0; l < placed.length; l++) {
+        const u = placed[l]
+        if (Math.abs(a - u.cx) < r / 2 + u.hx + 2.5 && Math.abs(o - u.cz) < i / 2 + u.hz + 2.5) {
+          ok = false
+          break
+        }
+      }
+    }
+    if (!ok) return false
+
+    const d = we + Kt + 0.2
+    const tint = rnd() < 0.66 ? block.tint : BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
+    const p = createBoxBuilder(rnd)
+    const m = rnd()
+    let h
+    const x = r / 2, S = i / 2
+    const C = rnd() < 0.22 ? 1.7 + rnd() * 1.1 : 1
+
+    if (m < 0.36) {
+      const T = 5.5 + rnd() * 2.5
+      const E = Math.round((2 + (rnd() * 3 | 0)) * C)
+      const D = 4.2 + rnd() * 1.6
+      const O = T + E * D
+      h = 0.8 + O + 1.1
+      p.box(r, 0.8, i, a, d + 0.4, o)
+      const k = 3.8 + rnd() * 1.2
+      for (let v = -x + 1.1; v <= x - 1; v += k) {
+        p.box(1.2, T, 1.2, a + v, d + 0.8 + T / 2, o - S + 0.7)
+        p.box(1.2, T, 1.2, a + v, d + 0.8 + T / 2, o + S - 0.7)
+      }
+      for (let y = -S + 1.1 + k; y <= S - 1.1 - k * 0.5; y += k) {
+        p.box(1.2, T, 1.2, a - x + 0.7, d + 0.8 + T / 2, o + y)
+        p.box(1.2, T, 1.2, a + x - 0.7, d + 0.8 + T / 2, o + y)
+      }
+      for (let f = 0; f < E; f++) {
+        const A = d + 0.8 + T + f * D
+        p.box(r, 1.1, i, a, A + 0.55, o)
+        for (let v = -x + 0.9; v <= x - 0.8; v += 2.6) {
+          p.box(0.9, D - 1.1, 0.9, a + v, A + 1.1 + (D - 1.1) / 2, o - S + 0.5)
+          p.box(0.9, D - 1.1, 0.9, a + v, A + 1.1 + (D - 1.1) / 2, o + S - 0.5)
+        }
+      }
+      p.box(r, 1.1, i, a, d + 0.8 + O + 0.55, o)
+      p.box(r - 4.5, O * 0.9, i - 4.5, a, d + 0.8 + O / 2, o)
+    } else if (m < 0.64) {
+      const j = Math.round((3 + (rnd() * 3 | 0)) * C)
+      const M = 4.4 + rnd() * 1.6
+      h = j * (M + 1.3)
+      const N = 2 + (rnd() * 2 | 0)
+      const P = 2.1 + rnd() * 0.9
+      for (let g = 0; g < N; g++) {
+        for (let zi = 0; zi < 2; zi++) {
+          const F = a - x + 2.4 + g * (r - 4.8) / (N - 1)
+          const I = o - S + 2.4 + zi * (i - 4.8)
+          for (let b = 0; b < j; b++) {
+            const L = d + b * (M + 1.3)
+            p.box(P, M, P, F, L + M / 2, I)
+            p.box(P + 1.6, 1, P + 1.6, F, L + M - 0.5, I)
+          }
+        }
+      }
+      for (let b = 1; b <= j; b++) p.box(r, 1.3, i, a, d + b * (M + 1.3) - 0.65, o)
+      const R = d + h + 0.35
+      p.box(r, 0.7, 0.5, a, R, o - S + 0.25)
+      p.box(r, 0.7, 0.5, a, R, o + S - 0.25)
+      p.box(0.5, 0.7, i, a - x + 0.25, R, o)
+      p.box(0.5, 0.7, i, a + x - 0.25, R, o)
+    } else {
+      h = (15 + rnd() * 13) * C
+      const wallCount = 2 + +(rnd() < 0.4)
+      const B = 4.4 + rnd() * 1.8
+      for (let g = 0; g < wallCount; g++) {
+        const V = -S + B / 2 + g * (i - B) / (wallCount - 1)
+        p.box(r, h, B, a, d + h / 2, o + V)
+        for (let v = -x + 1; v <= x - 0.9; v += 2.4) {
+          p.box(0.8, h * 0.92, 0.7, a + v, d + h * 0.46, o + V - B / 2 - 0.32)
+          p.box(0.8, h * 0.92, 0.7, a + v, d + h * 0.46, o + V + B / 2 + 0.32)
+        }
+      }
+      const ee = 4.2 + rnd() * 1.6
+      const H = (rnd() - 0.5) * (r - ee) * 0.6
+      p.box(ee, h, i, a + H, d + h / 2, o)
+      if (rnd() < 0.4) p.box(ee, h * 0.8, i, a - H, d + h * 0.4, o)
+    }
+
+    if (rnd() < 0.7) {
+      p.box(2.2 + rnd() * 2, 1.6 + rnd() * 1.2, 2 + rnd() * 2, a + (rnd() - 0.5) * r * 0.4, d + h + 0.8, o + (rnd() - 0.5) * i * 0.4)
+    }
+    if (rnd() < 0.6) {
+      p.box(0.22, (3.5 + rnd() * 2.5) * (C > 1 ? 1.5 : 1), 0.22, a + (rnd() - 0.5) * r * 0.5, d + h + 2.2, o + (rnd() - 0.5) * i * 0.5)
+    }
+
+    scene.add(p.finish(tint, 'lichen'))
+    placed.push({ cx: a, cz: o, hx: x, hz: S })
+    dustAvoid.push({ x: a, z: o, r: Math.min(x, S) * 0.95 })
+    // Bookkeeping fuera del bundle original: percha para agentes (B8) y
+    // posición de capa de nieve (B9), tareas todavía pendientes.
+    poiPerch.push({ x: a / R_CITY, z: o / R_CITY, h: d + h - we })
+    capPos.push(a, d + h, o)
+    return true
+  }
+
+  // `bn` del original: por bloque, probabilidad de torre según su tamaño
+  // (más área ⇒ más probable); los bloques muy grandes pueden recibir una
+  // 2ª torre desplazada. Si la mala suerte del rnd dejó todo vacío, fuerza
+  // una torre en el bloque de mayor área.
+  function placeTowers() {
+    const e = TOWERS
+    for (let t = 0; t < blocks.length; t++) {
+      const n = blocks[t]
+      const r = Math.min(n.hx, n.hz) * 2
+      const i = (r >= 20 ? 0.85 : r >= 14 ? 0.5 : 0.2) * e
+      if (rnd() < i) spawnTower(n)
+      if (r >= 40 && rnd() < 0.6 * Math.min(e, 1.5)) spawnTower(n)
+    }
+    if (!placed.length && blocks.length && e > 0) {
+      const sorted = blocks.slice().sort((x, y) => y.area - x.area)
+      for (let o = 0; o < sorted.length && !spawnTower(sorted[o]); o++);
+    }
+  }
+  placeTowers()
+
+  // ─── MOBILIARIO BAJO (Sn/wn, interpretación provisoria; port real en P5) ─
   {
     // Cachés por tinte: la paleta tiene solo 6 colores, así que se reusa un
     // material de losa y uno de wireframe por tinte en vez de crear uno por
@@ -379,42 +527,6 @@ export function createCityScene(container, cfg, agentNames = []) {
       }
       return roofY
     }
-
-    function buildTower(block, blockTint) {
-      const r = Math.min(block.hx, block.hz) * 2
-      // Footprint: proporcional a r, con jitter, inscripto con margen dentro
-      // del bloque para dejar sitio al borde (pasto/flores, tarea B7).
-      const maxHalfX = Math.max(2, block.hx - TOWER_INSET)
-      const maxHalfZ = Math.max(2, block.hz - TOWER_INSET)
-      const w = Math.min(maxHalfX * 2, r * (0.35 + rnd() * 0.3))
-      const d = Math.min(maxHalfZ * 2, r * (0.35 + rnd() * 0.3))
-      // Offset dentro del bloque (no siempre centrada).
-      const freeX = Math.max(0, maxHalfX - w / 2)
-      const freeZ = Math.max(0, maxHalfZ - d / 2)
-      const cx = block.cx + (rnd() * 2 - 1) * freeX
-      const cz = block.cz + (rnd() * 2 - 1) * freeZ
-      // Altura: mayor en bloques grandes, con jitter para variar la silueta.
-      const H = (12 + r * 0.85) * (0.65 + rnd() * 0.7)
-      const floors = Math.max(3, Math.min(20, Math.round(H / FLOOR_GAP)))
-      const baseY = we + Kt
-      const tint = rnd() < 0.66 ? blockTint : BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
-      const roofY = stackSlabs(cx, cz, w, d, floors, baseY, tint)
-      poiPerch.push({ x: cx / R_CITY, z: cz / R_CITY, h: roofY - we })
-      capPos.push(cx, roofY, cz)
-    }
-
-    // `bn` del original: por bloque, probabilidad de torre según su tamaño;
-    // los bloques grandes pueden recibir una 2ª torre desplazada.
-    function placeBuildings() {
-      for (const block of blocks) {
-        const r = Math.min(block.hx, block.hz) * 2
-        const prob = (r >= 20 ? 0.85 : r >= 14 ? 0.5 : 0.2) * TOWERS
-        const blockTint = BUILDING_PALETTE[(rnd() * BUILDING_PALETTE.length) | 0]
-        if (rnd() < prob) buildTower(block, blockTint)
-        if (r >= 40 && rnd() < 0.6 * Math.min(TOWERS, 1.5)) buildTower(block, blockTint)
-      }
-    }
-    placeBuildings()
 
     // `Sn` del original: 3–6 volúmenes bajos (1–2 pisos), offset aleatorio
     // dentro de un bloque al azar. Mismo look de losa/matrix que las torres
