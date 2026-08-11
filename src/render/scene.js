@@ -13,6 +13,7 @@ import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createBugs, updateBugs, nearestBug } from '../sim/behaviors.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
 import { phenology } from '../sim/phenology.js'
+import { createLitter, tintLeafAnchors } from './tree/litter.js'
 
 // El mundo se construye SOLO con LineSegments (color por vértice) y Points (shader propio).
 // Sin mallas de vegetación, sin texturas, sin bloom: el brillo sale del blending aditivo.
@@ -457,10 +458,10 @@ export function createScene(container, cfg, agentNames = []) {
         const yr = (0.3 + rnd() * 1.0) * scale
         const cx = tx + Math.cos(b) * xr, cy = ty + yr, cz = tz + Math.sin(b) * xr
         pushLine(tx, ty, tz, cx, cy, cz, STEM_MID, STEM_HI)
-        pushPoint(cx, cy, cz, col, (0.34 + rnd() * 0.34) * scale, rnd())
+        pushPoint(cx, cy, cz, col, (0.34 + rnd() * 0.34) * scale, rnd(), 1)
       }
     } else {
-      pushPoint(tx, ty + 0.1 * scale, tz, col, (0.44 + rnd() * 0.42) * scale, rnd())
+      pushPoint(tx, ty + 0.1 * scale, tz, col, (0.44 + rnd() * 0.42) * scale, rnd(), 1)
     }
   }
 
@@ -1060,112 +1061,24 @@ export function createScene(container, cfg, agentNames = []) {
       folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
       folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
   }
-  const FALL_N = 280
-  const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
-  const fallCol = new Float32Array(FALL_N * 3)
-  const fallVy = new Float32Array(FALL_N)
-  const fallPh = new Float32Array(FALL_N)
-  const fallKind = new Float32Array(FALL_N) // 0 hoja (forma de hoja) / 1 pétalo (disco)
-  const fallRot = new Float32Array(FALL_N)
-  const fallActive = new Uint8Array(FALL_N)
-  let fallHead = 0, fallBudget = 0, petalBudget = 0
-  const fallGeo = new THREE.BufferGeometry()
-  fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
-  fallGeo.setAttribute('hcol', new THREE.BufferAttribute(fallCol, 3))
-  fallGeo.setAttribute('aKind', new THREE.BufferAttribute(fallKind, 1))
-  fallGeo.setAttribute('aRot', new THREE.BufferAttribute(fallRot, 1))
-  // Las hojas que caen tienen FORMA DE HOJA (óvalo apuntado que gira); los
-  // pétalos del sakura caen como discos. Comparte uProj/uT con los puntos.
-  const fallMesh = new THREE.Points(fallGeo, new THREE.ShaderMaterial({
-    uniforms: { uProj: pointUniforms.uProj, uT: pointUniforms.uT },
-    transparent: true, depthWrite: false,
-    vertexShader: `
-      attribute vec3 hcol; attribute float aKind; attribute float aRot;
-      uniform float uProj, uT;
-      varying vec3 vC; varying float vKind; varying float vRot;
-      void main() {
-        vC = hcol; vKind = aKind; vRot = aRot + uT * 2.0; // giran al caer
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        float vd = max(-mv.z, 0.001);
-        gl_PointSize = clamp(0.85 * uProj / vd, 1.0, 48.0);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vC; varying float vKind; varying float vRot;
-      void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        if (vKind > 0.5) {                 // pétalo: disco suave
-          float d = length(uv) * 2.0;
-          if (d > 1.0) discard;
-          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
-          return;
-        }
-        // hoja: óvalo apuntado rotado con nervadura (igual que el follaje)
-        float s = sin(vRot), c = cos(vRot);
-        vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
-        float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
-        if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
-        float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
-        float rib = smoothstep(0.06, 0.0, abs(q.x));
-        gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
-      }`,
-  }))
-  fallMesh.frustumCulled = false
-  scene.add(fallMesh)
-  function updateFallingLeaves(step, rate, autumn, petalRate) {
-    // Emisión de HOJAS: presupuesto fraccional (hojas/seg) desde las ramas.
-    if (leafAnchors.length && rate > 0) {
-      fallBudget += rate * step
-      while (fallBudget >= 1) {
-        fallBudget -= 1
-        const a = ((Math.random() * (leafAnchors.length / 9)) | 0) * 9
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = leafAnchors[a]; fallPos[i * 3 + 1] = leafAnchors[a + 1]; fallPos[i * 3 + 2] = leafAnchors[a + 2]
-        // La hoja que cae hereda su propio viraje de otoño (verde→su color).
-        fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
-        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
-        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
-        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28
-        fallKind[i] = 0; fallRot[i] = Math.random() * 6.28; fallActive[i] = 1 // HOJA
-      }
-    }
-    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
-    if (petalAnchors.length && petalRate > 0) {
-      petalBudget += petalRate * step
-      while (petalBudget >= 1) {
-        petalBudget -= 1
-        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
-        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
-        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28
-        fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1 // PÉTALO (disco)
-      }
-    }
-    // Emisión de PÉTALOS del sakura: caen más lento y flotan más (vy bajo).
-    if (petalAnchors.length && petalRate > 0) {
-      petalBudget += petalRate * step
-      while (petalBudget >= 1) {
-        petalBudget -= 1
-        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
-        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
-        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28; fallActive[i] = 1
-      }
-    }
-    for (let i = 0; i < FALL_N; i++) {
-      if (!fallActive[i]) continue
-      fallPos[i * 3 + 1] -= fallVy[i] * step
-      fallPos[i * 3] += Math.sin(clock * 2.0 + fallPh[i]) * 1.5 * step
-      fallPos[i * 3 + 2] += Math.cos(clock * 1.7 + fallPh[i] * 1.3) * 1.5 * step
-      if (fallPos[i * 3 + 1] < G - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 } // toca suelo → recicla
-    }
-    fallGeo.attributes.position.needsUpdate = true
-    fallGeo.attributes.hcol.needsUpdate = true
-    fallGeo.attributes.aKind.needsUpdate = true
-    fallGeo.attributes.aRot.needsUpdate = true
+  const litter = createLitter({
+    THREE, count: 320, ground: G, pointUniforms,
+  })
+  scene.add(litter.mesh)
+  const anclas = {
+    leaf: new Float32Array((leafAnchors.length / 9) * 6),
+    petal: new Float32Array(petalAnchors),
+    fruit: new Float32Array(0),
+  }
+  // Las anclas de hoja llevan el color YA VIRADO (verde→otoño). Se recalculan
+  // cuando el otoño avanza de forma apreciable — no cada frame, que sería
+  // tirar CPU a la basura. La interpolación vive en litter.js (tintLeafAnchors)
+  // porque el bosque y la ciudad la necesitan por igual.
+  let autumnCache = -1
+  function anclasHoja(autumn) {
+    if (Math.abs(autumn - autumnCache) < 0.02) return anclas.leaf
+    autumnCache = autumn
+    return tintLeafAnchors(leafAnchors, anclas.leaf, autumn)
   }
 
   // ─── NEBLINA aditiva (el halo de color del mundo) ─────────────────────────
@@ -1388,6 +1301,9 @@ export function createScene(container, cfg, agentNames = []) {
   }
   let clock = 0
   let snowCover = 0, wet = 0, moveScale = 1, rainShelter = 0
+  // Última fenología calculada: la usa `scare()` para saber cuánto follaje/flor
+  // tiene puesto el árbol ahora mismo (un árbol pelado no suelta nada).
+  let lastPhen = { leaf: 0, flower: 0, fruit: 0 }
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
@@ -1494,7 +1410,11 @@ export function createScene(container, cfg, agentNames = []) {
       foliageUniforms.uLeaf.value = phen.leafShown
       foliageUniforms.uFlower.value = phen.flowerShown
       foliageUniforms.uAutumn.value = phen.autumn
-      updateFallingLeaves(step, phen.shed, phen.autumn, phen.petals)
+      pointUniforms.uBloom.value = phen.meadow
+      anclasHoja(phen.autumn)
+      litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
+        { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
+      lastPhen = phen
     }
 
     mapPositions(step)
@@ -1589,12 +1509,22 @@ export function createScene(container, cfg, agentNames = []) {
       b.tx = (Math.random() * 2 - 1) * 0.85
       b.tz = (Math.random() * 2 - 1) * 0.85
     }
+    // El shake sacude la copa: suelta hojas y flores en proporción a lo que el
+    // árbol tenga puesto. Un árbol pelado en invierno no suelta nada.
+    litter.burst('leaf', 40 * strength * lastPhen.leaf, anclas.leaf)
+    litter.burst('petal', 50 * strength * lastPhen.flower, anclas.petal)
   }
 
-  // El desmontaje (GPU + nodos del DOM) lo hace el escenario compartido.
+  // El desmontaje: libera la hojarasca y delega el resto (GPU + nodos del DOM)
+  // en el escenario compartido.
+  function dispose() {
+    litter.dispose()
+    stage.dispose()
+  }
+
   return {
     update, scare, setPointer,
-    resize: stage.resize, flash: stage.flash, dispose: stage.dispose,
+    resize: stage.resize, flash: stage.flash, dispose,
     renderer: stage.renderer, camera, controls,
   }
 }

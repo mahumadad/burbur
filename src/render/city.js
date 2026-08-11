@@ -14,6 +14,7 @@ import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { createPerchers, updatePerchers } from '../sim/perch.js'
 import { phenology } from '../sim/phenology.js'
 import { SPECIES } from './tree/species.js'
+import { createLitter, tintLeafAnchors } from './tree/litter.js'
 
 const rnd = Math.random
 // Selección aleatoria uniforme de un elemento de un arreglo (paletas, colores).
@@ -987,7 +988,7 @@ export function createCityScene(container, cfg, agentNames = []) {
   // `src/render/scene.js` tiene un sistema completo de árbol (tubos ahusados
   // recursivos, `tube`/`branch`) + follaje estacional (hojas/flores como
   // PUNTOS que brotan/abren con `uSeason`/`uLeaf`/`uFlower`/`uAutumn`, mismo
-  // shader) + lluvia de pétalos reciclable (`updateFallingLeaves`). Se copia
+  // shader) + hojarasca reciclable con deriva por viento (`createLitter`). Se copia
   // aquí el MÍNIMO necesario para plantar sakuras en la ciudad (sin la rama
   // de árboles "normales"/troncos caídos del bosque, que la ciudad no usa):
   // mismo look, mismo shader, sin reinventar nada.
@@ -1231,94 +1232,22 @@ export function createCityScene(container, cfg, agentNames = []) {
       folCol[i * 3], folCol[i * 3 + 1], folCol[i * 3 + 2],
       folFall[i * 3], folFall[i * 3 + 1], folFall[i * 3 + 2])
   }
-  const FALL_N = 480   // pool más grande → lluvia de pétalos más densa
-  const fallPos = new Float32Array(FALL_N * 3).fill(-9999)
-  const fallCol = new Float32Array(FALL_N * 3)
-  const fallVy = new Float32Array(FALL_N)
-  const fallPh = new Float32Array(FALL_N)
-  const fallKind = new Float32Array(FALL_N)
-  const fallRot = new Float32Array(FALL_N)
-  const fallActive = new Uint8Array(FALL_N)
-  let fallHead = 0, fallBudget = 0, petalBudget = 0
-  const fallGeo = new THREE.BufferGeometry()
-  fallGeo.setAttribute('position', new THREE.BufferAttribute(fallPos, 3))
-  fallGeo.setAttribute('hcol', new THREE.BufferAttribute(fallCol, 3))
-  fallGeo.setAttribute('aKind', new THREE.BufferAttribute(fallKind, 1))
-  fallGeo.setAttribute('aRot', new THREE.BufferAttribute(fallRot, 1))
-  const fallMesh = new THREE.Points(fallGeo, new THREE.ShaderMaterial({
-    uniforms: { uProj: draw.uniforms.uProj, uT: draw.uniforms.uT },
-    transparent: true, depthWrite: false,
-    vertexShader: `
-      attribute vec3 hcol; attribute float aKind; attribute float aRot;
-      uniform float uProj, uT;
-      varying vec3 vC; varying float vKind; varying float vRot;
-      void main() {
-        vC = hcol; vKind = aKind; vRot = aRot + uT * 2.0;
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        float vd = max(-mv.z, 0.001);
-        gl_PointSize = clamp(0.85 * uProj / vd, 1.0, 48.0);
-        gl_Position = projectionMatrix * mv;
-      }`,
-    fragmentShader: `
-      precision mediump float;
-      varying vec3 vC; varying float vKind; varying float vRot;
-      void main() {
-        vec2 uv = gl_PointCoord - 0.5;
-        if (vKind > 0.5) {
-          float d = length(uv) * 2.0;
-          if (d > 1.0) discard;
-          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.6, 1.0, d));
-          return;
-        }
-        float s = sin(vRot), c = cos(vRot);
-        vec2 q = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
-        float halfW = 0.34 * (1.0 - (2.0 * q.y) * (2.0 * q.y));
-        if (q.y < -0.5 || q.y > 0.5 || abs(q.x) > halfW) discard;
-        float a = 1.0 - smoothstep(0.55, 1.0, abs(q.x) / max(halfW, 1e-3));
-        float rib = smoothstep(0.06, 0.0, abs(q.x));
-        gl_FragColor = vec4(vC * (0.9 + 0.35 * rib), a);
-      }`,
-  }))
-  fallMesh.frustumCulled = false
-  scene.add(fallMesh)
-  function updateFallingLeaves(step, rate, autumn, petalRate) {
-    if (leafAnchors.length && rate > 0) {
-      fallBudget += rate * step
-      while (fallBudget >= 1) {
-        fallBudget -= 1
-        const a = ((Math.random() * (leafAnchors.length / 9)) | 0) * 9
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = leafAnchors[a]; fallPos[i * 3 + 1] = leafAnchors[a + 1]; fallPos[i * 3 + 2] = leafAnchors[a + 2]
-        fallCol[i * 3] = leafAnchors[a + 3] + (leafAnchors[a + 6] - leafAnchors[a + 3]) * autumn
-        fallCol[i * 3 + 1] = leafAnchors[a + 4] + (leafAnchors[a + 7] - leafAnchors[a + 4]) * autumn
-        fallCol[i * 3 + 2] = leafAnchors[a + 5] + (leafAnchors[a + 8] - leafAnchors[a + 5]) * autumn
-        fallVy[i] = 1.4 + Math.random() * 1.6; fallPh[i] = Math.random() * 6.28
-        fallKind[i] = 0; fallRot[i] = Math.random() * 6.28; fallActive[i] = 1
-      }
-    }
-    if (petalAnchors.length && petalRate > 0) {
-      petalBudget += petalRate * step
-      while (petalBudget >= 1) {
-        petalBudget -= 1
-        const a = ((Math.random() * (petalAnchors.length / 6)) | 0) * 6
-        const i = fallHead; fallHead = (fallHead + 1) % FALL_N
-        fallPos[i * 3] = petalAnchors[a]; fallPos[i * 3 + 1] = petalAnchors[a + 1]; fallPos[i * 3 + 2] = petalAnchors[a + 2]
-        fallCol[i * 3] = petalAnchors[a + 3]; fallCol[i * 3 + 1] = petalAnchors[a + 4]; fallCol[i * 3 + 2] = petalAnchors[a + 5]
-        fallVy[i] = 0.6 + Math.random() * 0.8; fallPh[i] = Math.random() * 6.28
-        fallKind[i] = 1; fallRot[i] = 0; fallActive[i] = 1
-      }
-    }
-    for (let i = 0; i < FALL_N; i++) {
-      if (!fallActive[i]) continue
-      fallPos[i * 3 + 1] -= fallVy[i] * step
-      fallPos[i * 3] += Math.sin(clock * 2.0 + fallPh[i]) * 1.5 * step
-      fallPos[i * 3 + 2] += Math.cos(clock * 1.7 + fallPh[i] * 1.3) * 1.5 * step
-      if (fallPos[i * 3 + 1] < we - 0.5) { fallActive[i] = 0; fallPos[i * 3 + 1] = -9999 }
-    }
-    fallGeo.attributes.position.needsUpdate = true
-    fallGeo.attributes.hcol.needsUpdate = true
-    fallGeo.attributes.aKind.needsUpdate = true
-    fallGeo.attributes.aRot.needsUpdate = true
+  const litter = createLitter({
+    THREE, count: 480, ground: we, pointUniforms: draw.uniforms,
+  })
+  scene.add(litter.mesh)
+  const anclas = {
+    leaf: new Float32Array((leafAnchors.length / 9) * 6),
+    petal: new Float32Array(petalAnchors),
+    fruit: new Float32Array(0),
+  }
+  // Ver el comentario equivalente en scene.js: la interpolación verde→otoño
+  // vive en litter.js (tintLeafAnchors) para no duplicarla en cada mundo.
+  let autumnCache = -1
+  function anclasHoja(autumn) {
+    if (Math.abs(autumn - autumnCache) < 0.02) return anclas.leaf
+    autumnCache = autumn
+    return tintLeafAnchors(leafAnchors, anclas.leaf, autumn)
   }
 
   // ─── An: POLVO/BRUMA — puerto fiel ──────────────────────────────────────
@@ -1973,6 +1902,9 @@ export function createCityScene(container, cfg, agentNames = []) {
 
   const tintC = new THREE.Color()
   let snowCover = 0, moveScale = 1, birdShelter = 0
+  // Última fenología calculada: la usa `scare()` para saber cuánta flor/hoja
+  // tiene puesto el sakura ahora mismo.
+  let lastPhen = { leaf: 0, flower: 0, fruit: 0 }
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
@@ -2032,7 +1964,10 @@ export function createCityScene(container, cfg, agentNames = []) {
       foliageUniforms.uLeaf.value = phen.leafShown
       foliageUniforms.uFlower.value = phen.flowerShown
       foliageUniforms.uAutumn.value = phen.autumn
-      updateFallingLeaves(step, phen.shed, phen.autumn, phen.petals)
+      anclasHoja(phen.autumn)
+      litter.update(step, { wind: eco.wind || 0, windDir: eco.windDir || 0 },
+        { leaf: phen.shed, petal: phen.petals, fruit: 0 }, anclas)
+      lastPhen = phen
     }
 
     moveAgents(step * moveScale, clock)
@@ -2102,6 +2037,17 @@ export function createCityScene(container, cfg, agentNames = []) {
       r.vx += (r.x / m) * kf + (rnd() - 0.5) * kf * 1.5
       r.vz += (r.z / m) * kf + (rnd() - 0.5) * kf * 1.5
     }
+    // El sakura suelta una nube de pétalos (y alguna hoja), igual que en el
+    // bosque. Antes el shake movía agentes/aves pero no soltaba nada del árbol.
+    litter.burst('petal', 60 * strength * lastPhen.flower, anclas.petal)
+    litter.burst('leaf', 24 * strength * lastPhen.leaf, anclas.leaf)
+  }
+
+  // El desmontaje: libera la hojarasca y delega el resto (GPU + nodos del DOM)
+  // en el escenario compartido.
+  function dispose() {
+    litter.dispose()
+    stage.dispose()
   }
 
   return {
@@ -2110,6 +2056,6 @@ export function createCityScene(container, cfg, agentNames = []) {
     flash: stage.flash,
     scare,
     setPointer,
-    dispose: stage.dispose,
+    dispose,
   }
 }

@@ -39,6 +39,11 @@ async function start() {
   const audio = await createAudio(CONFIG)
   const ambient = createAmbient(CONFIG.ambient)
   const ecosystem = createEcosystem(CONFIG.ecosystem)
+  // Depuración: ?season=0.6&wind=1 congela la estación y el viento para poder
+  // revisar las cuatro estaciones sin esperar los 210 s de un año.
+  const qs = new URLSearchParams(location.search)
+  const fijoSeason = qs.has('season') ? parseFloat(qs.get('season')) : null
+  const fijoWind = qs.has('wind') ? parseFloat(qs.get('wind')) : null
   const eventLog = createEventLog('#8fe04a')
   const hud = createHud('#8fe04a', {
     // MUSIC = latidos + drone; WORLD = cama atmosférica.
@@ -171,6 +176,8 @@ async function start() {
     const env = ambient.update(dt)
     const wind = Math.max(env.wind, eco.rain * 0.4)
     eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas
+    if (fijoSeason != null) eco.seasonT = fijoSeason
+    if (fijoWind != null) eco.wind = fijoWind
     audio.setWind(wind)
     // Lluvia: siseo por intensidad + goteo a un ritmo proporcional. En mundos
     // sin lluvia (célula) se silencia aunque el "clima" del perfil tenga agua.

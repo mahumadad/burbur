@@ -188,6 +188,7 @@ export function createEcosystem(cfg, rand = Math.random) {
     activity: 0,
     tension: 0,
     rain: 0,            // 0..1 intensidad de lluvia
+    windDir: 0,         // dirección del viento en radianes (rota lento)
     fog: 0,             // 0..1 densidad de niebla
     light: [1, 1, 1],   // color de luz
     gain: 1,            // brillo
@@ -227,6 +228,9 @@ export function createEcosystem(cfg, rand = Math.random) {
     // Estación: avanza su reloj y da la base térmica (solo perfiles con seasonTemp).
     seasonClock += dt
     state.seasonT = (seasonClock / seasonLen + 0.35) % 1
+    // El viento gira lento: una vuelta completa cada ~7 minutos. Es lo que hace
+    // que las hojas que caen se vayan todas para el mismo lado.
+    state.windDir = (t * 0.015) % (Math.PI * 2)
     const st = profile.seasonTemp
     const seasonBase = st ? st.mid + st.amp * Math.cos(2 * Math.PI * (state.seasonT - st.peak)) : 0
 
