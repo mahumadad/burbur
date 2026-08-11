@@ -116,28 +116,36 @@ export const POND_CENSUS = [
   { name: 'el observador de aves', type: 'human' },
 ]
 
-/** Censo de ciudad: fauna urbana + actores humanos (según ng.city del bundle). */
+/** Censo de la ciudad: fauna urbana chilena + actores humanos, en español
+ * (coherente con el bosque y el estanque). Móviles sin artículo; estáticos
+ * con artículo. */
 export const CITY_CENSUS = [
-  { name: 'feral pigeon', type: 'flying_animal' },
-  { name: 'carrion crow', type: 'flying_animal' },
-  { name: 'magpie', type: 'flying_animal' },
-  { name: 'herring gull', type: 'flying_animal' },
-  { name: 'starling', type: 'flying_animal' },
-  { name: 'peregrine falcon', type: 'flying_animal' },
-  { name: 'swift', type: 'flying_animal' },
-  { name: 'red fox', type: 'walking_animal', night: true },
-  { name: 'brown rat', type: 'walking_animal', night: true },
-  { name: 'grey squirrel', type: 'walking_animal' },
-  { name: 'urban hedgehog', type: 'walking_animal', night: true },
-  { name: 'the fountain', type: 'static_object' },
-  { name: 'traffic hum', type: 'static_object' },
-  { name: 'neon sign', type: 'static_object' },
-  { name: 'skateboarder', type: 'human' },
-  { name: 'cyclist', type: 'human' },
-  { name: 'busker', type: 'human' },
-  { name: 'market trader', type: 'human' },
-  { name: 'tram', type: 'human' },
-  { name: 'ambulance', type: 'human', night: true },
+  // flying_animal — aves urbanas
+  { name: 'paloma', type: 'flying_animal' },
+  { name: 'tórtola', type: 'flying_animal' },
+  { name: 'zorzal', type: 'flying_animal', dawn: true },
+  { name: 'chincol', type: 'flying_animal' },
+  { name: 'gorrión', type: 'flying_animal' },
+  { name: 'tiuque', type: 'flying_animal' },
+  { name: 'jote', type: 'flying_animal' },
+  { name: 'golondrina', type: 'flying_animal' },
+  // walking_animal — de la calle y los sitios eriazos
+  { name: 'quiltro', type: 'walking_animal' },
+  { name: 'gato callejero', type: 'walking_animal', night: true },
+  { name: 'laucha', type: 'walking_animal', night: true },
+  { name: 'rata', type: 'walking_animal', night: true },
+  { name: 'zarigüeya', type: 'walking_animal', night: true },
+  // static_object — el paisaje: no deambula pero suena
+  { name: 'el semáforo', type: 'static_object' },
+  { name: 'el paradero', type: 'static_object' },
+  { name: 'la fuente', type: 'static_object' },
+  { name: 'el letrero de neón', type: 'static_object' },
+  // human
+  { name: 'transeúnte', type: 'human' },
+  { name: 'vendedor ambulante', type: 'human' },
+  { name: 'ciclista', type: 'human' },
+  { name: 'guardia', type: 'human' },
+  { name: 'músico callejero', type: 'human' },
 ]
 
 /**
