@@ -237,7 +237,7 @@ export const CONFIG = {
     },
     // Flujo CONTINUO de energía por cada axón: el murmullo de fondo que hace que
     // la red se lea VIVA (no como un diagrama). Los spikes reales corren encima.
-    flow: { perAxon: 11, speed: 0.13, size: 0.95 },
+    flow: { perAxon: 15, speed: 0.13, size: 0.95 },
     // Arbor dendrítico: árbol ramificado en el plano, congelado en el build.
     dendrite: { levels: 3, branches: 3, len: 0.16, lenDecay: 0.62, spread: 1.2, jitter: 0.22, spines: 4 },
     neuropil: 3800,     // puntos de fondo (la maraña de procesos que no se dibuja)
