@@ -100,6 +100,54 @@ export const CELL_PROFILE = {
   weathers: CELL_MEDIA, weatherData: CELL_MEDIUM,
 }
 
+// ── NEURONA ──────────────────────────────────────────────────────────────────
+// El "día" es un ciclo de sueño comprimido (spec §6.1): vigilia → somnolencia →
+// N1 → N2 (husos) → N3 (ondas lentas) → REM → despertar. La `temperature` no se
+// usa (37 fijo, sin estación); su fila del HUD mostrará la banda dominante en Hz,
+// que la alimenta el mundo, no el ecosistema (F4). `light`/`gain`: frío y apagado
+// en sueño profundo, brillante y neutro en vigilia y REM.
+export const NEURON_PHASES = [
+  'quiet wake', 'alert wake', 'focused', 'drowsy',
+  'N1', 'N2 spindles', 'N3 slow wave', 'N3 deep',
+  'N2 return', 'REM', 'REM burst', 'waking',
+]
+
+const NEURON_PHASE = [
+  { act: 0.55, temp: 37, light: [0.80, 0.86, 1.00], gain: 1.10 }, // quiet wake (α)
+  { act: 0.75, temp: 37, light: [0.90, 0.92, 1.00], gain: 1.25 }, // alert wake (β)
+  { act: 0.90, temp: 37, light: [1.00, 0.96, 0.86], gain: 1.35 }, // focused (γ, pico act)
+  { act: 0.50, temp: 37, light: [0.72, 0.76, 0.96], gain: 1.00 }, // drowsy (θ)
+  { act: 0.42, temp: 37, light: [0.62, 0.68, 0.92], gain: 0.90 }, // N1
+  { act: 0.40, temp: 37, light: [0.55, 0.62, 0.90], gain: 0.85 }, // N2 spindles
+  { act: 0.35, temp: 37, light: [0.46, 0.54, 0.86], gain: 0.78 }, // N3 slow wave
+  { act: 0.30, temp: 37, light: [0.40, 0.48, 0.82], gain: 0.72 }, // N3 deep (pico sincronía)
+  { act: 0.42, temp: 37, light: [0.55, 0.62, 0.90], gain: 0.85 }, // N2 return
+  { act: 0.82, temp: 37, light: [0.86, 0.80, 0.92], gain: 1.18 }, // REM (act alta, sin orden)
+  { act: 0.88, temp: 37, light: [0.92, 0.82, 0.90], gain: 1.24 }, // REM burst
+  { act: 0.60, temp: 37, light: [0.82, 0.86, 1.00], gain: 1.12 }, // waking
+]
+
+// El "clima" son los neuromoduladores (spec §6.2): química de fondo que cambia
+// cómo responde la red.
+export const NEURON_MODULATORS = [
+  'cholinergic', 'noradrenergic', 'dopaminergic',
+  'high adenosine', 'caffeine', 'gabaergic',
+]
+
+const NEURON_MODULATOR = {
+  'cholinergic': { act: 1.05, tension: 0.15, temp: 0, rain: 0.20, fog: 0.15 },
+  'noradrenergic': { act: 1.15, tension: 0.50, temp: 0, rain: 0.30, fog: 0.10 },
+  'dopaminergic': { act: 1.00, tension: 0.20, temp: 0, rain: 0.22, fog: 0.18 },
+  'high adenosine': { act: 0.55, tension: 0.30, temp: 0, rain: 0.10, fog: 0.40 },
+  'caffeine': { act: 0.95, tension: 0.40, temp: 0, rain: 0.18, fog: 0.20 },
+  'gabaergic': { act: 0.40, tension: 0.10, temp: 0, rain: 0.06, fog: 0.30 },
+}
+
+export const NEURON_PROFILE = {
+  phases: NEURON_PHASES, phaseData: NEURON_PHASE,
+  weathers: NEURON_MODULATORS, weatherData: NEURON_MODULATOR,
+}
+
 // ── MICELIO ──────────────────────────────────────────────────────────────────
 // El "día" es el ciclo de humedad y temperatura: la red crece de NOCHE y al ALBA
 // (con rocío) y se detiene al mediodía seco. `light` mantiene la escena tenue y

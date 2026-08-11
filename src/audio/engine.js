@@ -183,6 +183,33 @@ export async function createAudio(cfg) {
     bloopEnv.triggerAttackRelease(0.13, t)
   }
 
+  // Voz de la NEURONA: un tick eléctrico seco y corto (nada húmedo — la célula
+  // ya tomó ese registro). Más agudo para interneuronas (disparo rápido), más
+  // grave para la glía. El sonido propio del mundo (clicks de spike, ritmos) es F5.
+  const tickBP = new Tone.Filter(2600, 'bandpass').connect(faunaPan); tickBP.Q.value = 4
+  const tickEnv = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: 0.03, sustain: 0, release: 0.02 }).connect(tickBP)
+  const tickNoise = new Tone.Noise('white').start(); tickNoise.connect(tickEnv)
+  function tick(hz) { tickBP.frequency.value = hz; try { tickEnv.triggerAttackRelease(0.02) } catch (_) {} }
+
+  // ─── Click del SPIKE (mundo neurona) ──────────────────────────────────────
+  // Un potencial de acción sonificado es literalmente esto: un click seco y
+  // brevísimo, sin reverb. Muchos juntos suenan a lluvia / palomitas de maíz —
+  // el registro multiunidad real. Paneado por la posición de la neurona.
+  const spikeGain = new Tone.Gain(0.30).connect(limiter)
+  const spikePan = new Tone.Panner(0).connect(spikeGain)
+  const spikeBP = new Tone.Filter(2800, 'bandpass').connect(spikePan); spikeBP.Q.value = 1.1
+  const spikeEnv = new Tone.AmplitudeEnvelope({ attack: 0.0004, decay: 0.008, sustain: 0, release: 0.004 }).connect(spikeBP)
+  const spikeNoise = new Tone.Noise('white').start(); spikeNoise.connect(spikeEnv)
+  function spike(pan = 0, bright = 1) {
+    spikePan.pan.value = Math.max(-1, Math.min(1, pan))
+    spikeBP.frequency.value = 1700 + bright * 2400
+    try { spikeEnv.triggerAttackRelease(0.006) } catch (_) {}
+  }
+  // Ritmo cerebral (delta/theta/alfa/gamma) → velocidad del throb del drone: en
+  // sueño profundo late lento e hipnótico; despierto, un temblor rápido. Es la
+  // forma correcta de oír los ritmos (están por debajo del rango de tono).
+  function setThrob(hz) { throbLFO.frequency.rampTo(Math.max(0.05, hz), 0.6) }
+
   const rand = Math.random
   function fauna(type, dir, name = '') {
     // Primero el sample REAL del animalito; si no hay/no cargó, voz sintética.
@@ -210,6 +237,9 @@ export async function createAudio(cfg) {
       // Vida celular: bloops por tipo. Invasores más agudos; motores, graves.
       const f = type === 'invader' ? 320 + rand() * 130 : type === 'motor' ? 130 : 190 + rand() * 90
       bloop(f, t)
+    } else if (type === 'neuron' || type === 'interneuron' || type === 'glia' ||
+               type === 'neurotransmitter' || type === 'tissue') {
+      tick(type === 'interneuron' ? 3400 : type === 'glia' ? 1200 : 2600)
     } else if (type === 'soil_fauna') {
       rustleEnv.triggerAttackRelease(0.08, t) // roce menudo de bicho de suelo
     } else if (type === 'mycelium' || type === 'colony') {
@@ -308,5 +338,6 @@ export async function createAudio(cfg) {
   return {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
     setRain, drip, setFlashVol, setDroneVol, setBedVol, setMood, rattle,
+    spike, setThrob,
   }
 }

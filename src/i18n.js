@@ -67,6 +67,34 @@ export const CELL_WEATHER_ES = {
 Object.assign(PHASE_ES, CELL_PHASE_ES)
 Object.assign(WEATHER_ES, CELL_WEATHER_ES)
 
+// Mundo NEURONA: el "día" es un ciclo de sueño y el "clima", los neuromoduladores
+// (spec 2026-08-11-diseno-mundo-neurona.md §6).
+export const NEURON_PHASE_ES = {
+  'quiet wake': 'vigilia tranquila',
+  'alert wake': 'vigilia alerta',
+  'focused': 'atención',
+  'drowsy': 'somnolencia',
+  'N1': 'sueño ligero (N1)',
+  'N2 spindles': 'husos (N2)',
+  'N3 slow wave': 'ondas lentas (N3)',
+  'N3 deep': 'sueño profundo (N3)',
+  'N2 return': 'vuelta a husos (N2)',
+  'REM': 'REM',
+  'REM burst': 'ráfaga REM',
+  'waking': 'despertar',
+}
+
+export const NEURON_WEATHER_ES = {
+  'cholinergic': 'colinérgico',
+  'noradrenergic': 'noradrenérgico',
+  'dopaminergic': 'dopaminérgico',
+  'high adenosine': 'adenosina alta',
+  'caffeine': 'cafeína',
+  'gabaergic': 'gabaérgico',
+}
+Object.assign(PHASE_ES, NEURON_PHASE_ES)
+Object.assign(WEATHER_ES, NEURON_WEATHER_ES)
+
 export const phaseES = (p) => PHASE_ES[p] || p
 export const weatherES = (w) => WEATHER_ES[w] || w
 
