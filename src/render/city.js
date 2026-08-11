@@ -1,5 +1,7 @@
 import * as THREE from 'three'
 import { createStage } from './stage.js'
+import { createHaze } from './engine/haze.js'
+import { createRain, createSnow, createSnowCaps } from './engine/weather.js'
 import { createDraw } from './engine/points.js'
 import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
@@ -32,6 +34,9 @@ const BUILDING_PALETTE = [
   [1, 0.84, 0.79],      // rosa pálido
   [0.99, 0.45, 0.12],   // rojo-naranja
 ]
+// Color de la neblina de la ciudad (acento naranja, a diferencia del azul
+// frío del bosque en `cfg.render.hazeColor`).
+const CITY_HAZE_COLOR = [1, 0.48, 0.12]
 // `p.towers` del original: multiplicador global de la probabilidad de torre
 // por bloque. Valor de paridad = 1 (no expuesto como opción todavía).
 const TOWERS = 1
@@ -57,6 +62,9 @@ export function createCityScene(container, cfg, agentNames = []) {
   // posiciones de techo para que la nieve los cubra (Task 14/B9).
   const poiPerch = []
   const capPos = []
+  // Materiales pintables por hora del día/clima (equivalente a `snowMats` del
+  // bosque, pero sin acumulación de nieve en el suelo): suelo, pasto y flores.
+  let groundMat, grassMat, floraMat
 
   // Retícula de calles → manzanas (`tn` del bundle real). Se mantiene en el
   // scope de la factory: las tareas siguientes (edificios, pasto, polvo,
@@ -250,7 +258,8 @@ export function createCityScene(container, cfg, agentNames = []) {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.setIndex(new THREE.BufferAttribute(indices, 1))
-    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true })))
+    groundMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true })
+    scene.add(new THREE.Mesh(geo, groundMat))
 
     // Polvo de manzana: 20000 puntos sembrados alrededor de una manzana al
     // azar (ponderada por área, `En`), descartados si caen muy lejos del
@@ -738,7 +747,8 @@ export function createCityScene(container, cfg, agentNames = []) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(pos.slice(0, o * 12), 3))
     geo.setAttribute('color', new THREE.BufferAttribute(col.slice(0, o * 12), 3))
-    scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true })))
+    grassMat = new THREE.LineBasicMaterial({ vertexColors: true })
+    scene.add(new THREE.LineSegments(geo, grassMat))
   }
   Dn()
 
@@ -967,8 +977,15 @@ export function createCityScene(container, cfg, agentNames = []) {
   // cabezas de flor de `kn`) debe empujarse ANTES de esta llamada — no
   // después de ella. `Dn` (pasto) y `An` (polvo) NO pasan por `draw`: arman
   // su propia malla, como el bundle real.
-  draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true }))
+  floraMat = new THREE.LineBasicMaterial({ vertexColors: true })
+  draw.finalizeLines(scene, floraMat)
   draw.finalizePoints(scene)
+
+  // ─── NEBLINA aditiva (halo naranja, acento de la ciudad) ─────────────────
+  const haze = createHaze(scene, {
+    R: R_CITY, G: we, count: rc.hazeCount, color: CITY_HAZE_COLOR, alpha: rc.hazeAlpha,
+    heightFn: (x, z) => ln(x, z),
+  })
 
   // ─── AGENTES DE CIUDAD: roster (`Pn`), init (`In`) y física (`Rn`) ────────
   // Puerto fiel de la rama CIUDAD del bundle real
@@ -1371,15 +1388,66 @@ export function createCityScene(container, cfg, agentNames = []) {
   const _proj = new THREE.Vector3()
   let lx = 0, ly = 0
 
+  // ─── CLIMA: lluvia, nieve y nieve acumulada en techos (`capPos`, llenado
+  // por `spawnTower` con la cima de cada edificio colocado) ─────────────────
+  const rain = createRain(scene, R_CITY, we)
+  const snow = createSnow(scene, R_CITY, we, draw.uniforms.uProj)
+  const caps = createSnowCaps(scene, capPos, draw.uniforms.uProj)
+
   stage.setResizeHook((m) => {
     draw.uniforms.uProj.value = m.proj
+    haze.uniforms.uProj.value = m.proj
     kit.setResolution(m.w * m.dpr, m.h * m.dpr)
   })
 
+  const tintC = new THREE.Color()
+  let snowCover = 0, moveScale = 1
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
-    moveAgents(step, clock)
+    draw.uniforms.uT.value = clock
+
+    // El ecosistema pinta la ciudad: tinte de la hora, niebla y neblina del
+    // clima — mismo tratamiento que el bosque (`scene.js`), sin manto de
+    // nieve en el suelo ni charcos (la ciudad no tiene esos sistemas): acá
+    // la nieve solo se acumula como puntos sobre los techos (`caps`).
+    if (eco) {
+      const L = eco.light, g = eco.gain
+      const k = rc.tintStrength
+      tintC.setRGB(
+        (1 - k + k * L[0]) * g,
+        (1 - k + k * L[1]) * g,
+        (1 - k + k * L[2]) * g,
+      )
+      scene.fog.density = 0.0009 + eco.fog * 0.0028
+      haze.uniforms.uColor.value.set(
+        CITY_HAZE_COLOR[0] * 0.4 + L[0] * 0.6,
+        CITY_HAZE_COLOR[1] * 0.4 + L[1] * 0.6,
+        CITY_HAZE_COLOR[2] * 0.6 + L[2] * 0.4,
+      )
+      haze.uniforms.uAlpha.value = rc.hazeAlpha * Math.max(0, eco.fog - 0.12) * 2.4 * (0.5 + g * 0.6)
+
+      // Nieve: solo con frío marcado y algo de lluvia (igual que el bosque).
+      const snowing = eco.temperature <= -3 && eco.rain > 0.1
+      const snowfall = snowing ? Math.max(0.5, eco.rain) : 0
+      snowCover += snowfall * 0.09 * step
+      if (eco.temperature > 0 && snowCover > 0) snowCover -= eco.temperature * 0.03 * step
+      snowCover = Math.max(0, Math.min(1, snowCover))
+      caps.setCover(snowCover)
+
+      // Suelo, pasto y flores viran con el tinte de la hora.
+      if (groundMat) groundMat.color.copy(tintC)
+      if (grassMat) grassMat.color.copy(tintC)
+      if (floraMat) floraMat.color.copy(tintC)
+
+      rain.update(step, snowing ? 0 : eco.rain)
+      snow.update(step, clock, snowfall)
+
+      // Con lluvia/nieve el tráfico y los peatones se calman.
+      moveScale = snowing ? 0.4 : (1 - eco.rain * 0.45) * (eco.temperature <= 1 ? 0.85 : 1)
+    }
+
+    moveAgents(step * moveScale, clock)
 
     for (let i = 0; i < n; i++) {
       const p = agents[i].group.position
