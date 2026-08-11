@@ -72,6 +72,7 @@ async function start() {
     const old = world
     world = buildWorld(id)
     if (old) old.scene.dispose()
+    eventLog.clear() // el REGISTRO es por mundo: se vacía al cambiar
     if (selector) selector.setActive(world.def.id)
   }
   // Nombre de paridad con murmur (el selector de mundo lo llama).
