@@ -440,6 +440,19 @@ export function createCellScene(container, cfg, agentNames = []) {
   let _lx = 0, _ly = 0
   let ptrX = null, ptrY = null // posición del mouse en NDC (null = fuera del canvas)
   function setPointer(x, y) { ptrX = x; ptrY = y }
+  // El lente fisheye desplaza la posición VISUAL del organelo respecto a su NDC
+  // lógico; deshago esa distorsión para que el hover matchee lo que se ve (si no,
+  // hacia el borde el nombre "se pierde" y solo aparece al centro).
+  const _fk = Math.min(rc.fisheye, 0.62)
+  function lensNDC(px, py) {
+    let sx = px, sy = py
+    for (let it = 0; it < 3; it++) {
+      const rn = Math.hypot(sx, sy) / 0.7071
+      const f = (1 - _fk) + _fk * rn * rn
+      sx = px / f; sy = py / f
+    }
+    return [sx, sy]
+  }
 
   let clock = 0
   let rounding = 0, roundTarget = 0
@@ -735,12 +748,13 @@ export function createCellScene(container, cfg, agentNames = []) {
     // Etiqueta: SOLO al pasar el mouse por encima de un organelo (no en el centro).
     let bestI = -1
     if (ptrX !== null) {
-      let bestD = 0.12 // umbral de "encima" en NDC (organelos chicos y en movimiento)
+      let bestD = 0.14 // umbral de "encima" en NDC (organelos chicos y en movimiento)
       for (let i = 0; i < n; i++) {
         _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 4, worldPos[i * 3 + 2]).project(camera)
         if (_proj.z > 1) continue
-        const d = Math.hypot(_proj.x - ptrX, _proj.y - ptrY)
-        if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+        const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
+        const d = Math.hypot(vx - ptrX, vy - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = vx; _ly = vy }
       }
     }
     if (bestI >= 0 && agentNames[bestI]) {
