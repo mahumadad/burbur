@@ -180,7 +180,6 @@ export function createPond(container, cfg, _agentNames = []) {
   }
 
   // ─── ISLAS (It): elipsoide de icosfera deformada + arena + espuma + ramas ──
-  const LICHEN = [1.0, 0.827, 0.071]
   for (const L of lobes) {
     const geo = new THREE.IcosahedronGeometry(1, 3)
     const pos = geo.attributes.position
@@ -215,29 +214,13 @@ export function createPond(container, cfg, _agentNames = []) {
     }))
     mesh.position.set(L.x, L.cy, L.z)
     scene.add(mesh)
-    // Punteado por vértice (matrix/arena).
-    const pts = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 0.5, sizeAttenuation: true, vertexColors: true, transparent: true, opacity: 0.7, fog: true,
-    }))
-    pts.position.copy(mesh.position)
-    scene.add(pts)
 
-    // Puntos de la línea de agua (para espuma y ramas).
+    // Puntos de la línea de agua (para espuma y ramas). Las islas quedan como
+    // mallas de arena LIMPIAS (sin punteado ni liquen — preferencia del usuario).
     const shore = []
     for (let i = 0; i < pos.count; i++) {
       const wy = pos.getY(i) + L.cy
       if (wy > ht - 0.5 && wy < ht + 0.9) shore.push([L.x + pos.getX(i), L.z + pos.getZ(i)])
-    }
-    // Liquen naranja en caras hacia arriba, sobre el agua.
-    const lichenN = Math.min(1200, Math.floor(30 * L.rx * L.rz))
-    for (let i = 0, k = 0; i < lichenN && k < lichenN; i++) {
-      const vi = q() * pos.count | 0
-      if (nrm.getY(vi) < 0.1) continue
-      const wy = pos.getY(vi) + L.cy
-      if (wy <= ht + 0.3 || q() > 0.45 + nrm.getY(vi) * 0.4) continue
-      const A = 0.96 + q() * 0.09
-      pushPoint(L.x + pos.getX(vi), wy + 0.1, L.z + pos.getZ(vi), [1, LICHEN[1] * A, LICHEN[2]], 0.1 + q() * 0.1, 0)
-      k++
     }
     // Espuma blanca en la línea de agua (con phase = balanceo).
     if (shore.length) {
@@ -258,31 +241,56 @@ export function createPond(container, cfg, _agentNames = []) {
     }
   }
 
-  // ─── JUNCOS (Vt): 736 hojas dispersas en la línea de agua de cada isla ────
+  // ─── PLANTAS ACUÁTICAS (Vt): juncos rooteados en el LECHO (mayoría SUMERGIDOS,
+  // ~12% EMERGEN sobre la superficie) en ~16 matas, + plantas de SUPERFICIE
+  // (rosetas blancas) donde un junco emergente cruza el agua ─────────────────
   {
-    const total = Math.round(16 * 1) * 46 // 736
-    for (let o = 0, guard = 0; o < total && guard++ < total * 6; ) {
-      const L = lobes[q() * lobes.length | 0]
-      const ang = q() * 6.2832
-      // Radio en la línea de agua del elipsoide (donde la superficie ≈ ht).
+    // ~16 puntos-semilla (matas) en el borde de los lóbulos, a la línea de agua.
+    const seeds = []
+    for (let o = 0, guard = 0; o < 16 && guard++ < 16 * 14; ) {
+      const L = lobes[q() * lobes.length | 0], l = q() * 6.2832
       const frac = clamp01((ht - L.cy) / L.ry)
-      const qw = Math.sqrt(Math.max(0.05, 1 - frac * frac)) * (1.0 + q() * 0.4)
-      const mrx = Math.cos(ang) * L.rx * qw, mrz = Math.sin(ang) * L.rz * qw
-      const gx = L.x + mrx * L.c - mrz * L.s, gz = L.z + mrx * L.s + mrz * L.c
+      const f = Math.sqrt(Math.max(0.02, 1 - frac * frac)) * 0.94 * (1.1 + q() * 0.55)
+      const m = Math.cos(l) * L.rx * f, h = Math.sin(l) * L.rz * f
+      const gx = L.x + m * L.c - h * L.s, gz = L.z + m * L.s + h * L.c
       if (Math.hypot(gx, gz) > mt * 1.1) continue
+      seeds.push([gx, gz]); o++
+    }
+    const surface = []
+    const total = Math.round(16 * 1) * 46 // 736
+    for (let count = 0, guard = 0; seeds.length && count < total && guard++ < total * 6; ) {
+      const sd = seeds[q() * seeds.length | 0]
+      const C = q() * 6.2832, w = Math.pow(q(), 0.6) * (2.4 + q() * 2.2)
+      const T = sd[0] + Math.cos(C) * w, E = sd[1] + Math.sin(C) * w
+      if (Math.hypot(T, E) > mt * 1.1 || lobeTop(T, E) > bedY + 1.4) continue
       const tall = q() < 0.12
-      const base = ht - 0.2 + (q() - 0.5) * 0.4
-      const h = tall ? gt * 0.5 + q() * 3.2 : 3.5 + q() * 4
-      const lang = noise2(gx * 0.02 + 51, gz * 0.02 + 13) * 12.566 + (q() - 0.5) * 1.6
-      const lean = (0.5 + q() * 1.1) * (tall ? 1.6 : 1)
-      const vx = Math.cos(lang) * lean, vz = Math.sin(lang) * lean
-      const F = clamp01(0.35 + wt(gx, gz) * 0.45 + (q() - 0.5) * 0.2)
+      const k = bedY + (fbm(T * 0.06 + 3, E * 0.06 - 8, 2) - 0.5) * 1.3 // base EN EL LECHO
+      const A = tall ? gt * 0.8 + 0.8 + q() * 3.2 : 3.5 + q() * 5          // altura
+      const j = noise2(T * 0.02 + 51, E * 0.02 + 13) * 12.566 + (q() - 0.5) * 1.6
+      const M = (0.5 + q() * 1.1) * (tall ? 1.6 : 1)
+      const N = Math.cos(j) * M, P = Math.sin(j) * M
+      const F = clamp01(0.35 + wt(T, E) * 0.45 + (q() - 0.5) * 0.2)
       const col = [0.8 + 0.2 * F, 0.64 + 0.19 * F, 0.04 + 0.04 * F]
       const lo = [col[0] * 0.25, col[1] * 0.25, col[2] * 0.25]
-      const mx = gx + vx * 0.35, my = base + h * 0.62, mz = gz + vz * 0.35
-      pushLine(gx, base, gz, mx, my, mz, lo, col)
-      pushLine(mx, my, mz, gx + vx, base + h, gz + vz, col, [col[0] * 0.9, col[1] * 0.9, col[2] * 0.9])
-      o++
+      const hi = [col[0] * 0.88, col[1] * 0.9, col[2] * 0.88]
+      const mx = T + N * 0.35, my = k + A * 0.62, mz = E + P * 0.35
+      pushLine(T, k, E, mx, my, mz, lo, col)
+      pushLine(mx, my, mz, T + N, k + A, E + P, col, hi)
+      // Junco emergente que cruza la superficie → planta de superficie ahí.
+      if (tall && k + A > ht + 0.4 && q() < 0.5) {
+        const V = clamp01((ht - k) / A)
+        surface.push([T + N * V * 0.55, E + P * V * 0.55])
+      }
+      count++
+    }
+    // Plantas de superficie (Pt): roseta de puntos blancos flotando, con sway.
+    for (const sp of surface) {
+      const n = 10 + (q() * 14 | 0), rad = 0.7 + q() * 0.9
+      for (let a = 0; a < n; a++) {
+        const o = q() * 6.2832, s = Math.pow(q(), 0.7) * rad
+        pushPoint(sp[0] + Math.cos(o) * s, ht + 0.08 + Math.pow(q(), 2) * 0.5, sp[1] + Math.sin(o) * s,
+          [1, 1, 1], 0.11 + q() * 0.2, 0.05 + q() * 0.95)
+      }
     }
   }
 
