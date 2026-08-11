@@ -1,43 +1,63 @@
 import * as THREE from 'three'
 import { createStage } from '../render/stage.js'
-import { createDraw } from '../render/engine/points.js'
+import { createDraw, createPointCloud } from '../render/engine/points.js'
 import { createAgentKit } from '../render/engine/agents3d.js'
 import { createTrails } from '../render/engine/trails.js'
 import { PALETTE } from '../config.js'
-import { createNetwork } from '../sim/netwire.js'
+import { createNetwork, outgoing } from '../sim/netwire.js'
+import { createSpikes, fire, updateSpikes } from '../sim/spikes.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 
-// MUNDO NEURONA (F1) — una microred cortical vista desde arriba. Los somas están
+// MUNDO NEURONA — una microred cortical vista desde arriba. Los somas están
 // FIJOS (spec §3.1): es el único mundo de burbur donde los individuos con nombre
-// no deambulan. Lo que se mueve es la señal — pero eso llega en F2 (spikes) y F3
-// (sinapsis). F1 es solo la red estática, reconocible, con dispose limpio.
+// no deambulan. Lo que se mueve es la SEÑAL — el potencial de acción recorriendo
+// los axones (saltatorio en los mielinizados), y al llegar al terminal empuja a
+// la neurona siguiente, así la actividad se propaga en ondas por la red.
 //
-// El cableado (quién conecta con quién, dónde está cada soma, los axones y sus
-// nodos de Ranvier) vive en sim/netwire.js (puro, testeado). Este archivo lo
-// dibuja. Los astrocitos (glía) son los únicos que se desplazan, muy lento.
+// El cableado (netwire.js) y la propagación (spikes.js) son puros y testeados;
+// este archivo los dibuja. Los astrocitos son los únicos que se desplazan.
 //
-// Nota de implementación: el arbor dendrítico se genera acá con un pequeño
-// generador recursivo, no con mycelium.js como sugería §5.2 del spec — un árbol
-// controlado se lee más limpio que la maraña de hifas y evita correr 12 redes en
-// el build. Es una elección de render, reversible.
+// Registro visual: se mantiene el wireframe + puntos del proyecto, pero la red y
+// los pulsos se dibujan con blending ADITIVO (como el micelio), así el tejido
+// BRILLA sobre el negro y los pulsos se leen como corriente eléctrica — la
+// energía de una micrografía de fluorescencia, sin salir del lenguaje de líneas.
+//
+// El arbor dendrítico se genera con un pequeño recursivo (no con mycelium.js como
+// sugería §5.2): un árbol controlado se lee más limpio y evita 12 redes en el build.
 
 const rnd = Math.random
 
-/** Hex de PALETTE → [r,g,b] en 0..1, lo que comen los buffers de línea/punto. */
 function rgb(hex) {
   return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]
 }
 function tint(c, k) { return [c[0] * k, c[1] * k, c[2] * k] }
 
-const C_SOMA = rgb(PALETTE.white)
 const C_DEND = rgb(PALETTE.cyanSat)
 const C_AXON = rgb(PALETTE.blue)
-const C_MYELIN = rgb(PALETTE.white)
+const C_MYELIN = rgb(PALETTE.cyan)
 const C_NODE = rgb(PALETTE.yellow)
 const C_TERMINAL = rgb(PALETTE.pink)
-const C_GLIA = rgb(PALETTE.bond)
 const C_CAPILLARY = rgb(PALETTE.magenta)
-const C_NEUROPIL = [0.30, 0.34, 0.52]
+const C_NEUROPIL = [0.16, 0.20, 0.38]
+// Astrocito: ámbar APAGADO. Son soporte de fondo (§3.1), no protagonistas — con
+// el bond pleno robaban la escena a los pulsos, que son el sujeto del mundo.
+const GLIA_COL = 0x5a3d18
+// Jaula del soma: azul-blanco tenue. En blanco pleno leía como "diagrama"; así
+// queda como contorno fantasma del cuerpo celular y el núcleo/halo mandan.
+const SOMA_COL = 0x7d92c8
+// El flujo de energía es cian-blanco brillante: tiene que DESTACAR sobre la
+// estructura tenue, no confundirse con las dendritas.
+const C_FLOW = [0.55, 1.0, 1.0]
+// El pulso: núcleo casi blanco con halo amarillo (el color del spike, §5.3).
+const C_SPIKE = [1.0, 0.95, 0.55]
+const C_SPIKE_HOT = [1.0, 1.0, 0.9]
+
+/** Punto (x,z) sobre la polilínea de un axón en el parámetro t∈0..1. */
+function axonAt(axon, t) {
+  const f = Math.max(0, Math.min(1, t)) * (axon.length - 1)
+  const i = Math.floor(f), j = Math.min(axon.length - 1, i + 1), u = f - i
+  return { x: axon[i].x + (axon[j].x - axon[i].x) * u, z: axon[i].z + (axon[j].z - axon[i].z) * u }
+}
 
 export function createNeuronScene(container, cfg, agentNames = []) {
   const R = cfg.world.radius
@@ -46,17 +66,21 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   const H = cc.height
 
   const stage = createStage(container, cfg)
-  const { scene, camera, controls } = stage
-  // La red es FIJA: no hay movimiento propio que la órbita pueda tapar, así que
-  // se deja la auto-rotación del stage tal cual (decisión 8 del spec). El giro
-  // lento ayuda a leer la profundidad de los axones que se cruzan.
-  const draw = createDraw(rc)
+  const { scene, camera } = stage
+  const draw = createDraw(rc)          // geometría estática (red + fondo)
   const kit = createAgentKit(rc)
+  // Segunda instancia SOLO por su material de puntos, que pasamos a ADITIVO: es
+  // el que usan los pulsos y los halos de disparo para brillar sobre el negro.
+  const glow = createDraw(rc)
+  glow.pointMaterial.blending = THREE.AdditiveBlending
+  glow.pointMaterial.depthWrite = false
 
   // ─── El cableado (puro, sim/netwire.js) ───────────────────────────────────
   const net = createNetwork(cc.network, rnd)
+  const spikes = createSpikes(cc.spikes)
+  // Sinapsis salientes por neurona, precomputadas (para lanzar al disparar).
+  const outs = net.neurons.map((nrn) => outgoing(net, nrn.i))
 
-  // Empuja un anillo horizontal (segmentos de línea) al buffer estático.
   function pushRing(cx, cy, cz, r, segs, col) {
     for (let i = 0; i < segs; i++) {
       const a = (i / segs) * Math.PI * 2, b = ((i + 1) / segs) * Math.PI * 2
@@ -65,51 +89,47 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     }
   }
 
-  // ─── NEUROPILO: la maraña de procesos que no se dibuja, como fondo apagado ─
+  // ─── NEUROPILO: la maraña de fondo, MUY apagada (que el flujo destaque) ─────
   for (let i = 0; i < cc.neuropil; i++) {
     const a = rnd() * Math.PI * 2, r = Math.sqrt(rnd()) * 0.98
-    const k = 0.5 + rnd() * 0.6
+    const k = 0.25 + rnd() * 0.3
     draw.pushPoint(Math.cos(a) * r * R, H - 0.6 + rnd() * 1.2, Math.sin(a) * r * R,
-      tint(C_NEUROPIL, k), 0.16 + rnd() * 0.22, 0)
+      tint(C_NEUROPIL, k), 0.16 + rnd() * 0.20, 0)
   }
 
-  // ─── CAPILAR: línea serpenteante cruzando el fondo, con glóbulos ───────────
+  // ─── CAPILAR: línea serpenteante de fondo, con glóbulos ────────────────────
   {
-    const segs = cc.capillarySegs
-    const y = H - 1.2
+    const segs = cc.capillarySegs, y = H - 1.2
     const phase = rnd() * 6.28, amp = 0.28
     let prev = null
     for (let i = 0; i <= segs; i++) {
       const t = i / segs
       const x = (t * 2 - 1) * 0.95
       const z = Math.sin(t * 6 + phase) * amp + Math.sin(t * 2.3) * 0.15
-      const col = tint(C_CAPILLARY, 0.45)
+      const col = tint(C_CAPILLARY, 0.4)
       if (prev) draw.pushLine(prev[0] * R, y, prev[1] * R, x * R, y, z * R, col, col)
-      // Glóbulos: puntos apagados pasando de a uno.
-      if (i % 4 === 0) draw.pushPoint(x * R, y, z * R, tint(C_CAPILLARY, 0.7), 0.5, 0)
+      if (i % 4 === 0) draw.pushPoint(x * R, y, z * R, tint(C_CAPILLARY, 0.6), 0.5, 0)
       prev = [x, z]
     }
   }
 
-  // ─── DENDRITAS: árbol ramificado en el plano, desde cada soma ──────────────
+  // ─── DENDRITAS: árbol ramificado desde cada soma ───────────────────────────
   const d = cc.dendrite
   function growDendrite(x, z, ang, len, level) {
     if (level <= 0) return
     for (let b = 0; b < d.branches; b++) {
       const a = ang + (b - (d.branches - 1) / 2) * (d.spread / d.branches) + (rnd() - 0.5) * d.jitter
       const ex = x + Math.cos(a) * len, ez = z + Math.sin(a) * len
-      const bright = 0.28 + 0.20 * level
-      const c = tint(C_DEND, bright)
-      draw.pushLine(x * R, H, z * R, ex * R, H, ez * R, c, tint(C_DEND, 0.18))
-      // Espinas dendríticas: puntitos sobre la rama.
+      const c = tint(C_DEND, 0.09 + 0.07 * level)
+      draw.pushLine(x * R, H, z * R, ex * R, H, ez * R, c, tint(C_DEND, 0.05))
       for (let s = 0; s < d.spines; s++) {
         const t = (s + 1) / (d.spines + 1)
-        draw.pushPoint((x + (ex - x) * t) * R, H, (z + (ez - z) * t) * R, tint(C_DEND, 0.4), 0.22, 0)
+        draw.pushPoint((x + (ex - x) * t) * R, H, (z + (ez - z) * t) * R, tint(C_DEND, 0.16), 0.18, 0)
       }
       growDendrite(ex, ez, a, len * d.lenDecay, level - 1)
     }
   }
-  const NR = 4 // dendritas primarias por soma, repartidas alrededor
+  const NR = 4
   for (const nrn of net.neurons) {
     for (let k = 0; k < NR; k++) {
       const a = (k / NR) * Math.PI * 2 + rnd() * 0.6
@@ -118,52 +138,82 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   }
 
   // ─── AXONES: mielinizado (doble vaina + nodos) vs amielínico (línea fina) ──
-  const SO = cc.somaR * 1.3 // separación de la vaina (mundo normalizado)
+  const SO = cc.somaR * 1.3
   for (const syn of net.synapses) {
     const ax = syn.axon
     if (syn.myelinated) {
-      // Doble contorno paralelo (la vaina), segmento a segmento.
       for (let i = 1; i < ax.length; i++) {
         const p = ax[i - 1], q = ax[i]
         const dx = q.x - p.x, dz = q.z - p.z
         const dl = Math.hypot(dx, dz) || 1e-6
         const nx = -dz / dl * SO, nz = dx / dl * SO
-        const c = tint(C_MYELIN, 0.5)
+        const c = tint(C_MYELIN, 0.28)
         draw.pushLine((p.x + nx) * R, H, (p.z + nz) * R, (q.x + nx) * R, H, (q.z + nz) * R, c, c)
         draw.pushLine((p.x - nx) * R, H, (p.z - nz) * R, (q.x - nx) * R, H, (q.z - nz) * R, c, c)
       }
-      // Nodos de Ranvier: puntos brillantes donde el pulso se regenera.
-      for (const t of syn.nodes) {
-        const f = t * (ax.length - 1), i = Math.floor(f), u = f - i
-        const j = Math.min(ax.length - 1, i + 1)
-        const x = ax[i].x + (ax[j].x - ax[i].x) * u, z = ax[i].z + (ax[j].z - ax[i].z) * u
-        draw.pushPoint(x * R, H, z * R, C_NODE, 0.6, 0)
-      }
     } else {
-      // Amielínico: una sola línea fina y tenue.
       for (let i = 1; i < ax.length; i++) {
         const p = ax[i - 1], q = ax[i]
-        const c = tint(C_AXON, 0.6)
+        const c = tint(C_AXON, 0.5)
         draw.pushLine(p.x * R, H, p.z * R, q.x * R, H, q.z * R, c, c)
       }
     }
-    // Cono axónico: un punto amarillo apagado donde nace el pulso (arranque).
-    draw.pushPoint(ax[0].x * R, H, ax[0].z * R, tint(C_NODE, 0.5), 0.4, 0)
-    // Botón terminal: bulbo (anillo + puntos de vesículas) en el final del axón.
+    // Cono axónico: punto amarillo apagado donde nace el pulso.
+    draw.pushPoint(ax[0].x * R, H, ax[0].z * R, tint(C_NODE, 0.4), 0.4, 0)
+    // Botón terminal: anillo + vesículas.
     const end = ax[ax.length - 1]
-    pushRing(end.x * R, H, end.z * R, cc.somaR * R * 0.7, 8, tint(C_TERMINAL, 0.8))
+    pushRing(end.x * R, H, end.z * R, cc.somaR * R * 0.7, 8, tint(C_TERMINAL, 0.7))
     for (let v = 0; v < 5; v++) {
       draw.pushPoint((end.x + (rnd() - 0.5) * cc.somaR) * R, H, (end.z + (rnd() - 0.5) * cc.somaR) * R,
-        tint(C_TERMINAL, 0.9), 0.3, 0)
+        tint(C_TERMINAL, 0.8), 0.3, 0)
     }
   }
 
-  draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 }))
+  // La red brilla: blending ADITIVO sobre el negro (como el micelio). Los nodos
+  // de Ranvier viven en un buffer aparte porque se ENCIENDEN al pasar el pulso.
+  draw.finalizeLines(scene, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, opacity: 0.7,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }))
   draw.finalizePoints(scene)
 
-  // ─── SOMAS (fijos): 12 neuronas con jaula, nombre y voz ───────────────────
-  // Piramidal = cono truncado de 4 lados (frustumCage). Interneurona = anillo +
-  // esfera, más chica y apretada. La forma distingue E de I, no el color (§3.1).
+  // ─── NODOS DE RANVIER (dinámicos): se encienden cuando pasa el pulso ───────
+  // Cada nodo es un punto aditivo que late al ser cruzado — el latido saltatorio.
+  const nodeList = [] // {x, z, glow}
+  for (const syn of net.synapses) {
+    if (!syn.myelinated) continue
+    for (const t of syn.nodes) {
+      const p = axonAt(syn.axon, t)
+      nodeList.push({ x: p.x, z: p.z, glow: 0 })
+    }
+  }
+  const nodeCloud = createPointCloud(Math.max(1, nodeList.length), glow.pointMaterial)
+  scene.add(nodeCloud.mesh)
+
+  // ─── FLUJO CONTINUO (dinámico): el murmullo de energía por cada axón ───────
+  // Muchos puntos tenues corriendo sin parar por los axones: es lo que hace que
+  // la red se lea VIVA, con energía intercambiándose todo el tiempo (como las
+  // referencias). Los spikes brillantes de abajo son los potenciales de acción
+  // REALES que corren ENCIMA de este murmullo.
+  const flow = []
+  for (let s = 0; s < net.synapses.length; s++) {
+    for (let k = 0; k < cc.flow.perAxon; k++) {
+      flow.push({ syn: s, t: k / cc.flow.perAxon, speed: cc.flow.speed * (0.7 + rnd() * 0.6) })
+    }
+  }
+  const flowCloud = createPointCloud(Math.max(1, flow.length), glow.pointMaterial)
+  scene.add(flowCloud.mesh)
+
+  // ─── HALO de cada soma: un glow suave que lo hace leer como cuerpo celular ─
+  const somaGlow = createPointCloud(net.neurons.length, glow.pointMaterial)
+  scene.add(somaGlow.mesh)
+
+  // ─── PULSOS (dinámicos): halo + cabeza caliente + estela, aditivos ─────────
+  const SPK = cc.spikes.trail + 2 // halo + cabeza + estela
+  const spikeCloud = createPointCloud(cc.spikes.cap * SPK, glow.pointMaterial)
+  scene.add(spikeCloud.mesh)
+
+  // ─── SOMAS (fijos): 12 neuronas con jaula, NÚCLEO encendido, nombre y voz ──
   const n = cfg.fireflies.count
   const agents = []
   const worldPos = new Float32Array(n * 3)
@@ -171,19 +221,19 @@ export function createNeuronScene(container, cfg, agentNames = []) {
   for (const nrn of net.neurons) {
     const group = new THREE.Group()
     if (nrn.kind === 'pyramidal') {
-      group.add(kit.frustumCage(sr * 1.4, sr * 0.35, sr * 2.4, PALETTE.white))
+      group.add(kit.frustumCage(sr * 1.4, sr * 0.35, sr * 2.4, SOMA_COL))
     } else {
-      group.add(kit.ringLoop(sr * 0.9, 10, PALETTE.white))
-      group.add(new THREE.Mesh(new THREE.SphereGeometry(sr * 0.55, 10, 8),
-        new THREE.MeshBasicMaterial({ color: PALETTE.white })))
+      group.add(kit.ringLoop(sr * 0.9, 10, SOMA_COL))
     }
+    // Núcleo: esfera que se ENCIENDE al disparar (el color del soma en las refs).
+    const nucMat = new THREE.MeshBasicMaterial({ color: PALETTE.magenta })
+    group.add(new THREE.Mesh(new THREE.SphereGeometry(sr * 0.5, 12, 10), nucMat))
     group.position.set(nrn.x * R, H, nrn.z * R)
     scene.add(group)
-    agents.push({ group, kind: nrn.kind, fixed: true, x: nrn.x, z: nrn.z, baseScale: 1 })
+    agents.push({ group, kind: nrn.kind, fixed: true, x: nrn.x, z: nrn.z, baseScale: 1, nucMat })
   }
 
-  // ─── ASTROCITOS (glía): los únicos que se mueven, muy lento ───────────────
-  // Estrella: radios finos desde un centro (es lo que significa su nombre).
+  // ─── ASTROCITOS (glía): estrellas que derivan lento ───────────────────────
   const gliaCount = n - net.neurons.length
   const gliaRoamers = createRoamers(cc.wander, gliaCount, rnd)
   function makeStar() {
@@ -194,7 +244,7 @@ export function createNeuronScene(container, cfg, agentNames = []) {
       seg.push(0, 0, 0, Math.cos(a) * L, (rnd() - 0.5) * L * 0.3, Math.sin(a) * L)
     }
     const g = new THREE.Group()
-    g.add(kit.fatLine(seg, PALETTE.bond))
+    g.add(kit.fatLine(seg, GLIA_COL))
     return g
   }
   for (let k = 0; k < gliaCount; k++) {
@@ -202,11 +252,11 @@ export function createNeuronScene(container, cfg, agentNames = []) {
     scene.add(group)
     agents.push({ group, kind: 'glia', fixed: false, baseScale: 0.9, roamer: k })
   }
-  const gliaColors = new Array(gliaCount).fill(PALETTE.bond)
-  const trails = createTrails(scene, gliaCount, gliaColors, rc, draw.pointMaterial, 0.6)
+  const trails = createTrails(scene, gliaCount, new Array(gliaCount).fill(GLIA_COL), rc, draw.pointMaterial, 0.6)
 
   stage.setResizeHook((m) => {
     draw.uniforms.uProj.value = m.proj
+    glow.uniforms.uProj.value = m.proj
     kit.setResolution(m.w * m.dpr, m.h * m.dpr)
   })
 
@@ -228,22 +278,91 @@ export function createNeuronScene(container, cfg, agentNames = []) {
 
   let clock = 0
 
+  // Escribe un pulso en el buffer aditivo desde `base`: un halo grande y tenue
+  // (bloom) + una cabeza caliente casi blanca + una estela que se apaga detrás.
+  function put(idx, x, z, col, size) {
+    spikeCloud.pos[idx * 3] = x * R; spikeCloud.pos[idx * 3 + 1] = H; spikeCloud.pos[idx * 3 + 2] = z * R
+    spikeCloud.col[idx * 3] = col[0]; spikeCloud.col[idx * 3 + 1] = col[1]; spikeCloud.col[idx * 3 + 2] = col[2]
+    spikeCloud.size[idx] = size
+  }
+  function writeSpike(base, sp) {
+    const ax = net.synapses[sp.syn].axon
+    const head = axonAt(ax, sp.t)
+    put(base, head.x, head.z, tint(C_SPIKE, 0.55), 5.0)       // halo (bloom)
+    put(base + 1, head.x, head.z, C_SPIKE_HOT, 2.6)           // cabeza caliente
+    for (let k = 1; k <= cc.spikes.trail; k++) {              // estela
+      const idx = base + 1 + k
+      const tt = sp.t - k * 0.04
+      if (tt < 0) { spikeCloud.pos[idx * 3 + 1] = -9999; continue }
+      const p = axonAt(ax, tt)
+      const f = 1 - k / (cc.spikes.trail + 1)
+      put(idx, p.x, p.z, tint(C_SPIKE, f), 1.4 * f)
+    }
+  }
+
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
     draw.uniforms.uT.value = clock
+    glow.uniforms.uT.value = clock
+    const events = []
 
-    // Los astrocitos derivan lento por el fondo; contenidos en el disco.
+    // ── Disparo: cuando el swarm cruza el umbral, la neurona larga un pulso por
+    //    cada axón saliente. fire() respeta el refractario, así no re-dispara en
+    //    los frames en que el flash aún decae.
+    if (swarm) {
+      for (let i = 0; i < net.neurons.length; i++) {
+        if (swarm.flash[i] > cc.spikes.fireThresh) fire(spikes, net, cc.spikes, i, outs[i])
+      }
+    }
+    // ── Los pulsos avanzan; las llegadas empujan la fase de la postsináptica
+    //    (+ excita / − inhibe): así la actividad se propaga en ondas visibles.
+    const arrivals = updateSpikes(spikes, net, cc.spikes, step)
+    for (const arr of arrivals) {
+      const syn = net.synapses[arr.syn]
+      if (swarm) {
+        const bump = syn.sign > 0 ? cc.spikes.exciteBump : -cc.spikes.inhibitBump
+        swarm.phases[syn.post] = (swarm.phases[syn.post] + bump + Math.PI * 2) % (Math.PI * 2)
+      }
+      // Enciende el terminal (glía/postsináptica) — un destello en la hendidura.
+      const end = syn.axon[syn.axon.length - 1]
+      for (const nd of nodeList) { // el nodo más cercano al terminal se aviva
+        if (Math.abs(nd.x - end.x) < 0.04 && Math.abs(nd.z - end.z) < 0.04) nd.glow = 1
+      }
+    }
+
+    // ── Flujo continuo de energía por los axones (el murmullo de fondo) ───────
+    for (let i = 0; i < flow.length; i++) {
+      const fp = flow[i]
+      fp.t += fp.speed * step
+      if (fp.t >= 1) fp.t -= 1
+      const p = axonAt(net.synapses[fp.syn].axon, fp.t)
+      const tw = 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(clock * 3 + i * 1.7)) // parpadeo
+      flowCloud.pos[i * 3] = p.x * R; flowCloud.pos[i * 3 + 1] = H; flowCloud.pos[i * 3 + 2] = p.z * R
+      flowCloud.col[i * 3] = C_FLOW[0] * tw
+      flowCloud.col[i * 3 + 1] = C_FLOW[1] * tw
+      flowCloud.col[i * 3 + 2] = C_FLOW[2] * tw
+      flowCloud.size[i] = cc.flow.size
+    }
+    flowCloud.commit()
+
+    // ── Astrocitos derivando ─────────────────────────────────────────────────
     updateRoamers(gliaRoamers, cc.wander, step, rnd, clock)
 
     for (let i = 0; i < n; i++) {
       const a = agents[i]
-      // El latido del swarm hincha el soma un instante (placeholder de F1: en F2
-      // esto pasa a ser el disparo real que larga spikes por el axón).
       const flash = swarm ? swarm.flash[i] : 0
-      const pulse = 1 + flash * 0.4
+      const pulse = 1 + flash * 0.45
       if (a.fixed) {
         worldPos[i * 3] = a.x * R; worldPos[i * 3 + 1] = H; worldPos[i * 3 + 2] = a.z * R
+        // El núcleo se ENCIENDE al disparar: de magenta apagado a casi blanco.
+        const g = 0.5 + flash * 0.5
+        a.nucMat.color.setRGB(1.0 * g, (0.12 + flash * 0.8) * g, (0.56 + flash * 0.3) * g)
+        // Halo del cuerpo celular: glow suave que crece con el disparo.
+        const gb = 0.30 + flash * 1.0
+        somaGlow.pos[i * 3] = a.x * R; somaGlow.pos[i * 3 + 1] = H; somaGlow.pos[i * 3 + 2] = a.z * R
+        somaGlow.col[i * 3] = 0.45 * gb; somaGlow.col[i * 3 + 1] = 0.85 * gb; somaGlow.col[i * 3 + 2] = 0.95 * gb
+        somaGlow.size[i] = 5.5 + flash * 4
       } else {
         const r = gliaRoamers[a.roamer]
         const x = r.x * R, z = r.z * R
@@ -253,11 +372,39 @@ export function createNeuronScene(container, cfg, agentNames = []) {
       }
       a.group.scale.setScalar(a.baseScale * pulse)
     }
-    // Estelas SOLO de la glía (los índices fijos apuntan a su soma inmóvil, así
-    // que su estela es un punto quieto — inofensiva).
+    somaGlow.commit()
     trails.update(worldPos)
 
-    // Etiqueta: solo al pasar el mouse por encima de un individuo.
+    // ── Dibujo de los pulsos en vuelo ─────────────────────────────────────────
+    let slot = 0
+    for (const sp of spikes.active) {
+      if (slot >= cc.spikes.cap) break
+      writeSpike(slot * SPK, sp)
+      // El pulso mielinizado enciende el nodo que va cruzando (saltatorio).
+      if (sp.node >= 0) {
+        const ax = net.synapses[sp.syn].axon
+        const p = axonAt(ax, net.synapses[sp.syn].nodes[sp.node])
+        for (const nd of nodeList) if (Math.abs(nd.x - p.x) < 0.02 && Math.abs(nd.z - p.z) < 0.02) nd.glow = 1
+      }
+      slot++
+    }
+    // Apaga los slots del pool que no se usaron este frame.
+    for (let s = slot * SPK; s < cc.spikes.cap * SPK; s++) spikeCloud.pos[s * 3 + 1] = -9999
+    spikeCloud.commit()
+
+    // ── Nodos de Ranvier: laten y se apagan ───────────────────────────────────
+    const nodeDecay = Math.exp(-step / 0.12)
+    for (let i = 0; i < nodeList.length; i++) {
+      const nd = nodeList[i]
+      nd.glow *= nodeDecay
+      const base = 0.25, g = base + nd.glow * 1.4
+      nodeCloud.pos[i * 3] = nd.x * R; nodeCloud.pos[i * 3 + 1] = H; nodeCloud.pos[i * 3 + 2] = nd.z * R
+      nodeCloud.col[i * 3] = C_NODE[0] * g; nodeCloud.col[i * 3 + 1] = C_NODE[1] * g; nodeCloud.col[i * 3 + 2] = C_NODE[2] * g
+      nodeCloud.size[i] = 0.45 + nd.glow * 0.5
+    }
+    nodeCloud.commit()
+
+    // ── Etiqueta al pasar el mouse ────────────────────────────────────────────
     let bestI = -1
     if (ptrX !== null) {
       let bestD = 0.14
@@ -281,10 +428,9 @@ export function createNeuronScene(container, cfg, agentNames = []) {
 
     if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0022
     stage.render(step)
-    return [] // F1: la red no emite eventos propios todavía (spikes/sinapsis en F2/F3)
+    return events
   }
 
-  /** Shake: dispersa a los astrocitos (las neuronas están fijas). */
   function scare(strength = 1) {
     for (const r of gliaRoamers) {
       const m = Math.hypot(r.x, r.z) || 1e-3
