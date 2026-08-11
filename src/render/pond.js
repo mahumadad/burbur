@@ -2,6 +2,10 @@ import * as THREE from 'three'
 import { createStage } from './stage.js'
 import { createDraw } from './engine/points.js'
 import { createHaze } from './engine/haze.js'
+import { createAgentKit } from './engine/agents3d.js'
+import { createTrails } from './engine/trails.js'
+import { createRoamers, updateRoamers } from '../sim/wander.js'
+import { buildSpecies, POND_POOL } from './pond/species.js'
 import { noise2, fbm } from './noise.js'
 
 // Mundo AGUA (pond). Calca el mundo de agua de murmur.living: ISLAS de arena
@@ -11,7 +15,7 @@ import { noise2, fbm } from './noise.js'
 // `docs/superpowers/specs/2026-08-11-pond-visual-map.md`.
 //
 // Paridad (spec §4): mt=64, ht=-3.4, gt=11, G=85. Valores en `cfg.pond`.
-export function createPond(container, cfg, _agentNames = []) {
+export function createPond(container, cfg, agentNames = []) {
   const rc = cfg.render
   const P = cfg.pond
   const R = cfg.world.radius            // 85 (G)
@@ -316,22 +320,138 @@ export function createPond(container, cfg, _agentNames = []) {
     heightFn: () => P.waterLevel,
   }).uniforms
 
+  // ─── AGENTES: las 6 especies acuáticas (pool ponderado) ───────────────────
+  const kit = createAgentKit(rc)
+  const KIND_COLOR = { lamp: 0xeef2ff, ice: 0xaee6ff, strider: 0x39c8ff, orb: 0xe08bd8, burst: 0xbfe6ff, pins: 0x86e03a }
+  const pool = []
+  for (const [kind, wgt] of POND_POOL) for (let i = 0; i < wgt; i++) pool.push(kind)
+  const n = cfg.fireflies.count
+  const agents = []
+  const trailColors = []
+  for (let i = 0; i < n; i++) {
+    const kind = pool[q() * pool.length | 0]
+    const { group, params } = buildSpecies(kind, kit)
+    const baseScale = 0.9 + q() * 0.5
+    group.scale.setScalar(baseScale)
+    scene.add(group)
+    // Las especies "rodantes" envuelven su jaula en group.children[0].
+    const cage = params.rollMul > 0 ? group.children[0] : null
+    agents.push({
+      group, cage, kind, baseScale, idx: i, homeY: 0.4 + q() * 1.2,
+      dive: params.dive, hover: params.hover, rollMul: params.rollMul,
+      spinY: params.spinY, effR: params.effR,
+    })
+    trailColors.push(KIND_COLOR[kind])
+  }
+  const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial)
+
+  // Deambular sobre el agua: roamers normalizados → radio de laguna.
+  const roamers = createRoamers(cfg.wander, n, q)
+  const LR = mt * 0.92
+  const worldPos = new Float32Array(n * 3)
+  let simTime = 0
+  function mapPositions(dt, t) {
+    simTime += dt
+    updateRoamers(roamers, cfg.wander, dt, q, simTime, null, null, null)
+    for (let i = 0; i < n; i++) {
+      const a = agents[i], r = roamers[i]
+      // Física de agua (spec §4.3): unas bucean (dive>0), otras planean (dive<0).
+      let j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
+      if (j < bedY + 0.9) j = bedY + 0.9
+      worldPos[i * 3] = r.x * LR; worldPos[i * 3 + 1] = j; worldPos[i * 3 + 2] = r.z * LR
+    }
+  }
+
+  const _up = new THREE.Vector3(0, 1, 0), _dir = new THREE.Vector3(), _axis = new THREE.Vector3(), _quat = new THREE.Quaternion()
+  const _proj = new THREE.Vector3()
+  let ptrX = null, ptrY = null, _lx = 0, _ly = 0
+
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
     hazeUniforms.uProj.value = m.proj
+    kit.setResolution(m.w * m.dpr, m.h * m.dpr)
   })
 
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
-  function update(_swarm, dt, eco) {
+  function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
     pointUniforms.uT.value = clock
     if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0028
+
+    mapPositions(step, clock)
+    for (let i = 0; i < n; i++) {
+      const a = agents[i], r = roamers[i]
+      const y = worldPos[i * 3 + 1]
+      a.group.position.set(worldPos[i * 3], y, worldPos[i * 3 + 2])
+      if (a.spinY) a.group.rotation.y += a.spinY * step
+      // Rodado de jaula según la velocidad (lamp/ice/strider).
+      if (a.rollMul > 0 && a.cage) {
+        const wvx = r.vx * LR, wvz = r.vz * LR, sp = Math.hypot(wvx, wvz)
+        if (sp > 1e-4) {
+          _dir.set(wvx, 0, wvz).normalize()
+          _axis.crossVectors(_up, _dir)
+          if (_axis.lengthSq() < 1e-5) _axis.set(1, 0, 0)
+          _axis.normalize()
+          _quat.setFromAxisAngle(_axis, (sp * step) / a.effR * a.rollMul)
+          a.cage.quaternion.premultiply(_quat)
+        }
+      }
+      // Cabeceo cerca de la superficie; se endereza si planea alto.
+      if (y < ht + 1.2) {
+        a.group.rotation.x = Math.sin(clock * 1.7 + a.idx) * 0.085
+        a.group.rotation.z = Math.cos(clock * 1.5 + a.idx) * 0.085
+      } else {
+        a.group.rotation.x *= 1 - 3 * step
+        a.group.rotation.z *= 1 - 3 * step
+      }
+      const pulse = 1 + (swarm ? swarm.flash[i] : 0) * 0.35
+      if (a.cage) a.cage.scale.setScalar(pulse)
+      else a.group.scale.setScalar(a.baseScale * pulse)
+    }
+
+    // Etiqueta flotante al pasar el mouse por encima de un agente.
+    let bestI = -1
+    if (ptrX !== null) {
+      let bestD = 0.12
+      for (let i = 0; i < n; i++) {
+        _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 3, worldPos[i * 3 + 2]).project(stage.camera)
+        if (_proj.z > 1) continue
+        const d = Math.hypot(_proj.x - ptrX, _proj.y - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = _proj.x; _ly = _proj.y }
+      }
+    }
+    if (bestI >= 0 && agentNames[bestI]) {
+      const { w, h, ox, oy } = stage.metrics
+      stage.labelEl.style.left = ox + (_lx * 0.5 + 0.5) * w + 'px'
+      stage.labelEl.style.top = oy + (-_ly * 0.5 + 0.5) * h + 'px'
+      stage.labelEl.textContent = agentNames[bestI]
+      stage.labelEl.style.opacity = '1'
+    } else {
+      stage.labelEl.style.opacity = '0'
+    }
+
+    trails.update(worldPos)
     stage.render(step)
     return []
   }
-  function scare() {}
 
-  return { update, scare, flash: stage.flash, resize: stage.resize, dispose: stage.dispose }
+  function setPointer(x, y) { ptrX = x; ptrY = y }
+
+  function scare(strength = 1) {
+    for (const r of roamers) {
+      const m = Math.hypot(r.x, r.z) || 1e-3
+      const k = (0.7 + Math.random() * 1.1) * strength
+      r.vx += (r.x / m) * k + (Math.random() - 0.5) * k * 1.5
+      r.vz += (r.z / m) * k + (Math.random() - 0.5) * k * 1.5
+      r.state = 'move'; r.stateT = 1.2 + Math.random() * 1.5
+    }
+  }
+
+  return {
+    update, scare, setPointer,
+    flash: stage.flash, resize: stage.resize, dispose: stage.dispose,
+    camera: stage.camera, controls: stage.controls,
+  }
 }
