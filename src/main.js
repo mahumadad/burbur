@@ -93,6 +93,9 @@ async function start() {
     applyAccent(def.accent)
     // El panel ECOSISTEMA se adapta al mundo (la célula oculta la estación, etc.).
     hud.setWorld(def.hud)
+    // El bed de "mundo" (clima de exterior) se apaga en mundos interiores; si no,
+    // arrastraba el fondo de lluvia/viento de los demás mundos (célula, neurona).
+    audio.setWeatherBed((def.audio && def.audio.rain) !== false)
     return { def, swarm, pop, scene, events }
   }
   function switchWorld(id) {

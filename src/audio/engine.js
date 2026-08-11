@@ -96,11 +96,19 @@ export async function createAudio(cfg) {
     try { synth.triggerAttackRelease(f, 0.5, undefined, 0.2 + 0.6 * intensity) } catch (_) {}
   }
 
-  function setWind(w) {
-    const clamped = Math.max(0, Math.min(1, w))
-    bedFilter.frequency.rampTo(300 + clamped * 1800, 0.3)
-    bedGain.gain.rampTo(Tone.dbToGain(cfg.audio.volumes.bed) * (0.5 + clamped), 0.3)
+  // El bed de "mundo" es clima de exterior: en mundos interiores (célula,
+  // neurona) se apaga por completo para que no arrastre el fondo de los otros.
+  let bedWind = 0, bedOn = true
+  function applyBed() {
+    const g = bedOn ? Tone.dbToGain(cfg.audio.volumes.bed) * (0.5 + bedWind) : 0
+    bedGain.gain.rampTo(g, 0.3)
   }
+  function setWind(w) {
+    bedWind = Math.max(0, Math.min(1, w))
+    bedFilter.frequency.rampTo(300 + bedWind * 1800, 0.3)
+    applyBed()
+  }
+  function setWeatherBed(on) { bedOn = on; applyBed() }
 
   function cricket() {
     cricketPan.pan.value = Math.random() * 2 - 1
@@ -347,6 +355,6 @@ export async function createAudio(cfg) {
   return {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
     setRain, drip, setDroneVol, setWeatherVol, setActivityVol, setMood, rattle,
-    spike, setThrob,
+    spike, setThrob, setWeatherBed,
   }
 }
