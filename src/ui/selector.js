@@ -1,7 +1,7 @@
-// Selector de mundo VERTICAL en el borde derecho (pensado para mobile, estilo
-// murmur.living): una tarjeta redondeada por bioma con un "blob" de su color de
-// acento, y al final una tarjeta de AGITAR. Click → cambia de mundo / sacude.
-// El nombre del mundo aparece a la IZQUIERDA de la tarjeta al pasar el mouse
+// Selector de mundo en GRILLA 3×2 abajo a la izquierda (pensado para mobile,
+// estilo murmur.living): una tarjeta redondeada por bioma con un "blob" de su
+// color de acento, y abajo una barra ancha de AGITAR. Click → cambia de mundo /
+// sacude. El nombre del mundo aparece ENCIMA de la tarjeta al pasar el mouse
 // (y un instante al seleccionar, útil en mobile sin hover).
 
 // Blob SVG por mundo (viewBox 0 0 24 24, pintado con el acento del mundo).
@@ -11,6 +11,7 @@ const SHAPES = {
   city: '<rect x="4.5" y="4.5" width="15" height="15" rx="2.6"/>',                       // bloque
   cell: '<polygon points="12,2.8 19.9,7.4 19.9,16.6 12,21.2 4.1,16.6 4.1,7.4"/>',        // hexágono
   fungus: '<path d="M3.4 11.5a8.6 6.2 0 0 1 17.2 0z"/><rect x="9.8" y="11.5" width="4.4" height="8.4" rx="1.8"/>', // hongo
+  neuron: '<circle cx="12" cy="12" r="3.4"/><circle cx="5" cy="6" r="1.7"/><circle cx="19" cy="7" r="1.7"/><circle cx="18.5" cy="18" r="1.7"/><circle cx="5.5" cy="17.5" r="1.7"/>', // red/neurona
 }
 const shapeFor = (id) => SHAPES[id] || '<circle cx="12" cy="12" r="8.2"/>'
 // Icono de AGITAR: rombo con dos arcos de vibración (guiño al shake de murmur).
@@ -21,8 +22,9 @@ const SHAKE_SVG =
 const CSS = `
 .wsel {
   position: fixed; left: 12px; bottom: 14px; z-index: 20;
-  display: flex; flex-direction: column; gap: 8px; user-select: none;
+  display: grid; grid-template-columns: repeat(3, 46px); gap: 8px; user-select: none;
 }
+.wsel .shk { grid-column: 1 / -1; width: auto; height: 40px; }
 .wsel button {
   all: unset; cursor: pointer; display: grid; place-items: center;
   width: 46px; height: 46px; border-radius: 14px;
@@ -46,7 +48,7 @@ const CSS = `
 body.is-shaking .wsel .shk .ico svg { animation: wsel-shk .55s ease; }
 @keyframes wsel-shk { 0%,100%{transform:rotate(0)} 25%{transform:rotate(-13deg)} 75%{transform:rotate(13deg)} }
 .wsel-lbl {
-  position: fixed; z-index: 21; transform: translateY(-50%);
+  position: fixed; z-index: 21; transform: translate(-50%, -100%);
   font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: .16em; text-transform: uppercase; color: #eafff0;
   opacity: 0; transition: opacity .16s ease; pointer-events: none; white-space: nowrap;
@@ -67,13 +69,13 @@ export function createWorldSelector(worlds, current, onSelect, onShake) {
   for (const w of worlds) byId[w.id] = w
   const nameOf = (w) => w.name || w.label
 
-  // El nombre se posiciona a la izquierda de la tarjeta que lo dispara.
+  // El nombre se posiciona ENCIMA de la tarjeta (centrado), así no tapa las
+  // vecinas de la grilla.
   function showLabel(text, btn) {
     lbl.textContent = text
     const r = btn.getBoundingClientRect()
-    lbl.style.top = (r.top + r.height / 2) + 'px'
-    lbl.style.left = (r.right + 10) + 'px'   // el selector va a la izquierda → nombre a la derecha
-    lbl.style.right = 'auto'
+    lbl.style.left = (r.left + r.width / 2) + 'px'
+    lbl.style.top = (r.top - 6) + 'px'
     lbl.style.opacity = '1'
   }
   function hideLabel() { lbl.style.opacity = '0' }
