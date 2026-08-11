@@ -105,17 +105,13 @@ async function start() {
 
   let last = performance.now()
   let lightningCooldown = 4
-  let seasonClock = 0
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
     // Se leen del mundo activo cada frame → tras un cambio, apuntan al nuevo.
     const { swarm, pop, scene, events } = world
     if (mouse) attract(swarm, CONFIG.fireflies, mouse.x, mouse.y, 0.6 * dt)
-    const eco = ecosystem.update(dt)
-    // Reloj de estación (~210 s = un "año"), compartido por el follaje y el HUD.
-    seasonClock += dt
-    eco.seasonT = (seasonClock / 210 + 0.35) % 1
+    const eco = ecosystem.update(dt) // eco.seasonT lo da el ecosistema (para HUD + follaje)
     lastEco = eco
     hud.update(eco)
     audio.setMood(eco.tension)

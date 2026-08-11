@@ -169,9 +169,9 @@ export async function createAudio(cfg) {
     const t = Tone.now()
     const n = name.toLowerCase()
     if (type === 'flying_animal') {
-      if (/owl|nightjar/.test(n)) { hoot(260 + rand() * 60, 0.35, t); hoot(240, 0.4, t + 0.5) }
-      else if (/crow|jay|magpie|rook|raven/.test(n)) { const reps = 1 + ((rand() * 3) | 0); for (let k = 0; k <= reps; k++) caw(t + k * (0.22 + rand() * 0.1), 0.14 + rand() * 0.06) }
-      else if (/dove|cuckoo|pigeon/.test(n)) { chirp(520, 470, 0.18, t); chirp(430, 410, 0.22, t + 0.26) }
+      if (/owl|nightjar|tucúquere|tucuquere|lechuza|concón|concon/.test(n)) { hoot(260 + rand() * 60, 0.35, t); hoot(240, 0.4, t + 0.5) }
+      else if (/crow|jay|magpie|rook|raven|tiuque|jote|traro|tordo/.test(n)) { const reps = 1 + ((rand() * 3) | 0); for (let k = 0; k <= reps; k++) caw(t + k * (0.22 + rand() * 0.1), 0.14 + rand() * 0.06) }
+      else if (/dove|cuckoo|pigeon|torcaza|tórtola|tortola/.test(n)) { chirp(520, 470, 0.18, t); chirp(430, 410, 0.22, t + 0.26) }
       else { // canto: trino de 2–4 chirridos ascendentes
         const reps = 2 + ((rand() * 3) | 0)
         const base = 1600 + rand() * 900

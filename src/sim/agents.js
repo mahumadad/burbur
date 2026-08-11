@@ -2,42 +2,44 @@
 // El modelo deja `memory` y `state` como gancho para un futuro cerebro (LLM /
 // generative_agents), aunque hoy no se usen.
 
-/** Censo del bosque, por tipo. Contenido propio inspirado en un bosque templado. */
+/** Censo del bosque: FAUNA de la zona CENTRO de Chile (bosque esclerófilo/matorral). */
 export const FOREST_CENSUS = [
-  // flying_animal (mayoría en un bosque)
-  { name: 'pito real', type: 'flying_animal' },
-  { name: 'cárabo', type: 'flying_animal', night: true },
-  { name: 'corneja', type: 'flying_animal' },
-  { name: 'arrendajo', type: 'flying_animal' },
-  { name: 'mirlo', type: 'flying_animal', dawn: true },
-  { name: 'chochín', type: 'flying_animal' },
-  { name: 'petirrojo', type: 'flying_animal' },
-  { name: 'trepador azul', type: 'flying_animal' },
-  { name: 'busardo', type: 'flying_animal' },
-  { name: 'jilguero', type: 'flying_animal' },
-  { name: 'urraca', type: 'flying_animal' },
-  { name: 'cuco', type: 'flying_animal' },
-  { name: 'chotacabras', type: 'flying_animal', night: true },
-  { name: 'paloma zurita', type: 'flying_animal' },
-  { name: 'gavilán', type: 'flying_animal' },
-  // walking_animal
-  { name: 'corzo', type: 'walking_animal' },
-  { name: 'tejón', type: 'walking_animal', night: true },
-  { name: 'zorro', type: 'walking_animal', night: true },
-  { name: 'ardilla roja', type: 'walking_animal' },
-  { name: 'ratón de campo', type: 'walking_animal', night: true },
-  { name: 'sapo común', type: 'walking_animal' },
-  { name: 'faisán', type: 'walking_animal' },
-  // static_object (no se mueven pero suenan)
-  { name: 'viejo roble', type: 'static_object' },
-  { name: 'el arroyo', type: 'static_object' },
+  // aves (flying_animal)
+  { name: 'zorzal', type: 'flying_animal', dawn: true },
+  { name: 'chincol', type: 'flying_animal' },
+  { name: 'diuca', type: 'flying_animal' },
+  { name: 'tordo', type: 'flying_animal' },
+  { name: 'loica', type: 'flying_animal' },
+  { name: 'queltehue', type: 'flying_animal' },
+  { name: 'tiuque', type: 'flying_animal' },
+  { name: 'jote', type: 'flying_animal' },
+  { name: 'picaflor', type: 'flying_animal' },
+  { name: 'chercán', type: 'flying_animal' },
+  { name: 'pitío', type: 'flying_animal' },
+  { name: 'torcaza', type: 'flying_animal' },
+  { name: 'cachaña', type: 'flying_animal' },
+  { name: 'tucúquere', type: 'flying_animal', night: true },
+  { name: 'lechuza', type: 'flying_animal', night: true },
+  // mamíferos y reptiles (walking_animal)
+  { name: 'zorro chilla', type: 'walking_animal', night: true },
+  { name: 'zorro culpeo', type: 'walking_animal', night: true },
+  { name: 'quique', type: 'walking_animal', night: true },
+  { name: 'chingue', type: 'walking_animal', night: true },
+  { name: 'degú', type: 'walking_animal' },
+  { name: 'ratoncito', type: 'walking_animal', night: true },
+  { name: 'liebre', type: 'walking_animal' },
+  { name: 'lagartija', type: 'walking_animal' },
+  // objetos que no se mueven pero suenan (incluye bichitos)
+  { name: 'el viejo peumo', type: 'static_object' },
+  { name: 'el estero', type: 'static_object' },
   { name: 'la hojarasca', type: 'static_object' },
-  { name: 'los mosquitos', type: 'static_object' },
-  // human (raros)
-  { name: 'recolector', type: 'human' },
+  { name: 'los tábanos', type: 'static_object' },
+  { name: 'los abejorros', type: 'static_object' },
+  // personas (raras)
+  { name: 'arriero', type: 'human' },
   { name: 'excursionista', type: 'human' },
   { name: 'ciclista de montaña', type: 'human' },
-  { name: 'paseador de perros', type: 'human' },
+  { name: 'campesino', type: 'human' },
 ]
 
 /**
