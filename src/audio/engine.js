@@ -10,16 +10,21 @@ export async function createAudio(cfg) {
   // murmur usa mp3 pre-renderizados por hora; nosotros lo SINTETIZAMOS (más vivo).
   // Cadena: voces graves detuned → filtro con LFO lento (respira) → autopan lento
   //         → reverb largo + delay con feedback → limiter.
-  const droneReverb = new Tone.Reverb({ decay: 14, wet: 0.72 }).connect(limiter)
+  const droneReverb = new Tone.Reverb({ decay: 20, wet: 0.78 }).connect(limiter)
   const droneDelay = new Tone.FeedbackDelay({ delayTime: 0.75, feedback: 0.48, wet: 0.32 }).connect(limiter)
   const droneAutoPan = new Tone.AutoPanner({ frequency: 0.03, depth: 0.55 }).start()
   droneAutoPan.connect(droneReverb); droneAutoPan.connect(droneDelay)
-  const droneFilter = new Tone.Filter(420, 'lowpass').connect(droneAutoPan)
-  droneFilter.Q.value = 1.3
-  // LFO muy lento sobre el corte → el drone "respira".
-  const droneLFO = new Tone.LFO({ frequency: 0.05, min: 170, max: 820 }).start()
+  const droneFilter = new Tone.Filter(360, 'lowpass').connect(droneAutoPan)
+  droneFilter.Q.value = 2.2 // más resonante → barrido "vocal", psicodélico
+  // LFO muy lento sobre el corte → el drone "respira", y se queda GRAVE/oscuro.
+  const droneLFO = new Tone.LFO({ frequency: 0.04, min: 90, max: 520 }).start()
   droneLFO.connect(droneFilter.frequency)
   const droneGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.drone)).connect(droneFilter)
+  // Pulso hipnótico (throb) tipo Enter the Void: tremolo lento SOBRE las voces,
+  // antes del volumen, para que el bajo "late/respira" sin pelear con el slider.
+  const droneThrob = new Tone.Gain(1).connect(droneGain)
+  const throbLFO = new Tone.LFO({ frequency: 0.2, min: 0.6, max: 1.0, type: 'sine' }).start()
+  throbLFO.connect(droneThrob.gain)
 
   // Voces: sub (una octava abajo, "muy profundo") + fundamental + quinta, con
   // FatOscillator para el grosor psicodélico sin volverse áspero.
@@ -29,7 +34,7 @@ export async function createAudio(cfg) {
     new Tone.FatOscillator(droneRoot, 'triangle', 12),
     new Tone.FatOscillator(droneRoot * 1.5, 'sine', 16),
   ]
-  for (const v of droneVoices) { v.count = 3; v.start(); v.connect(droneGain) }
+  for (const v of droneVoices) { v.count = 3; v.start(); v.connect(droneThrob) }
 
   // Evolución armónica lenta: cada ~22s mueve las notas por una pentatónica
   // menor con rampas largas → pad flotante, sin resolución tonal (chill).
@@ -37,10 +42,10 @@ export async function createAudio(cfg) {
   const droneEvolve = setInterval(() => {
     const a = PENT[(Math.random() * PENT.length) | 0]
     const fifth = PENT[3 + ((Math.random() * 2) | 0)] // 1.5 o 1.8
-    droneVoices[0].frequency.rampTo(droneRoot * a / 2, 9)
-    droneVoices[1].frequency.rampTo(droneRoot * a, 9)
-    droneVoices[2].frequency.rampTo(droneRoot * a * fifth, 9)
-  }, 22000)
+    droneVoices[0].frequency.rampTo(droneRoot * a / 2, 15)
+    droneVoices[1].frequency.rampTo(droneRoot * a, 15)
+    droneVoices[2].frequency.rampTo(droneRoot * a * fifth, 15)
+  }, 30000) // deriva glacial: pad flotante, más hipnótico
 
   // Cama: ruido rosado → filtro (modulado por viento).
   const bedGain = new Tone.Gain(Tone.dbToGain(cfg.audio.volumes.bed)).connect(limiter)

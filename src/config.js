@@ -111,8 +111,8 @@ export const CONFIG = {
   audio: {
     masterLimitDb: -3,
     flashPolyphony: 8,
-    droneRootHz: 55,
-    volumes: { drone: -14, bed: -18, flash: -10 },
+    droneRootHz: 43.65,  // F1: más grave y oscuro (vibe Enter the Void, sub-bajos)
+    volumes: { drone: -11.5, bed: -18, flash: -10 },  // el drone pesa más
   },
   // Mundo CÉLULA: un macrófago reptando sobre un sustrato, visto desde arriba.
   // Ver docs/superpowers/specs/2026-08-11-diseno-mundo-celula.md
