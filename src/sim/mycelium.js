@@ -135,6 +135,18 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       }
     }
 
+    // Contención: una colonia no se expande al infinito sobre terreno estéril.
+    // Pasado `bound` la punta se reorienta hacia adentro — el equivalente al
+    // die-back del borde cuando ya no hay de qué comer. Sin esto el micelio se
+    // iba del sustrato y quedaba fuera de cuadro (invisible por el edgeFade).
+    if (cfg.bound) {
+      const m = Math.hypot(tip.x, tip.z)
+      if (m > cfg.bound) {
+        const inward = Math.atan2(-tip.z, -tip.x)
+        const d = ((inward - ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI
+        ang += d * Math.min(1, (m - cfg.bound) * 6)
+      }
+    }
     tip.ang = ang
 
     // 4. Avanza. Solo la punta se mueve — el resto de la red queda quieto.
@@ -217,10 +229,33 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       const mz = (nodes[e.a].z + nodes[e.b].z) * 0.5
       e.flow += resourceAt(mx, mz) * dt
     }
-    e.width += cfg.widthGain * e.flow * dt
+    // El grosor SUBE con el flujo y BAJA sin él: un cordón que deja de
+    // transportar se atrofia y se reabsorbe. Sin esta atrofia el grosor solo
+    // crecía, nada bajaba nunca de `pruneBelow`, y la red terminaba saturada y
+    // congelada — viva en el papel, estática en pantalla.
+    e.width += cfg.widthGain * e.flow * dt - (cfg.widthDecay || 0) * dt
+    if (e.width < 0) e.width = 0
     e.flow *= Math.max(0, 1 - cfg.flowDecay * dt)
 
     if (e.width < cfg.pruneBelow && rand() < cfg.pruneRate * dt) e.alive = false
+  }
+
+  // 9. Reciclado de NODOS. Sin esto la poda liberaba aristas pero nunca nodos:
+  //    el pool saturaba en ~30 s y la red quedaba congelada en extensión — viva
+  //    en el papel, estática en pantalla. Un nodo que se quedó sin ninguna arista
+  //    viva y sin punta encima ya no es parte del micelio: se reabsorbe y vuelve
+  //    al pool. Es la misma biología de la poda, terminada.
+  {
+    const used = net._nodeUsed || (net._nodeUsed = new Uint8Array(nodes.length))
+    used.fill(0)
+    for (const e of edges) {
+      if (!e.alive) continue
+      used[e.a] = 1; used[e.b] = 1
+    }
+    for (const t of tips) if (t.alive) used[t.node] = 1
+    for (let i = 0; i < nodes.length; i++) {
+      if (nodes[i].alive && !used[i]) nodes[i].alive = false
+    }
   }
 
   return events

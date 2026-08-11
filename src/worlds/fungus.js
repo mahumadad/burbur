@@ -4,7 +4,7 @@ import { createDraw, createPointCloud, createLineBuffer } from '../render/engine
 import { createAgentKit } from '../render/engine/agents3d.js'
 import { createTrails } from '../render/engine/trails.js'
 import { PALETTE } from '../config.js'
-import { createSubstrate, resourceAt } from '../sim/decay.js'
+import { createSubstrate, resourceAt, consume, decayClass } from '../sim/decay.js'
 import { createNetwork, updateNetwork, tipPositions } from '../sim/mycelium.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { noise2 } from '../render/noise.js'
@@ -56,7 +56,9 @@ const FAUNA_COLORS = [PALETTE.yellow, PALETTE.orange, PALETTE.bond]
 // Cuánto se levanta el tronco en Y por unidad de radio (mundo). Puramente
 // estético: sin esto el tronco se lee como una textura plana en vez de un
 // cilindro apoyado en el suelo.
-const LOG_HEIGHT_SCALE = 0.4
+// 1.0 = sección semicircular real (la altura del lomo iguala al radio), así el
+// tronco se lee como un cilindro acostado y no como un montículo aplastado.
+const LOG_HEIGHT_SCALE = 1.0
 // Caída a negro en los bordes del disco (coords normalizadas [-1,1]), como
 // los otros mundos: se apaga entre estos dos radios normalizados.
 const EDGE_FADE_START = 0.86
@@ -81,10 +83,11 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // se toca el DOF global de otros mundos— así el fondo se disuelve sin perder
   // el mapa. La auto-rotación queda TAL CUAL la deja el stage: esto no es un
   // microscopio, un tronco sí puede girar lento.
-  // Macro suave: con la apertura muy alta el fondo se disolvía tanto que las
-  // líneas finas de la red desaparecían. Bajamos para que el detalle se lea.
-  draw.uniforms.uFocus.value = 75
-  draw.uniforms.uAperture.value = 0.5
+  // Foco EN el tronco (la cámara orbita a ~118) y apertura discreta. Con el
+  // foco corto y apertura alta que tenía antes, el tronco entero se convertía
+  // en bokeh gigante: se perdía la forma y no se leía como un tronco.
+  draw.uniforms.uFocus.value = 115
+  draw.uniforms.uAperture.value = 0.12
 
   // ─── Sustrato: el tronco podrido + su despensa (puro, de sim/decay.js) ────
   const sub = createSubstrate(cc.substrate, rnd)
@@ -107,9 +110,13 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const rr = Math.min(radial, logR)
     return Math.sqrt(Math.max(0, logR * logR - rr * rr)) * R * LOG_HEIGHT_SCALE
   }
-  /** Altura de apoyo en (x,z): sobre el tronco sigue su domo; fuera, el suelo. */
+  /** Altura de apoyo en (x,z): sobre el tronco sigue su domo; fuera, el suelo.
+   * Pasa por (u,v) y usa `surfaceYUV` — la MISMA superficie que dibuja la
+   * corteza. Si no, la red se apoyaría en un tronco que ya no existe. */
   function surfaceY(x, z) {
-    return domeHeight(radialToAxis(x, z))
+    const u = x * logAx + z * logAz
+    const v = x * logPx + z * logPz
+    return surfaceYUV(u, v)
   }
   function edgeFade(x, z) {
     const rr = Math.hypot(x, z)
@@ -124,6 +131,18 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const taper = 1 - s * 0.35                     // se adelgaza hacia +eje
     const knot = 0.08 * noise2(u * 3.1, 1.7)       // nudos/engrosamientos
     return logR * Math.max(0.4, taper + knot)
+  }
+  /** Silueta IRREGULAR: el borde no es una cápsula perfecta — se muerde con
+   * ruido, como el contorno comido de un tronco podrido de verdad. */
+  function logEdgeAt(u, side) {
+    return logRAt(u) * (0.82 + 0.3 * noise2(u * 4.7 + (side > 0 ? 31 : 61), side * 2.3))
+  }
+  /** ¿(u,v) cae dentro del tronco, con su borde irregular? */
+  function insideLog(u, v) {
+    const uc = Math.max(-halfLen, Math.min(halfLen, u))
+    const over = u - uc
+    if (over !== 0) return Math.hypot(over, v) <= logRAt(uc) // puntas redondeadas
+    return Math.abs(v) <= logEdgeAt(u, Math.sign(v) || 1)
   }
   function bump(u, v) {
     return (noise2(u * 2.3 + 5, v * 4.1) - 0.5) * logR * 0.4 * R * LOG_HEIGHT_SCALE
@@ -159,7 +178,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const uc = Math.max(-halfLen, Math.min(halfLen, u))
       const lr = logRAt(uc)
       const v = (rnd() * 2 - 1) * lr
-      if (Math.hypot(Math.max(0, Math.abs(u) - halfLen), v) > lr) continue
+      if (!insideLog(u, v)) continue
       placed++
       const [x, z] = uvToWorld(u, v)
       const y = surfaceYUV(u, v) + 0.15
@@ -167,16 +186,21 @@ export function createFungusScene(container, cfg, agentNames = []) {
       // Musgo: parches en el flanco -v (húmedo), donde el ruido lo permite.
       const mossN = noise2(u * 1.7 + 20, v * 2.3 + 9)
       const lichenN = noise2(u * 3.3 - 12, v * 3.7 - 4)
+      // Corteza DESPRENDIDA: parches donde ya se cayó y asoma la albura clara
+      // — el rasgo más característico de un tronco en descomposición.
+      const peelN = noise2(u * 2.1 - 40, v * 2.9 + 17)
       let col, size
       if (v < -lr * 0.15 && mossN > 0.62) {
-        col = tint(C_MOSS, (0.6 + rnd() * 0.5) * fade); size = 0.32 + rnd() * 0.5
+        col = tint(C_MOSS, (0.6 + rnd() * 0.5) * fade); size = 0.16 + rnd() * 0.2
+      } else if (peelN > 0.70) {
+        col = tint(C_SAPWOOD, (0.55 + rnd() * 0.4) * fade); size = 0.14 + rnd() * 0.16
       } else if (lichenN > 0.72) {
-        col = tint(C_LICHEN, (0.7 + rnd() * 0.4) * fade); size = 0.3 + rnd() * 0.35
+        col = tint(C_LICHEN, (0.7 + rnd() * 0.4) * fade); size = 0.14 + rnd() * 0.16
       } else {
         // Corteza: surcos longitudinales (bandas de v) + variación por punto.
         const furrow = 0.5 + 0.5 * Math.abs(Math.sin(v / lr * 7 + Math.sin(u * 3)))
         const shade = (0.5 + furrow * 0.5) * (0.85 + rnd() * 0.3)
-        col = tint(C_BARK, shade * fade); size = 0.26 + rnd() * 0.34
+        col = tint(C_BARK, shade * fade); size = 0.13 + rnd() * 0.16
       }
       draw.pushPoint(x * R, y, z * R, col, size, 0)
     }
@@ -210,7 +234,11 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const ringColor = (rad) => rad >= barkStart ? C_BARK : rad >= sapStart ? C_SAPWOOD : C_HEARTWOOD
     for (const endU of [-halfLen, halfLen]) {
       const seg = 30
-      for (const rad of [logR * 0.94, barkStart, (sapStart + barkStart) / 2, sapStart, sapStart * 0.6, sapStart * 0.3]) {
+      // Los anillos siguen el radio LOCAL del extremo (el tronco se ahúsa): si
+      // usan el radio nominal salen como halos flotando fuera de la madera.
+      const endR = logRAt(endU)
+      const k = endR / logR
+      for (const rad of [endR * 0.94, barkStart * k, ((sapStart + barkStart) / 2) * k, sapStart * k, sapStart * 0.6 * k, sapStart * 0.3 * k]) {
         const col = ringColor(rad + 1e-4)
         let prev = null
         for (let i = 0; i <= seg; i++) {
@@ -270,9 +298,13 @@ export function createFungusScene(container, cfg, agentNames = []) {
   // Dos registros visuales del micelio (spec §10). La red se dibuja con capacidad
   // para bundlear los cordones (una arista gruesa = varias líneas paralelas), y
   // aparte los frentes plumosos que salen de cada punta.
-  const CORD_W = 0.06                 // grosor a partir del cual una arista es cordón
+  // Grosor a partir del cual una arista se dibuja como CORDÓN (haz de 3 hifas).
+  // Calibrado contra los valores reales que produce la sim (mediana ≈ 5): con un
+  // umbral bajo TODAS las aristas salían bundleadas y desbordaban el buffer.
+  const CORD_W = 9
   const netMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })
-  const netBuf = createLineBuffer(cc.mycelium.maxEdges * 3, netMat)
+  // Cada arista se dibuja curva (3 segmentos) y, si es cordón, ×3 hifas.
+  const netBuf = createLineBuffer(cc.mycelium.maxEdges * 9, netMat)
   scene.add(netBuf.mesh)
   const frontMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55 })
   const FAN = 10                       // hifas finas por punta (el borde plumoso)
@@ -290,22 +322,45 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const ax = a.x * R, az = a.z * R, bx = b.x * R, bz = b.z * R
       const ya = surfaceY(a.x, a.z) + 0.35, yb = surfaceY(b.x, b.z) + 0.35
       const fa = edgeFade(a.x, a.z), fb = edgeFade(b.x, b.z)
+      // Las hifas CURVAN: una cuerda recta nodo-a-nodo delata la geometría del
+      // grafo. Cada arista se dibuja como una polilínea con una comba lateral
+      // estable (derivada de los índices, no aleatoria por frame — si no,
+      // temblaría). `arc` da la curvatura en unidades de mundo.
+      const dx = bx - ax, dz = bz - az
+      const d = Math.hypot(dx, dz) || 1
+      const px = -dz / d, pz = dx / d
+      const wobble = Math.sin((e.a * 12.9898 + e.b * 78.233) % 6.2832)
+      const arc = wobble * d * 0.18
+      const SEG = 3
+      const curvePt = (s, lateral) => {
+        const t = s / SEG
+        const bend = Math.sin(t * Math.PI) * arc
+        return [
+          ax + dx * t + px * (bend + lateral),
+          ya + (yb - ya) * t,
+          az + dz * t + pz * (bend + lateral),
+        ]
+      }
       if (e.width >= CORD_W) {
-        // CORDÓN (rizomorfo): haz de 3 hifas paralelas, brillante. Los cordones
-        // son las "autopistas" que consolidan el territorio ganado.
+        // CORDÓN (rizomorfo): haz de 3 hifas paralelas curvas, brillante — las
+        // "autopistas" que consolidan el territorio ganado.
         const bright = Math.min(1, 0.7 + e.width * 5)
-        let dx = bx - ax, dz = bz - az
-        const d = Math.hypot(dx, dz) || 1
-        const px = (-dz / d), pz = (dx / d)      // perpendicular en el plano
         const off = Math.min(1.6, 0.5 + e.width * 8)
-        for (const s of [-off, 0, off]) {
-          netBuf.push(ax + px * s, ya, az + pz * s, bx + px * s, yb, bz + pz * s,
-            tint(base, fa * bright), tint(base, fb * bright))
+        for (const lat of [-off, 0, off]) {
+          for (let s = 0; s < SEG; s++) {
+            const p0 = curvePt(s, lat), p1 = curvePt(s + 1, lat)
+            netBuf.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2],
+              tint(base, fa * bright), tint(base, fb * bright))
+          }
         }
       } else {
-        // MALLA FINA: la trama difusa entre cordones, tenue.
+        // MALLA FINA: la trama difusa entre cordones, tenue y también curva.
         const dim = 0.4 + e.width * 6
-        netBuf.push(ax, ya, az, bx, yb, bz, tint(base, fa * dim), tint(base, fb * dim))
+        for (let s = 0; s < SEG; s++) {
+          const p0 = curvePt(s, 0), p1 = curvePt(s + 1, 0)
+          netBuf.push(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2],
+            tint(base, fa * dim), tint(base, fb * dim))
+        }
       }
     }
     netBuf.commit()
@@ -436,7 +491,16 @@ export function createFungusScene(container, cfg, agentNames = []) {
       moisture,
     }
     updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
-    drawNetwork()
+
+    // El micelio COME donde tiene puntas: eso agota el sustrato localmente, y
+    // el agotamiento es lo que hace que el cordón deje de recibir flujo, se
+    // atrofie y se pode — así la red ABANDONA lo exprimido y sigue avanzando.
+    // Sin este consumo el recurso era infinito, nada se podaba nunca y la red
+    // quedaba congelada al saturar. Es además la premisa del mundo: el terreno
+    // es la comida y se acaba.
+    for (const t of net.tips) {
+      if (t.alive) consume(sub, t.x, t.z, cc.eatRate * step * growthMul)
+    }
     drawFront()
     drawTips()
 
