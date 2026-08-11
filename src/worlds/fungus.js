@@ -111,12 +111,46 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const rr = Math.min(radial, logR)
     return Math.sqrt(Math.max(0, logR * logR - rr * rr)) * R * LOG_HEIGHT_SCALE
   }
+  /** Eje CURVO del tronco (arco de círculo): centerline(u) y su perpendicular.
+   * En u=0 coincide con el eje recto (logAx/logPx); al alejarse, el tangente
+   * rota `k` rad por unidad → tronco curvo tipo banana. */
+  const k = cc.substrate.logCurve || 0
+  const baseA = cc.substrate.logAngle
+  function centerX(u) { return k ? (Math.sin(baseA + k * u) - Math.sin(baseA)) / k : logAx * u }
+  function centerZ(u) { return k ? (Math.cos(baseA) - Math.cos(baseA + k * u)) / k : logAz * u }
+  function perpX(u) { return -Math.sin(baseA + k * u) }
+  function perpZ(u) { return Math.cos(baseA + k * u) }
+  /** El punto más cercano del eje curvo a (x,z): devuelve [u, v] (v = offset
+   * perpendicular con signo). Búsqueda numérica gruesa + refinamiento — barata
+   * y robusta, evita invertir el arco analíticamente. */
+  function worldToUV(x, z) {
+    const lo = -halfLen - logR, hi = halfLen + logR
+    let bestU = 0, bestD = Infinity
+    const N = 48
+    for (let i = 0; i <= N; i++) {
+      const u = lo + (hi - lo) * (i / N)
+      const dx = x - centerX(u), dz = z - centerZ(u)
+      const d = dx * dx + dz * dz
+      if (d < bestD) { bestD = d; bestU = u }
+    }
+    let step = (hi - lo) / N
+    for (let it = 0; it < 4; it++) {
+      step *= 0.5
+      for (const s of [-step, step]) {
+        const u = bestU + s
+        const dx = x - centerX(u), dz = z - centerZ(u)
+        const d = dx * dx + dz * dz
+        if (d < bestD) { bestD = d; bestU = u }
+      }
+    }
+    const v = (x - centerX(bestU)) * perpX(bestU) + (z - centerZ(bestU)) * perpZ(bestU)
+    return [bestU, v]
+  }
   /** Altura de apoyo en (x,z): sobre el tronco sigue su domo; fuera, el suelo.
-   * Pasa por (u,v) y usa `surfaceYUV` — la MISMA superficie que dibuja la
-   * corteza. Si no, la red se apoyaría en un tronco que ya no existe. */
+   * Pasa por (u,v) del eje CURVO y usa `surfaceYUV` — la MISMA superficie que
+   * dibuja la corteza. Si no, la red se apoyaría en un tronco que ya no existe. */
   function surfaceY(x, z) {
-    const u = x * logAx + z * logAz
-    const v = x * logPx + z * logPz
+    const [u, v] = worldToUV(x, z)
     return surfaceYUV(u, v)
   }
   function edgeFade(x, z) {
@@ -163,7 +197,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     return h + (rad < lr ? bump(u, v) : 0)
   }
   function uvToWorld(u, v) {
-    return [logAx * u + logPx * v, logAz * u + logPz * v]
+    return [centerX(u) + perpX(u) * v, centerZ(u) + perpZ(u) * v]
   }
 
   // ─── TRONCO: CUERPO SÓLIDO. Antes era solo dither de puntos, así que se veía
