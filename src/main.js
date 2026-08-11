@@ -83,7 +83,6 @@ async function start() {
   // Nombre de paridad con murmur (el selector de mundo lo llama).
   window.setScene = switchWorld
   world = buildWorld('land')
-  selector = createWorldSelector(WORLDS, 'land', switchWorld)
 
   // ── Shake: sacude el mundo (dispersa individuos + traqueteo + alarma) ──
   let lastEco = null
@@ -93,7 +92,10 @@ async function start() {
     audio.fauna('flying_animal', 'all around', 'crow') // graznido de alarma
     if (lastEco) eventLog.push({ type: 'shift', log: 'El mundo fue sacudido.', short: 'sacudida' }, clockLabel(lastEco))
   }
-  createShake(doShake)
+  const shake = createShake(doShake) // gestos físicos + animación
+  // Selector VERTICAL a la derecha (mundos + tarjeta de AGITAR), estilo murmur,
+  // pensado para mobile. La tarjeta de agitar usa el mismo trigger que los gestos.
+  selector = createWorldSelector(WORLDS, 'land', switchWorld, shake.trigger)
 
   // Interacción: el mouse atrae a los individuos cercanos del mundo activo.
   let mouse = null
