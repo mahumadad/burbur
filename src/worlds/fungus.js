@@ -206,7 +206,11 @@ export function createFungusScene(container, cfg, agentNames = []) {
         const grain = 0.5 + 0.5 * Math.sin(u * 22 + noise2(u, v * 3) * 4) // fibra a lo largo
         let shade = (0.35 + 0.75 * ridge) * (0.55 + 0.5 * crack) * (0.8 + 0.25 * grain) * f
         if (rad > lr) shade *= 0.4                            // la falda, oscura
-        let cr = C_BARK[0] * shade * 3.4, cg = C_BARK[1] * shade * 3.2, cb = C_BARK[2] * shade * 2.8
+        // Marrón de corteza OSCURO y sólido (referencia: ~0.15,0.1,0.05 con
+        // ruido), no un naranja saturado. El sombreado por vértice le da el
+        // volumen ya que el mundo es unlit.
+        let cr = (0.14 + 0.26 * shade), cg = (0.09 + 0.17 * shade), cb = (0.05 + 0.09 * shade)
+        cr *= f; cg *= f; cb *= f
         const weather = noise2(u * 1.4 + 40, v * 1.4 - 8)     // manchas de intemperie
         if (weather > 0.72 && rad <= lr) { cr *= 0.85; cg *= 1.15; cb *= 0.95 }
         col.push(cr, cg, cb)
@@ -263,16 +267,24 @@ export function createFungusScene(container, cfg, agentNames = []) {
       // tupido en el flanco -v; la corteza y la tierra asoman donde ralea.
       const mossThresh = v < -lr * 0.1 ? 0.52 : 0.66
       if (mossN > mossThresh) {
-        // MUSGO como PELUSA: matitas verticales cortas y densas — un tallo verde
-        // oscuro en la base que aclara hacia la punta, con leve inclinación. Es
-        // lo que lo hace ver afelpado (ref. tronco lush) en vez de pintado plano.
-        const h = (0.7 + rnd() * rnd() * 2.6) * (0.6 + mossN * 0.7)
-        const tone = 0.6 + rnd() * 0.7
-        const lean = (rnd() - 0.5) * 0.9
-        const base = [C_MOSS[0] * 0.45 * fade, C_MOSS[1] * 0.45 * fade, C_MOSS[2] * 0.45 * fade]
-        const tip = [C_MOSS[0] * tone * fade, C_MOSS[1] * 1.3 * tone * fade, C_MOSS[2] * tone * fade]
-        draw.pushLine(x * R, y, z * R, x * R + lean, y + h, z * R + lean, base, tip)
-        draw.pushPoint(x * R + lean, y + h, z * R + lean, tip, 0.16 + rnd() * 0.22, 0)
+        // MUSGO como hojitas orientadas por la NORMAL de la superficie (técnica
+        // de la referencia, doc tronco-musgo.md): en el lomo apuntan hacia
+        // arriba, en los flancos salen de costado siguiendo la curva del tronco,
+        // inclinadas al azar. Verde con variación (+R, -G) → del verde al
+        // amarillento, nunca un verde plano.
+        const nvv = Math.max(-1, Math.min(1, v / lr))          // normal transversal
+        const nup = Math.sqrt(Math.max(0, 1 - nvv * nvv))       // componente hacia arriba
+        // Dirección de la hojita = normal de la sección + inclinación aleatoria.
+        const nx = logPx * nvv, nz = logPz * nvv                // componente lateral (mundo)
+        const len = (1.0 + rnd() * rnd() * 2.4) * (0.6 + mossN * 0.7)
+        const jx = (rnd() - 0.5) * 0.7, jz = (rnd() - 0.5) * 0.7
+        const dx = (nx + jx) * len, dy = (nup + 0.2) * len, dz = (nz + jz) * len
+        const rr = rnd(), gr = rnd()
+        const tone = 0.55 + rnd() * 0.6
+        const base = [C_MOSS[0] * 0.4 * fade, C_MOSS[1] * 0.4 * fade, C_MOSS[2] * 0.4 * fade]
+        const tip = [(C_MOSS[0] + 0.3 * rr) * tone * fade, (C_MOSS[1] * 1.3 - 0.25 * gr) * tone * fade, C_MOSS[2] * tone * fade]
+        draw.pushLine(x * R, y, z * R, x * R + dx, y + dy, z * R + dz, base, tip)
+        draw.pushPoint(x * R + dx, y + dy, z * R + dz, tip, 0.16 + rnd() * 0.2, 0)
         continue
       } else if (peelN > 0.70) {
         col = tint(C_SAPWOOD, (0.55 + rnd() * 0.4) * fade); size = 0.14 + rnd() * 0.16
