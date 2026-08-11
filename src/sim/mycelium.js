@@ -1,0 +1,253 @@
+// Micelio: un grafo que CRECE. En todos los demás mundos los agentes recorren
+// un terreno fijo; acá la punta de la hifa avanza y lo que deja atrás no se
+// borra — es la red. La punta es el único agente; el resto (`nodes`, `edges`)
+// es estructura inerte que jamás se mueve.
+//
+// Cinco reglas, todas biología real (ver spec §3):
+//   1. Solo crece la punta (extensión apical).
+//   2. Dirección = ruido sesgado + tropismo (hacia el recurso) + autotropismo
+//      negativo (se aparta de su propia red — así COLONIZA en vez de amontonarse).
+//   3. Ramificación: la población de puntas CRECE (el único módulo del repo
+//      sin `count` fijo de agentes vivos).
+//   4. Anastomosis: misma colonia se funde; distinta colonia rechaza (barrera).
+//   5. Refuerzo (los cordones que transportan se engrosan) y poda (lo estéril
+//      se reabsorbe). La poda no es optimización: es lo único que evita que
+//      el grafo reviente.
+//
+// Pools de tamaño FIJO con slots libres marcados por `alive` — igual que
+// `atp.js` e `invaders.js`. Sin tope, el grafo revienta el navegador.
+// Puro: sin three/DOM. Coordenadas (x,z) normalizadas.
+
+const TWO_PI = Math.PI * 2
+
+// Ancho inicial de una arista recién creada. Tiene que quedar POR DEBAJO de
+// cualquier `pruneBelow` razonable: si no hay refuerzo (rule 5), la arista
+// tiene que ser podable desde el vamos, no nacer ya "gruesa".
+const INITIAL_EDGE_WIDTH = 0.01
+
+// Muestras de dirección para el tropismo: la primera es "seguir igual"
+// (offset 0) para que un campo de recurso UNIFORME no produzca un sesgo
+// artificial por desempate — solo gana una muestra si es ESTRICTAMENTE mejor.
+const TROPISM_OFFSETS = [0, -Math.PI / 4, Math.PI / 4, -Math.PI / 2, Math.PI / 2]
+
+/** Envuelve un ángulo a [-π, π]. */
+function wrapAngle(a) {
+  return a - TWO_PI * Math.floor((a + Math.PI) / TWO_PI)
+}
+
+/** Gira `from` hacia `to` sin pasarse de `maxDelta` radianes. */
+function turnToward(from, to, maxDelta) {
+  if (maxDelta <= 0) return from
+  const diff = wrapAngle(to - from)
+  if (Math.abs(diff) <= maxDelta) return from + diff
+  return from + Math.sign(diff) * maxDelta
+}
+
+/** Primer slot libre (`!alive`) de un pool. `-1` si está lleno: el tope duro. */
+function allocFree(pool) {
+  for (let i = 0; i < pool.length; i++) if (!pool[i].alive) return i
+  return -1
+}
+
+/**
+ * @param {object} cfg  { maxNodes, maxEdges, maxTips, stepLen, tipSpeed,
+ *                         turnRate, noise, tropism, autotropism, branchRate,
+ *                         fuseRadius, widthGain, flowDecay, pruneBelow, pruneRate }
+ * @param {Array<{x:number,z:number,colony:number}>} seeds  de dónde arranca cada colonia
+ */
+export function createNetwork(cfg, seeds, rand = Math.random) {
+  const nodes = Array.from({ length: cfg.maxNodes }, () => ({ x: 0, z: 0, colony: 0, alive: false }))
+  const edges = Array.from({ length: cfg.maxEdges }, () => ({ a: 0, b: 0, width: 0, flow: 0, colony: 0, alive: false }))
+  const tips = Array.from({ length: cfg.maxTips }, () => ({
+    node: -1, ang: 0, colony: 0, vigor: 1, alive: false, x: 0, z: 0, dist: 0,
+  }))
+
+  const net = { nodes, edges, tips }
+
+  for (const seed of seeds) {
+    const ni = allocFree(nodes)
+    if (ni === -1) continue // tope: no debería pasar con un cfg razonable
+    nodes[ni].x = seed.x; nodes[ni].z = seed.z; nodes[ni].colony = seed.colony; nodes[ni].alive = true
+
+    const ti = allocFree(tips)
+    if (ti === -1) continue
+    const t = tips[ti]
+    t.node = ni; t.x = seed.x; t.z = seed.z; t.dist = 0
+    t.ang = rand() * TWO_PI
+    t.colony = seed.colony; t.vigor = 1; t.alive = true
+  }
+
+  return net
+}
+
+/**
+ * Avanza la simulación un paso `dt`. Devuelve los eventos del frame:
+ * `{type:'fusion', x, z, colony}` o `{type:'barrier', x, z, colony, otherColony}`.
+ * @param {object} field  { resourceAt(x,z) → 0..1, moisture }
+ */
+export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
+  const events = []
+  const { nodes, edges, tips } = net
+  const resourceAt = field && typeof field.resourceAt === 'function' ? field.resourceAt : null
+
+  for (let i = 0; i < tips.length; i++) {
+    const tip = tips[i]
+    if (!tip.alive) continue
+
+    // 1. Dirección: paseo aleatorio sesgado, acotado por turnRate (la punta
+    //    no puede reorientarse instantáneamente ni con ruido).
+    let ang = tip.ang
+    const jitter = (rand() * 2 - 1) * cfg.noise * dt
+    const maxJitter = cfg.turnRate * dt
+    ang += Math.max(-maxJitter, Math.min(maxJitter, jitter))
+
+    // 2. Tropismo: sesga hacia donde el recurso es mayor entre unas pocas
+    //    direcciones candidatas.
+    if (cfg.tropism > 0 && resourceAt) {
+      let bestAng = ang
+      let bestVal = -Infinity
+      for (const off of TROPISM_OFFSETS) {
+        const a = ang + off
+        const val = resourceAt(tip.x + Math.cos(a) * cfg.stepLen, tip.z + Math.sin(a) * cfg.stepLen)
+        if (val > bestVal) { bestVal = val; bestAng = a }
+      }
+      ang = turnToward(ang, bestAng, cfg.turnRate * cfg.tropism * dt)
+    }
+
+    // 3. Autotropismo negativo: se aparta de nodos de su PROPIA colonia
+    //    cercanos. Es lo que hace que colonice en vez de amontonarse.
+    if (cfg.autotropism > 0) {
+      let rx = 0, rz = 0
+      const R = cfg.fuseRadius * 4 // radio de "sentir" la propia red
+      for (const n of nodes) {
+        if (!n.alive || n.colony !== tip.colony) continue
+        const dx = tip.x - n.x, dz = tip.z - n.z
+        const d2 = dx * dx + dz * dz
+        if (d2 > 1e-9 && d2 < R * R) {
+          const d = Math.sqrt(d2)
+          const w = 1 - d / R
+          rx += (dx / d) * w
+          rz += (dz / d) * w
+        }
+      }
+      if (rx !== 0 || rz !== 0) {
+        ang = turnToward(ang, Math.atan2(rz, rx), cfg.turnRate * cfg.autotropism * dt)
+      }
+    }
+
+    tip.ang = ang
+
+    // 4. Avanza. Solo la punta se mueve — el resto de la red queda quieto.
+    const step = cfg.tipSpeed * dt
+    tip.x += Math.cos(ang) * step
+    tip.z += Math.sin(ang) * step
+    tip.dist += step
+
+    // 5. Anastomosis: ¿está cerca de un nodo ajeno a su propio último nodo?
+    //    (fuseRadius debe ser menor que stepLen: si no, una punta puede
+    //    "fusionarse" con su propio rastro recién dejado.)
+    let fused = false
+    for (let ni = 0; ni < nodes.length; ni++) {
+      const n = nodes[ni]
+      if (!n.alive || ni === tip.node) continue
+      const dx = tip.x - n.x, dz = tip.z - n.z
+      if (dx * dx + dz * dz > cfg.fuseRadius * cfg.fuseRadius) continue
+
+      if (n.colony === tip.colony) {
+        const ei = allocFree(edges)
+        if (ei !== -1) {
+          const e = edges[ei]
+          e.a = tip.node; e.b = ni; e.width = INITIAL_EDGE_WIDTH; e.flow = 0
+          e.colony = tip.colony; e.alive = true
+        }
+        events.push({ type: 'fusion', x: tip.x, z: tip.z, colony: tip.colony })
+      } else {
+        events.push({ type: 'barrier', x: tip.x, z: tip.z, colony: tip.colony, otherColony: n.colony })
+      }
+      tip.alive = false
+      fused = true
+      break
+    }
+    if (fused) continue
+
+    // 6. Cada `stepLen` recorrido, deposita un nodo nuevo y la arista que lo une
+    //    al anterior. Sin slot libre, la operación simplemente no ocurre.
+    if (tip.dist >= cfg.stepLen) {
+      tip.dist -= cfg.stepLen
+      const nodeIdx = allocFree(nodes)
+      if (nodeIdx !== -1) {
+        const n = nodes[nodeIdx]
+        n.x = tip.x; n.z = tip.z; n.colony = tip.colony; n.alive = true
+
+        const edgeIdx = allocFree(edges)
+        if (edgeIdx !== -1) {
+          const e = edges[edgeIdx]
+          e.a = tip.node; e.b = nodeIdx; e.width = INITIAL_EDGE_WIDTH; e.flow = 0
+          e.colony = tip.colony; e.alive = true
+        }
+        tip.node = nodeIdx
+      }
+    }
+
+    // 7. Ramificación: nace en el NODO actual (no a mitad de camino), con
+    //    ángulo desviado. La población de puntas crece — a diferencia de
+    //    todos los otros módulos del repo.
+    if (rand() < cfg.branchRate * dt) {
+      const ti = allocFree(tips)
+      if (ti !== -1) {
+        const baseNode = nodes[tip.node]
+        const off = (Math.PI / 6 + rand() * Math.PI / 3) * (rand() < 0.5 ? -1 : 1)
+        const child = tips[ti]
+        child.node = tip.node; child.x = baseNode.x; child.z = baseNode.z; child.dist = 0
+        child.ang = tip.ang + off
+        child.colony = tip.colony; child.vigor = tip.vigor; child.alive = true
+      }
+    }
+  }
+
+  // 8. Refuerzo y poda de aristas. Las que están cerca de recurso ganan
+  //    flujo; el flujo engrosa el cordón y decae con el tiempo; lo que
+  //    queda por debajo de `pruneBelow` se reabsorbe con probabilidad
+  //    `pruneRate` por segundo. No es una optimización: es la biología que
+  //    evita que el grafo reviente.
+  for (const e of edges) {
+    if (!e.alive) continue
+    if (resourceAt) {
+      const mx = (nodes[e.a].x + nodes[e.b].x) * 0.5
+      const mz = (nodes[e.a].z + nodes[e.b].z) * 0.5
+      e.flow += resourceAt(mx, mz) * dt
+    }
+    e.width += cfg.widthGain * e.flow * dt
+    e.flow *= Math.max(0, 1 - cfg.flowDecay * dt)
+
+    if (e.width < cfg.pruneBelow && rand() < cfg.pruneRate * dt) e.alive = false
+  }
+
+  return events
+}
+
+/** Puntas vivas, para dibujar. */
+export function tipPositions(net) {
+  const out = []
+  for (const t of net.tips) if (t.alive) out.push({ x: t.x, z: t.z, colony: t.colony })
+  return out
+}
+
+/** Censo de la red: totales y desglose por colonia. */
+export function networkStats(net) {
+  let nodeCount = 0, edgeCount = 0, tipCount = 0, cordLength = 0
+  const byColony = {}
+  const bucket = (colony) => byColony[colony] || (byColony[colony] = { nodes: 0, edges: 0, tips: 0 })
+
+  for (const n of net.nodes) if (n.alive) { nodeCount++; bucket(n.colony).nodes++ }
+  for (const t of net.tips) if (t.alive) { tipCount++; bucket(t.colony).tips++ }
+  for (const e of net.edges) {
+    if (!e.alive) continue
+    edgeCount++
+    bucket(e.colony).edges++
+    const a = net.nodes[e.a], b = net.nodes[e.b]
+    cordLength += Math.hypot(a.x - b.x, a.z - b.z)
+  }
+
+  return { nodes: nodeCount, edges: edgeCount, tips: tipCount, cordLength, byColony }
+}
