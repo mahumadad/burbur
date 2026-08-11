@@ -156,6 +156,10 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
   // dos terrenos: la MADERA (donde puede envolver el flanco y seguir por la
   // panza) y la TIERRA (donde se abre en abanico). Sin él todo es madera.
   const onLogAt = field && typeof field.onLog === 'function' ? field.onLog : null
+  // `canLeave(x,z)`: ¿el tronco toca la tierra ahí? El flanco de un tronco
+  // apoyado es una pared; la hifa no baja por ella. Sólo PASA a la tierra donde
+  // hay contacto, y si no lo hay sigue bordeando el tronco por abajo.
+  const canLeaveAt = field && typeof field.canLeave === 'function' ? field.canLeave : null
   const soil = cfg.soil || null
   // La celda vale exactamente el radio de "sentir la propia red": así las 9
   // celdas vecinas cubren tanto el autotropismo como la anastomosis.
@@ -251,15 +255,18 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
     tip.z += Math.sin(ang) * step
     tip.dist += step
 
-    // 4bis. ENVOLVER EL FLANCO. Una punta que llega al borde del tronco puede
-    //    seguir de largo a la tierra o doblar sobre el canto y seguir comiendo
-    //    por la PANZA. Envolver = deshacer el paso, darse vuelta y cambiar de
-    //    lado; el trazo (x,z) sigue siendo el mismo mapa en planta, lo que
-    //    cambia es en qué mitad del tronco se apoya.
-    if (onLogAt && !onSoil && cfg.wrapChance && !onLogAt(tip.x, tip.z) && rand() < cfg.wrapChance) {
-      tip.x = prevX; tip.z = prevZ; tip.dist -= step
-      ang = wrapAngle(ang + Math.PI + (rand() * 2 - 1) * 0.5)
-      tip.side = -tip.side
+    // 4bis. ENVOLVER EL FLANCO. Una punta que llega al borde del tronco sólo
+    //    PASA a la tierra si el tronco la toca ahí. Si no, dobla sobre el canto
+    //    y sigue comiendo por la PANZA: envolver = deshacer el paso, darse
+    //    vuelta y cambiar de lado. El trazo (x,z) sigue siendo el mismo mapa en
+    //    planta; lo que cambia es en qué mitad del tronco se apoya.
+    if (onLogAt && !onSoil && !onLogAt(tip.x, tip.z)) {
+      const puedeSalir = canLeaveAt ? canLeaveAt(prevX, prevZ) : true
+      if (!puedeSalir || (cfg.wrapChance && rand() < cfg.wrapChance)) {
+        tip.x = prevX; tip.z = prevZ; tip.dist -= step
+        ang = wrapAngle(ang + Math.PI + (rand() * 2 - 1) * 0.5)
+        tip.side = -tip.side
+      }
     }
     tip.ang = ang
 

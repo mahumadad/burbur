@@ -354,3 +354,49 @@ describe('mycelium: brote lateral', () => {
     }
   })
 })
+
+// El tronco es un cilindro apoyado: su flanco es una pared. Una hifa no baja
+// por ahí — sólo pasa a la tierra donde el tronco la TOCA. Si no, sigue
+// bordeando el tronco por abajo.
+describe('mycelium: sólo pasa a tierra donde el tronco toca el suelo', () => {
+  const onLog = (x, z) => Math.hypot(x, z) < 0.3
+  const CFGC = {
+    maxNodes: 300, maxEdges: 300, maxTips: 20,
+    stepLen: 0.05, tipSpeed: 0.3,
+    turnRate: 0, noise: 0, tropism: 0, autotropism: 0, branchRate: 0,
+    fuseRadius: 0.01,
+    widthGain: 0, flowDecay: 0, pruneBelow: 0, pruneRate: 0,
+    wrapChance: 0,                      // aunque pudiera, no dobla por gusto
+  }
+
+  it('sin contacto con el suelo la punta NUNCA sale del tronco', () => {
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog, canLeave: () => false }
+    const net = createNetwork(CFGC, [{ x: 0, z: 0, colony: 1 }], seeded(70))
+    net.tips[0].ang = 0
+    const rand = seeded(71)
+    for (let i = 0; i < 300; i++) {
+      updateNetwork(net, CFGC, 1 / 30, rand, field)
+      expect(onLog(net.tips[0].x, net.tips[0].z)).toBe(true)
+    }
+    expect(net.tips[0].side).toBe(-1)   // se dio vuelta: siguió por la panza
+  })
+
+  it('donde hay contacto la punta sí pasa a la tierra', () => {
+    // Contacto sólo en el semiplano +x.
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog, canLeave: (x) => x > 0 }
+    const net = createNetwork(CFGC, [{ x: 0, z: 0, colony: 1 }], seeded(72))
+    net.tips[0].ang = 0                 // derecho hacia +x
+    const rand = seeded(73)
+    for (let i = 0; i < 200; i++) updateNetwork(net, CFGC, 1 / 30, rand, field)
+    expect(onLog(net.tips[0].x, net.tips[0].z)).toBe(false)
+  })
+
+  it('sin canLeave en el field, el comportamiento no cambia', () => {
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog }
+    const net = createNetwork(CFGC, [{ x: 0, z: 0, colony: 1 }], seeded(74))
+    net.tips[0].ang = 0
+    const rand = seeded(75)
+    for (let i = 0; i < 200; i++) updateNetwork(net, CFGC, 1 / 30, rand, field)
+    expect(onLog(net.tips[0].x, net.tips[0].z)).toBe(false)
+  })
+})

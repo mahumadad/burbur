@@ -188,18 +188,16 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const A = lr * (1 - sink) * R * LOG_HEIGHT_SCALE + centerY(u)  // eje sobre el suelo
     const RR = lr * R * LOG_HEIGHT_SCALE
     const t = rad / lr
-    // Hasta FLANK el lomo es el lomo DE VERDAD (la sección circular): repartir
-    // el radio en planta sobre todo el arco de forma pareja mandaba un nodo a
-    // media anchura del tronco casi al ecuador, y en pantalla la colonia se
-    // apretaba en una franja finita sobre la cresta. El descenso por el flanco
-    // —que visto desde arriba es una banda angosta, escorzada— se comprime en
-    // la franja exterior, que es donde de verdad se ve.
-    const FLANK = 0.86
-    const dome = Math.sqrt(Math.max(0, 1 - Math.min(t, FLANK) * Math.min(t, FLANK)))
-    const h = side < 0 ? A - RR * dome : A + RR * dome
-    if (t <= FLANK) return Math.max(0, h)
-    const s = (t - FLANK) / (1 - FLANK)
-    return Math.max(0, h * (1 - s * s))          // baja al suelo justo en el borde
+    // La sección circular REAL, sin trucos: el lomo baja del domo al ecuador, y
+    // la panza sube del punto más bajo al mismo ecuador. Las dos caras valen lo
+    // mismo en el canto (t=1), así que envolver por el flanco es continuo.
+    // Antes esto forzaba un descenso hasta el suelo en la franja exterior: eso
+    // era una PARED de ~22 unidades en 2 de ancho, y la hifa que la cruzaba se
+    // leía como un hilo colgando. Ya no hay que cruzarla: `soilContactXZ` sólo
+    // deja pasar a la tierra donde el tronco la toca de verdad.
+    const dome = RR * Math.sqrt(Math.max(0, 1 - t * t))
+    // Donde la panza queda enterrada, lo que hay ahí es suelo.
+    return Math.max(0, side < 0 ? A - dome : A + dome)
   }
 
   // ─── MAPA DE ALTURAS (LUT). Evaluar el drape muchas veces por arista exige
@@ -299,6 +297,18 @@ export function createFungusScene(container, cfg, agentNames = []) {
   function onLogXZ(x, z) {
     const [u, v] = worldToUV(x, z)
     return insideLog(u, v)
+  }
+  /** ¿El tronco TOCA la tierra a la altura de (x,z)? El tronco es un cilindro
+   * apoyado: sólo donde su panza llega a y=0 hay contacto, y sólo ahí una hifa
+   * puede pasar de la madera al suelo. En el resto el flanco es una pared y la
+   * hifa no baja: sigue bordeando el tronco por abajo hasta encontrar contacto.
+   * (Con el arco actual el centro NO toca; el contacto está hacia las puntas.) */
+  function soilContactXZ(x, z) {
+    const [u] = worldToUV(x, z)
+    const uc = Math.max(-halfLen, Math.min(halfLen, u))
+    const lr = logRAt(uc)
+    const axisAbove = lr * (1 - sink) * R * LOG_HEIGHT_SCALE + centerY(u)
+    return axisAbove <= lr * R * LOG_HEIGHT_SCALE
   }
 
   // ─── CORTEZA DE PLACAS. La corteza de un tronco viejo no son surcos
@@ -788,7 +798,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
   {
     const warmField = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture: 0.9, onLog: onLogXZ,
+      moisture: 0.9, onLog: onLogXZ, canLeave: soilContactXZ,
     }
     // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
     // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
@@ -921,13 +931,17 @@ export function createFungusScene(container, cfg, agentNames = []) {
       const y0 = netY(t.x, t.z, t.side) + 0.2
       const x0 = t.x * R, z0 = t.z * R
       // PENETRACIÓN: si la punta está sobre el tronco, una hifa se hunde en la
-      // madera — el hongo empieza a COMER el tronco por dentro, no solo por
-      // encima. Se apaga hacia adentro (queda dentro de la corteza). Desde la
-      // panza se hunde hacia ARRIBA: la madera está del otro lado.
+      // madera — el hongo come el tronco por dentro, no solo por encima. Va
+      // hacia el EJE del tronco, que es donde está la madera. Antes bajaba en Y
+      // a secas: sobre el flanco la madera no está abajo sino al costado, así
+      // que la hifa salía del tronco y quedaba COLGANDO EN EL AIRE.
       const [uu, vv] = worldToUV(t.x, t.z)
       if (surf > 0 && Math.abs(vv) < logRAt(Math.max(-halfLen, Math.min(halfLen, uu))) * 0.9) {
-        const into = (8 + rnd() * 10) * (t.side || 1)
-        frontBuf.push(x0, surf, z0, x0 + (rnd() - 0.5) * 2, Math.max(0, surf - into), z0 + (rnd() - 0.5) * 2,
+        const ax = logAxis(uu)
+        let dx = ax[0] - x0, dy = ax[1] - y0, dz = ax[2] - z0
+        const dn = Math.hypot(dx, dy, dz) || 1
+        const into = (3 + rnd() * 5) / dn
+        frontBuf.push(x0, y0, z0, x0 + dx * into, y0 + dy * into, z0 + dz * into,
           tint(base, fade * 0.5), tint(base, fade * 0.06))
       }
       for (let k = 0; k < FAN; k++) {
@@ -935,14 +949,24 @@ export function createFungusScene(container, cfg, agentNames = []) {
         const a = baseAng + spread + (rnd() - 0.5) * 0.25
         const len = (0.7 + rnd() * 0.9) * step
         const mx = x0 + Math.cos(a) * len, mz = z0 + Math.sin(a) * len
+        // Cada punto del penacho toma su altura de la superficie: el penacho se
+        // APOYA en la corteza o en la tierra. Dibujado a una altura fija salía
+        // como un abanico plano clavado en el aire al llegar al flanco.
+        const my = netY(mx / R, mz / R, t.side)
+        // Si el extremo cae por el otro lado del canto, la superficie da un
+        // salto y la hifa se dibujaría bajando en vertical hasta la tierra —
+        // otra vez el hilo colgando. Esa hifa simplemente no se dibuja: el
+        // penacho se detiene en el borde, que es donde se detiene de verdad.
+        if (Math.abs(my - y0) > len) continue
         // Tallo de la hifa (más brillante en la base, se apaga hacia la punta).
-        frontBuf.push(x0, y0, z0, mx, y0, mz, tint(base, fade * 0.7), tint(base, fade * 0.15))
+        frontBuf.push(x0, y0, z0, mx, my, mz, tint(base, fade * 0.7), tint(base, fade * 0.15))
         // Bifurcación dicotómica: dos ramitas finas abriéndose en la punta.
         const fl = len * 0.55
         for (const s of [-0.4, 0.4]) {
-          frontBuf.push(mx, y0, mz,
-            mx + Math.cos(a + s) * fl, y0, mz + Math.sin(a + s) * fl,
-            tint(base, fade * 0.15), tint(base, 0))
+          const bx = mx + Math.cos(a + s) * fl, bz = mz + Math.sin(a + s) * fl
+          const by = netY(bx / R, bz / R, t.side)
+          if (Math.abs(by - my) > fl) continue
+          frontBuf.push(mx, my, mz, bx, by, bz, tint(base, fade * 0.15), tint(base, 0))
         }
       }
     }
@@ -1037,7 +1061,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
         ]
         const fade = edgeFade(t.x, t.z)
         tipsCloud.pos[i * 3] = t.x * R
-        tipsCloud.pos[i * 3 + 1] = netY(t.x, t.z, t.side) - 0.7 * (t.side || 1)
+        tipsCloud.pos[i * 3 + 1] = netY(t.x, t.z, t.side)
         tipsCloud.pos[i * 3 + 2] = t.z * R
         tipsCloud.col[i * 3] = glow[0] * fade
         tipsCloud.col[i * 3 + 1] = glow[1] * fade
@@ -1183,7 +1207,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
 
     const field = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture, onLog: onLogXZ,
+      moisture, onLog: onLogXZ, canLeave: soilContactXZ,
     }
     const events = []
     const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
