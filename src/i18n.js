@@ -24,8 +24,24 @@ export const WEATHER_ES = {
   'heavy rain': 'lluvia fuerte',
 }
 
-// Mundo CÉLULA: el "día" es el ciclo celular y el "clima" es el medio.
+// Mundo CÉLULA: el "día" es el ritmo funcional del macrófago (spec
+// 2026-08-11-ciclo-y-division-celula.md §3) y el "clima" es el medio.
 export const CELL_PHASE_ES = {
+  'resting': 'reposo',
+  'surveillance': 'vigilancia',
+  'patrolling': 'patrulla',
+  'chemotaxis': 'quimiotaxis',
+  'alert': 'alerta',
+  'hunting': 'caza',
+  'engulfing': 'fagocitosis',
+  'digesting': 'digestión',
+  'antigen presentation': 'presentación de antígeno',
+  'cytokine secretion': 'secreción de citoquinas',
+  'efferocytosis': 'barrido de restos',
+  'recovery': 'recuperación',
+  // Entradas viejas del ciclo celular (ya no las produce ecosystem.js: el
+  // ciclo pasó a sim/cellCycle.js). Se conservan porque test/cellNarration.test.js
+  // las sigue usando para probar la traducción genérica de fase.
   'G1 early': 'G1 temprana',
   'G1': 'G1',
   'G1/S checkpoint': 'control G1/S',

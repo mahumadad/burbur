@@ -199,6 +199,26 @@ export const CELL_LEXICON = {
   conflict: (ctx, ev) => (ev.agentType === 'invader'
     ? { log: `El lamelipodio se pliega; ${ev.agent} queda dentro. El fagosoma se sella.`, short: `fagocitosis · ${ev.agent}` }
     : { log: `${cap(ev.agent)} se traba en la contracción y se detiene.`, short: `${ev.agent} se detiene` }),
+  // Momentos del ciclo celular real (sim/cellCycle.js §5 del spec): son
+  // acontecimientos ocasionales, no la plantilla genérica de `moment`.
+  byKind: {
+    enter: () => ({
+      log: 'El núcleo se prepara: la célula entra en ciclo.',
+      short: 'entra en ciclo',
+    }),
+    commit: () => ({
+      log: 'Cruza el punto de restricción. Ya no hay vuelta atrás.',
+      short: 'punto de restricción',
+    }),
+    abort: () => ({
+      log: 'La señal se apaga; la célula vuelve a la quiescencia.',
+      short: 'vuelve a G0',
+    }),
+    divide: () => ({
+      log: 'El anillo contráctil aprieta. La célula se parte en dos.',
+      short: 'división',
+    }),
+  },
 }
 
 // ── MICELIO ──────────────────────────────────────────────────────────────────
@@ -316,6 +336,12 @@ function action(type, rand, lex, name) {
 export function narrate(ev, ctx, rand = Math.random, lex = FOREST_LEXICON) {
   const name = ev.agent
   const t = ev.agentType || lex.fallbackType
+
+  // Los acontecimientos grandes de un mundo (el ciclo celular, por ejemplo)
+  // se narran por `kind`, ANTES que por tipo — necesitan frase propia, no la
+  // plantilla genérica de 'moment'. Retro-compatible: sin `byKind` en el
+  // léxico, no pasa nada y sigue el camino de siempre.
+  if (ev.kind && lex.byKind && lex.byKind[ev.kind]) return lex.byKind[ev.kind](ctx, ev, rand)
 
   // Un léxico puede reemplazar la plantilla de cualquier tipo de evento.
   const override = lex[ev.type]

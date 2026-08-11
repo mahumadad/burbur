@@ -190,6 +190,11 @@ export function createPond(container, cfg, agentNames = []) {
     // x, z, radio, fuerza — sembrados en la superficie por los elementos que pasan.
     uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, 0)) },
   }
+  // MAREA: el nivel del agua sube y baja despacio (curTide se recalcula por frame
+  // en update); el plano de agua, los troncos y los nenúfares lo siguen, y la
+  // línea de agua trepa por las rocas/juncos fijos (borde mojado).
+  let waterMesh = null
+  let curTide = 0
   {
     const geo = new THREE.PlaneGeometry(R * 2.4, R * 2.4, 150, 150)
     geo.rotateX(-Math.PI / 2)
@@ -251,6 +256,7 @@ export function createPond(container, cfg, agentNames = []) {
     const water = new THREE.Mesh(geo, waterMat)
     water.renderOrder = 1
     scene.add(water)
+    waterMesh = water
   }
 
   // ─── ISLAS (It): elipsoide de icosfera deformada + arena + espuma + ramas ──
@@ -509,6 +515,37 @@ export function createPond(container, cfg, agentNames = []) {
   }
 
   // ─── TRONCO(S) DE ÁRBOL flotando en el agua ───────────────────────────────
+  // Musgo sobre el tronco (ref: alikim "secret pond"): cúmulos verdes abultados
+  // pegados a la cara SUPERIOR del tronco. Van como Points HIJO del grupo del
+  // tronco (el shader de puntos usa modelViewMatrix) → flotan/giran con él. Usan
+  // el mismo mossClump que corona las rocas, así el musgo se lee igual en todo.
+  function addLogMoss(group) {
+    const mesh0 = group.children[0]                 // la malla oscura del tronco
+    const gp = mesh0.geometry.attributes.position
+    const gn = mesh0.geometry.attributes.normal
+    const top = []                                  // vértices de la cara de arriba
+    for (let i = 0; i < gp.count; i++) {
+      if (gn.getY(i) > 0.32 && gp.getY(i) > -0.25) top.push(i)
+    }
+    if (!top.length) return
+    const mp = [], mc = [], ms = [], mph = []
+    const pushM = (x, y, z, col, size) => { mp.push(x, y, z); mc.push(col[0], col[1], col[2]); ms.push(size); mph.push(0) }
+    const clumps = 16 + (q() * 12 | 0)              // cojín tupido a lo largo del lomo
+    for (let i = 0; i < clumps; i++) {
+      const vi = top[q() * top.length | 0]
+      mossClump(pushM, gp.getX(vi), gp.getY(vi), gp.getZ(vi), {
+        radius: 0.6 + q() * 1.2, height: 0.28 + q() * 0.42, density: 0.7 + q() * 0.6, size: 0.13 + q() * 0.07,
+      })
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mp), 3))
+    geo.setAttribute('hcol', new THREE.BufferAttribute(new Float32Array(mc), 3))
+    geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(ms), 1))
+    geo.setAttribute('hphs', new THREE.BufferAttribute(new Float32Array(mph), 1))
+    const pts = new THREE.Points(geo, draw.pointMaterial)
+    pts.frustumCulled = false
+    group.add(pts)
+  }
   const floatLogs = []
   for (let li = 0; li < 1 + (q() < 0.5 ? 1 : 0); li++) {
     // Mismo tronco caído orgánico del bosque (tubo ahusado + ramas), flotando.
@@ -524,6 +561,7 @@ export function createPond(container, cfg, agentNames = []) {
     }
     g.position.set(lx, ht, lz) // tronco al ras del agua
     g.rotation.y = q() * 6.2832
+    addLogMoss(g)              // cojín de musgo sobre el lomo
     scene.add(g)
     floatLogs.push({ g, drift: q() * 6.2832, spin: (q() - 0.5) * 0.04, phase: q() * 6.2832 })
   }
@@ -544,9 +582,146 @@ export function createPond(container, cfg, agentNames = []) {
       }
       if (blocked) L.drift += Math.PI + (q() - 0.5) * 0.6
       else { L.g.position.x = nx; L.g.position.z = nz }
-      L.g.position.y = ht + Math.sin(t * 0.9 + L.phase) * 0.1   // flota al ras
+      L.g.position.y = ht + curTide + Math.sin(t * 0.9 + L.phase) * 0.1   // flota al ras, sigue la marea
       L.g.rotation.y += L.spin * step
       L.g.rotation.x = 0; L.g.rotation.z = 0                     // siempre plano
+    }
+  }
+
+  // ─── NENÚFARES: hoja de nenúfar + flor de loto de PÉTALOS en CÚPULA (mapeo
+  // exacto del código de alikim "secret pond", ver docs/alikim-tronco-musgo.md +
+  // el nivel blossom): ~40 pétalos repartidos en bandas (una CÚPULA), sépalos
+  // VERDES abajo, centro AMARILLO, pétalos interiores más pálidos. Floración:
+  // al abrir los pétalos se inclinan hacia afuera Y SE ENCOGEN, así que cerrados
+  // forman un capullo gordo y apretado (alikim: sc - 0.5·bloom). Hoja: borde que
+  // CAE (se inunda), degradado verde-amarillo y venas radiales. Sigue la marea.
+  const LOTUS_COLS = [
+    [1.0, 0.45, 0.12], [0.30, 0.78, 1.0], [1.0, 0.28, 0.66], [0.62, 0.42, 1.0], [1.0, 0.55, 0.82],
+  ]
+  const lotusMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true })
+  snowMats.push(lotusMat)
+  const mixW = (c, p) => [c[0] + (1 - c[0]) * p, c[1] + (1 - c[1]) * p, c[2] + (1 - c[2]) * p]
+  // Pétalo: almendra puntiaguda apuntando +Y (capullo vertical), ahuecada (mids
+  // hacia -Z, como el makeZ del loto de alikim). Color por vértice base→punta.
+  function petalGeom(len, wid, lo, hi) {
+    const mid = [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5, (lo[2] + hi[2]) * 0.5]
+    const cup = len * 0.14
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      0, 0, 0, wid, len * 0.42, -cup, 0, len, 0, -wid, len * 0.42, -cup,
+    ]), 3))
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array([
+      lo[0], lo[1], lo[2], mid[0], mid[1], mid[2], hi[0], hi[1], hi[2], mid[0], mid[1], mid[2],
+    ]), 3))
+    g.setIndex([0, 1, 2, 0, 2, 3])
+    return g
+  }
+  // Hoja de nenúfar: disco festoneado con muesca en V; el BORDE CAE (rim negativo
+  // → se inunda al ras del agua). Degradado centro amarillo-verde → borde verde,
+  // con venas radiales (oscurecimiento cada pocas divisiones). notch=null → disco
+  // lleno (para el centro de la flor); cen/edge = colores.
+  function padGeom(rad, notch, cen, edge, dip) {
+    const full = notch === null, gap = full ? 0 : 0.5
+    const seg = full ? 12 : 32
+    const pos = [0, 0, 0], cols = [cen[0], cen[1], cen[2]], idx = []
+    let prev = -1
+    for (let s = 0; s <= seg; s++) {
+      const a = (full ? 0 : notch + gap / 2) + (s / seg) * (6.2832 - gap)
+      const r = rad * (0.9 + 0.1 * Math.sin(a * 5))
+      const vein = !full && s % 3 === 0 ? 0.6 : 1
+      pos.push(Math.cos(a) * r, -(dip || 0) * rad, Math.sin(a) * r)
+      cols.push(edge[0] * vein, edge[1] * vein, edge[2] * vein)
+      const vi = pos.length / 3 - 1
+      if (prev >= 0) idx.push(0, prev, vi)
+      prev = vi
+    }
+    if (full) idx.push(0, prev, 1)
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3))
+    g.setIndex(idx)
+    return g
+  }
+  // Bandas de pétalos (cúpula), de fuera (sépalos verdes, muy tumbados) a dentro
+  // (pequeños, casi verticales, pálidos). th = inclinación abierta de la banda.
+  const BANDS = [
+    { n: 7, th: 1.5, lf: 1.15, wf: 0.36, sepal: true },
+    { n: 9, th: 1.12, lf: 1.06, wf: 0.34, pale: 0.0 },
+    { n: 8, th: 0.88, lf: 0.92, wf: 0.33, pale: 0.14 },
+    { n: 7, th: 0.64, lf: 0.78, wf: 0.32, pale: 0.34 },
+    { n: 6, th: 0.42, lf: 0.62, wf: 0.3, pale: 0.54 },
+    { n: 4, th: 0.24, lf: 0.48, wf: 0.28, pale: 0.74 },
+  ]
+  const SEPAL_LO = [0.08, 0.24, 0.05], SEPAL_HI = [0.16, 0.44, 0.1]
+  const PAD_CEN = [0.5, 0.6, 0.1], PAD_EDGE = [0.14, 0.46, 0.11]
+  const lilies = []
+  {
+    const LN = 7 + (q() * 3 | 0)
+    for (let i = 0; i < LN; i++) {
+      // Sobre AGUA ABIERTA (no dentro de una isla), como los troncos.
+      let lx = 0, lz = 0, ok = false
+      for (let t = 0; t < 24 && !ok; t++) {
+        const a = q() * 6.2832, rr = 8 + q() * (mt * 0.72)
+        lx = Math.cos(a) * rr; lz = Math.sin(a) * rr
+        ok = Math.hypot(lx, lz) < mt * 0.9
+        if (ok) for (const L2 of lobes) { const dx = lx - L2.x, dz = lz - L2.z, rad = Math.max(L2.rx, L2.rz) * 1.1 + 3; if (dx * dx + dz * dz < rad * rad) { ok = false; break } }
+      }
+      const group = new THREE.Group()
+      group.position.set(lx, ht, lz)
+      // Hoja: borde cae 0.14·rad → se inunda al ras del agua.
+      group.add(new THREE.Mesh(padGeom(2.4 + q() * 1.8, q() * 6.2832, PAD_CEN, PAD_EDGE, 0.14), lotusMat))
+      let flowerGroup = null, petals = null
+      if (q() < 0.72) {
+        const col = LOTUS_COLS[q() * LOTUS_COLS.length | 0]
+        const fh = 1.7 + q() * 1.1
+        flowerGroup = new THREE.Group()
+        flowerGroup.position.y = 0.34            // la flor EMERGE sobre el agua
+        petals = []
+        for (const B of BANDS) {
+          const hi = B.sepal ? SEPAL_HI : mixW(col, B.pale)
+          const lo = B.sepal ? SEPAL_LO : [hi[0] * 0.5, hi[1] * 0.5, hi[2] * 0.5]
+          const geom = petalGeom(fh * B.lf, fh * B.wf, lo, hi)
+          const off = q() * 6.2832
+          for (let p = 0; p < B.n; p++) {
+            const m = new THREE.Mesh(geom, lotusMat)
+            flowerGroup.add(m)
+            petals.push({ m, az: (p / B.n) * 6.2832 + off, th: B.th })
+          }
+        }
+        // Centro amarillo (receptáculo/estambres).
+        const cen = new THREE.Mesh(padGeom(fh * 0.2, null, [1, 0.95, 0.55], [1, 0.82, 0.2], 0), lotusMat)
+        cen.position.y = fh * 0.06
+        flowerGroup.add(cen)
+        group.add(flowerGroup)
+      }
+      scene.add(group)
+      lilies.push({ group, flowerGroup, petals, phase: q(), period: 12 + q() * 10, bob: q() * 6.2832 })
+    }
+  }
+  const _pQ = new THREE.Quaternion(), _pR = new THREE.Quaternion()
+  const _yAx = new THREE.Vector3(0, 1, 0), _xAx = new THREE.Vector3(1, 0, 0)
+  function updateLilies() {
+    const y0 = ht + curTide
+    for (let i = 0; i < lilies.length; i++) {
+      const L = lilies[i]
+      // Hoja al ras del agua (+3cm para no pelear con el plano) y sigue la marea.
+      L.group.position.y = y0 + 0.03 + Math.sin(clock * 0.8 + L.bob) * 0.04
+      if (!L.flowerGroup) continue
+      // Floración (alikim: q = quaternFromETh(e, -th - bloom)): el bloom se SUMA
+      // a la inclinación base de cada banda, no la reemplaza. Así los sépalos
+      // verdes (th grande) siguen abiertos SIEMPRE → el collar de hojas que
+      // envuelve el loto no se pierde al cerrar; sólo los pétalos internos
+      // (th chico) suben a capullo. Al abrir, todos se inclinan +bloom y se encogen.
+      const o = 0.5 - 0.5 * Math.cos((clock / L.period + L.phase) * 6.2832) // 0 cerrado → 1 abierto
+      const bloom = -0.1 + o                        // alikim: [-0.1, 0.9]
+      const petScale = 1 - 0.34 * o
+      for (const P of L.petals) {
+        const spread = Math.max(0.05, P.th + bloom) // th de banda + bloom; sépalos quedan abiertos
+        _pR.setFromAxisAngle(_yAx, P.az)
+        _pQ.setFromAxisAngle(_xAx, spread)
+        P.m.quaternion.multiplyQuaternions(_pR, _pQ)
+        P.m.scale.setScalar(petScale)
+      }
     }
   }
 
@@ -635,12 +810,12 @@ export function createPond(container, cfg, agentNames = []) {
     const top = lobeTop(px, pz)
     return { x: px, z: pz, y: (top > -Infinity ? top : ht) + 1.2 }
   }
-  function huntHerons(step, predations) {
+  function huntHerons(step, predations, eco) {
     const F = fish.state.fish
     // Refugio con lluvia (paridad con ciudad/bosque vía sim/perch.js): a más
     // lluvia, las garzas prefieren quedarse posadas y casi no salen a pescar.
-    // Con rain=0 todo queda idéntico al comportamiento seco.
-    const shelter = eco.rain || 0
+    // Con rain=0 (o sin eco) todo queda idéntico al comportamiento seco.
+    const shelter = (eco && eco.rain) || 0
     for (let i = 0; i < n; i++) {
       const a = agents[i]
       if (!a.hunter) continue
@@ -829,14 +1004,20 @@ export function createPond(container, cfg, agentNames = []) {
     waterUniforms.uTime.value = clock
     if (eco) scene.fog.density = 0.0009 + eco.fog * 0.0028
 
+    // Marea lenta: dos senos → el nivel sube y baja de forma orgánica (~±0.55).
+    // El plano de agua sigue la marea; troncos y nenúfares leen curTide.
+    curTide = Math.sin(clock * 0.11) * 0.4 + Math.sin(clock * 0.043 + 1.3) * 0.16
+    if (waterMesh) waterMesh.position.y = curTide
+
     const predations = []
     mapPositions(step, clock)
     fish.update(step, clock)      // mueve los peces primero
-    huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
+    huntHerons(step, predations, eco)  // garzas pican (puede sobreescribir su y)
     crossSky(step)                // un ave cruza el cielo alto de vez en cuando
     updateBugs(step, clock)
     updateFrogs(step)
     updateLogs(step, clock)
+    updateLilies()
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
