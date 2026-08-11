@@ -1,7 +1,8 @@
 # Diseño del mundo NEURONA (`neuron`)
 
 **Fecha:** 2026-08-11
-**Estado:** diseño **propuesto** — pendiente de revisión del usuario. Sin código todavía.
+**Estado:** diseño **aprobado** — las 8 decisiones de §10 quedaron cerradas con el usuario el
+2026-08-11. Sin código todavía: se implementa a partir de F0 (§9.5).
 **Alcance:** un sexto mundo del registro, hermano de `land` / `water` / `city` / `cell` / `fungus`,
 cuyo tema central es **el impulso eléctrico: cómo viaja, cómo se transmite y qué se mueve**.
 **Encuadre ya cerrado por el usuario:** opción **B — una MICRORED de neuronas** conectadas por
@@ -16,7 +17,8 @@ transmisión sináptica cuántica, estados de sueño). Los números son valores 
 redondeados, para calibrar proporciones — no para simular física.
 
 > Convención del doc (la misma del spec de célula): cada decisión abierta se presenta con
-> **opciones + recomendación marcada ⭐**. La sección §10 junta todas las decisiones abiertas.
+> **opciones + recomendación marcada ⭐**, y §10 junta el fallo de todas. Las opciones descartadas
+> se conservan escritas: sirven para poder volver sobre una decisión sabiendo qué se pesó.
 
 ---
 
@@ -138,12 +140,34 @@ visible a este mundo**:
 | **Kuramoto** (el de hoy) | Continuo: `sin(θⱼ − θᵢ)` sumado sobre vecinos, todo el tiempo | Nada. La influencia es un término matemático sin cuerpo |
 | **Mirollo–Strogatz** (el de este mundo) | **Por pulsos**: cuando `j` dispara, empuja la fase de `i` de golpe | El pulso **es un objeto**: nace, viaja por el axón, tarda, y llega |
 
-El mundo neurona usa el segundo. Consecuencias:
+El mundo neurona usa **los dos**, y no por indecisión: el cerebro también usa los dos, y son cosas
+distintas (decisión 4 de §10, cerrada el 2026-08-11).
 
-1. **El acoplamiento por proximidad se apaga** (`couplingK: 0` en la config de swarm del mundo).
-   Sin esto habría sincronía fantasma: hoy `updateSwarm` acopla por distancia euclídea dentro de un
-   volumen invisible de 12×7×10, que en este mundo no significa nada.
-2. **Todo el acoplamiento entra por las sinapsis**: al llegar el neurotransmisor a la postsináptica,
+- **Por pulsos = sinapsis química.** El 99 % de las conexiones corticales. Es la que tiene cuerpo
+  visible: vesículas, hendidura, retardo, fallos. Es el sujeto del mundo.
+- **Continuo (Kuramoto débil) = acoplamiento eléctrico.** Las **uniones gap** entre interneuronas
+  son citoplasma compartido: la corriente pasa sin umbral ni retardo, de forma continua —
+  literalmente el término `sin(θⱼ − θᵢ)`. Se suma el **acoplamiento efáptico** (el campo eléctrico
+  local que las neuronas vecinas se imponen entre sí sin tocarse). Ninguno de los dos se dibuja como
+  objeto, porque ninguno de los dos *es* un objeto: son un fondo que empuja a la red hacia el ritmo.
+
+Reparto propuesto: `couplingK ≈ 0.35` (contra 2.2 del bosque) para el término continuo, y el grueso
+del acoplamiento por los pulsos. El continuo da un piso de ritmo que hace que la red nunca se vea
+del todo azarosa; los pulsos hacen todo lo que se ve.
+
+**Un requisito que el híbrido impone y conviene no pasar por alto:** el término continuo tiene que
+acoplar **por la topología sináptica**, no por proximidad. Hoy `updateSwarm` construye la adyacencia
+por distancia euclídea dentro de un volumen invisible de 12×7×10 con posiciones a la deriva — en la
+célula eso da un latido de fondo aceptable, pero acá produciría sincronía fantasma entre neuronas
+que no se conocen, justo el efecto que arruinaría la lectura de las ondas. Cuesta dos líneas
+arreglarlo (§9.4a2).
+
+Consecuencias del modelo:
+
+1. **La adyacencia es la red**, no la proximidad: el Kuramoto débil corre sobre el mismo grafo que
+   las sinapsis, con las gap junctions concentradas entre interneuronas (que es donde están de
+   verdad).
+2. **El grueso del acoplamiento entra por las sinapsis**: al llegar el neurotransmisor a la postsináptica,
    el mundo hace `swarm.phases[j] += w` — positivo con glutamato, negativo con GABA. Es un PSP
    (potencial postsináptico) y es una línea de código.
 3. **El retardo es el sujeto.** Entre que `i` dispara y que `j` recibe pasan cientos de ms de
@@ -397,9 +421,10 @@ Sin excepciones respecto de `2026-08-10-lenguaje-visual.md`:
 - Este mundo es, si acaso, **el que mejor encaja con el look "matrix"**: una red de nodos y
   conexiones con pulsos recorriéndola es la imagen que el estilo estaba buscando desde el principio.
 
-**Cámara:** a diferencia de la célula (que apagó `autoRotate` porque la autorotación tapaba el
-deslizamiento del sustrato), aquí **se mantiene la órbita con respiración**. La red es fija; el giro
-lento ayuda a leer la profundidad de los axones que se cruzan.
+**Cámara: órbita con respiración, encendida** (decisión 8, cerrada). A diferencia de la célula —que
+apagó `autoRotate` porque la autorotación tapaba el deslizamiento del sustrato—, acá la red es fija:
+no hay movimiento propio que el giro pueda tapar, y el giro lento ayuda a leer la profundidad de los
+axones que se cruzan. Es el comportamiento por defecto del stage: cero código.
 
 ### 5.2 Geometría por elemento
 
@@ -452,10 +477,11 @@ una línea fija. Es la misma resolución que la célula usó para magenta/pink (
 **el movimiento desambigua antes que el color**.
 
 **Color de acento del mundo** (`--accent` del HUD): los cinco existentes son `#b6d184` land,
-`#aacdff` water, `#fab75e` city, `#c9a6ff` cell, `#9cc47a` fungus. Para neurona se propone
-**`#f2a0c8`** (rosa pastel): no colisiona con ninguno, y el rosa/magenta es la convención de tinción
-en histología neural (Nissl, Golgi-Cox invertido). Es color nuevo, no de la paleta — queda marcado
-como decisión propia, igual que el violeta de la célula.
+`#aacdff` water, `#fab75e` city, `#c9a6ff` cell, `#9cc47a` fungus. Para neurona queda
+**`#f2a0c8`** (rosa pastel, decisión 6 cerrada): no colisiona con ninguno, y el rosa/magenta es la
+convención de tinción en histología neural. Descartados el azul eléctrico `#8fd0ff` (se confundiría
+con la laguna en el selector) y el ámbar `#ffd166` (cerca del naranjo de la ciudad). Es color nuevo,
+no de la paleta — queda marcado como decisión propia, igual que el violeta de la célula.
 
 ---
 
@@ -491,7 +517,11 @@ coro del alba (todos cantan); en la célula, la división. Aquí hay dos y son c
 `REM` es **máxima actividad con mínima sincronía** (todos disparan, nadie de acuerdo). El mundo
 oscila entre orden y ruido, que es exactamente lo que hace un cerebro dormido.
 
-**`temperature`:** 37 fijo, como la célula. No hay estación (`season: null` en el `hud` del registro).
+**La fila de métrica del HUD muestra la banda dominante en Hz**, no la temperatura (decisión 7,
+cerrada). Es el dato que *define* el estado y el que hace legible la tabla de arriba: se ve
+`δ 1 Hz` en sueño profundo y `γ 40 Hz` en atención, y el número baja y sube con el hipnograma. La
+temperatura sería un 37 inmóvil, una fila muerta. Cuesta ~6 líneas repartidas entre `hud.js` y
+`main.js` (§9.4e). No hay estación (`season: null`).
 
 **La columna "sincronía" no la produce `ecosystem.js`** (su `phaseData` solo aporta `act`, `temp`,
 `light`, `gain`). La produce un módulo puro propio, `src/sim/brainstate.js` (§9.3), que a partir de
@@ -519,7 +549,7 @@ reconocible que puede tener el mundo — la red quiere dormirse y no la dejan.
 
 | Campo del core | En el bosque | En la neurona |
 |---|---|---|
-| `temperature` | °C del aire | 37 fijo (sin estación) |
+| `temperature` | °C del aire | **No se usa.** Su fila del HUD pasa a mostrar la banda dominante en Hz, que la alimenta el mundo (§9.4e), no el ecosistema |
 | `rain` | Lluvia | **Densidad de actividad multiunidad de fondo**: los spikes de las neuronas que no están en cuadro. Es lo que suena a lluvia (§7) |
 | `fog` | Niebla | Densidad del neuropilo: cuánto se difumina el fondo |
 | `light` / `gain` | Luz del día | Frío y apagado en sueño profundo, brillante y neutro en vigilia/REM |
@@ -702,10 +732,15 @@ El mundo neurona entra como una entrada más:
 {
   id: 'neuron', label: 'Network ecosystem', name: 'Neurona', accent: '#f2a0c8', ready: true,
   census: NEURON_CENSUS, lexicon: NEURON_LEXICON, ecosystem: NEURON_PROFILE,
-  hud: { time: 'ESTADO', weather: 'NEUROMODULADOR', season: null },
+  // La fila de métrica muestra la banda dominante, no la temperatura (§6.1).
+  hud: { time: 'ESTADO', weather: 'NEUROMODULADOR', season: null,
+         metric: { label: 'RITMO', unit: 'Hz' } },
+  // Los slots inhibitorios y los de glía reciben nombres de su clase (§9.4b).
+  slotClass: (i) => (i < 10 ? 'neuron' : i < 12 ? 'interneuron' : 'glia'),
   audio: { rain: false, insects: false, owl: false },
-  // Acoplamiento continuo apagado: acá el acoplamiento entra por las sinapsis (§2).
-  swarm: { couplingK: 0, omegaSpread: 0.35 },
+  // Acoplamiento HÍBRIDO (§2): el continuo baja a un piso (las uniones gap y el
+  // campo local) y el grueso entra por las sinapsis, que sí se ven.
+  swarm: { couplingK: 0.35, omegaSpread: 0.35 },
   build: (container, cfg, names) => createNeuronScene(container, cfg, names),
 }
 ```
@@ -766,7 +801,7 @@ Todos acotados y retro-compatibles, pero hay que nombrarlos antes de empezar.
 **(a) Config de swarm por mundo — el único cambio imprescindible.**
 Hoy `main.js:59` hace `createSwarm(CONFIG.fireflies)` y `main.js:172` hace
 `updateSwarm(swarm, CONFIG.fireflies, dt)`: el swarm es idéntico en los seis mundos. La neurona
-necesita `couplingK: 0` (§2.1) y un `omegaSpread` mayor. Cambio propuesto:
+necesita `couplingK: 0.35` (§2) y un `omegaSpread` mayor. Cambio propuesto:
 
 ```js
 // buildWorld
@@ -782,13 +817,27 @@ Tres líneas, sin efecto sobre los mundos que no declaran `swarm`. **Y es el mis
 habilita la fase posterior de ~40 neuronas** (`swarm: { count: 40 }`), lo que lo hace doblemente
 barato.
 
-**(b) Partición de slots del censo por clase — recomendado, no bloqueante.**
+**(a2) Adyacencia opcional en el swarm — lo pide el acoplamiento híbrido.**
+`updateSwarm` reconstruye la adyacencia por proximidad en cada frame (`buildAdjacency`, O(n²) sobre
+posiciones a la deriva). El término continuo del híbrido tiene que correr sobre la **topología
+sináptica** (§2), así que:
+
+```js
+// fireflies.js, dentro de updateSwarm
+const adjacency = swarm.adjacency || buildAdjacency(pos, n, cfg.neighborRadius)
+```
+
+Una línea. El mundo escribe `swarm.adjacency` una vez, con el grafo de `netwire.js`. Los cinco
+mundos existentes no la declaran y siguen exactamente igual. Beneficio lateral: con adyacencia fija
+se salta el O(n²) por frame.
+
+**(b) Partición de slots del censo por clase — decisión 5, cerrada: se generaliza.**
 `createCensus(source, count, rand, isAerial)` sabe partir los slots en dos grupos, pero el criterio
 está cableado al tipo `flying_animal` del bosque (`agents.js:207`). La neurona necesita exactamente
 la misma mecánica con otro criterio: que los slots inhibitorios reciban nombres de
 `interneuron`, los de glía nombres de `glia`, y el resto `neuron`. Dos opciones:
 
-- **B1 ⭐ recomendada — generalizar el gancho.** Cambiar `isAerial` por un
+- **B1 ✅ elegida — generalizar el gancho.** Cambiar `isAerial` por un
   `slotClass(i, cfg) → tipo` opcional; si el mundo lo declara, el slot se llena del subconjunto del
   censo con ese tipo (con fallback al conjunto general si está vacío). ~8 líneas en `agents.js`,
   y `land`/`water`/`city` se adaptan devolviendo `'flying_animal'` o `null` — comportamiento
@@ -807,14 +856,22 @@ la misma mecánica con otro criterio: que los slots inhibitorios reciban nombres
 6/s hacia `audio.triggerFlash`. Añadir `p.type === 'spike'` → `audio.spike(...)` con bucket propio
 más alto (~20/s). ~4 líneas, en el mismo bloque que ya existe.
 
-**(e) Nada más.** No hace falta tocar `stage.js`, `engine/*`, el HUD, el selector, el motor de
-eventos ni el narrador: las tres parametrizaciones que la célula y el micelio necesitaron
-(`setProfile`, léxico por mundo, `hud` por mundo) **ya están hechas y en uso**.
+**(e) HUD: la fila de métrica, parametrizable.** `createHud` cablea la etiqueta `TEMPERATURA` con
+unidad `°C` y la alimenta desde `eco.temperature`. Este mundo muestra ahí la **banda dominante en
+Hz** (decisión 7, §6.1), que no la produce el ecosistema sino el mundo. Dos piezas:
 
-**Menor, opcional:** el HUD fija la etiqueta `TEMPERATURA` con unidad `°C`. Mostrar en su lugar la
-**banda dominante en Hz** sería mejor para este mundo, pero pide etiqueta y unidad parametrizables
-en `createHud` — la misma mejora que la célula dejó anotada para el pH y que sigue sin ser
-bloqueante. Mientras tanto: 37 °C.
+- **`hud.js`**: `setWorld(hud)` ya renombra `time`/`weather`/`season`; se le suma `metric`
+  (`{ label, unit }`, default `{ label: 'TEMPERATURA', unit: '°C' }`), más un `setMetric(v)` que
+  escribe el valor. ~4 líneas, sin efecto en los mundos que no lo declaran.
+- **`main.js`**: si el mundo expone `scene.metric()`, el host llama `hud.setMetric(scene.metric())`
+  en el frame; si no, sigue mostrando `eco.temperature` como hoy. ~2 líneas.
+
+Es la misma mejora que la célula dejó anotada para el pH: la resuelve este mundo y queda disponible
+para el resto.
+
+**(f) Nada más.** No hace falta tocar `stage.js`, `engine/*`, el selector, el motor de eventos ni el
+narrador: las tres parametrizaciones que la célula y el micelio necesitaron (`setProfile`, léxico
+por mundo, `hud` por mundo) **ya están hechas y en uso**.
 
 ### 9.5 Fases sugeridas de implementación
 
@@ -824,7 +881,7 @@ Con criterio de verificación por fase. Tests: `npx vitest run --exclude '**/.cl
 |---|---|---|
 | **F0** | Módulos puros sin render: `netwire.js` + `spikes.js` + `synapse.js` con sus tests. No depende de nada del engine, se puede hacer primero | Tests verdes: la red queda conectada; un spike mielinizado llega antes que uno amielínico; el pool se agota y se repone; el GABA entrega peso negativo |
 | **F1** | Red estática sobre `createStage`: somas, dendritas (mycelium congelado), axones con mielina y nodos, terminales, neuropilo, capilar. `ready: true` en el registro | Se cambia de mundo y se ve una red reconocible; sin errores de consola; `dispose` limpio al volver a `land` |
-| **F2** | **Los spikes se ven**: swarm con `couplingK: 0`, disparo desde el cono axónico, propagación por el axón (salto vs deslizamiento), refractario. Requiere §9.4a | El pulso recorre el axón y se ve la diferencia entre los dos tipos de cable |
+| **F2** | **Los spikes se ven**: swarm con `couplingK` bajo y adyacencia sináptica, disparo desde el cono axónico, propagación por el axón (salto vs deslizamiento), refractario. Requiere §9.4a y §9.4a2 | El pulso recorre el axón y se ve la diferencia entre los dos tipos de cable; el piso de ritmo continuo no tapa los pulsos |
 | **F3** | **La sinapsis funciona**: calcio, liberación estocástica, vesículas que se gastan, neurotransmisor difundiendo, receptores, empujón de fase. La red se acopla de verdad | Un disparo provoca (a veces) el siguiente; se ven fallos de liberación; el GABA apaga somas visiblemente |
 | **F4** | Estados cerebrales: `NEURON_PROFILE` + `brainstate.js` + husos + estados UP/DOWN + narrador propio cableado | El HUD muestra los estados; el log narra en vocabulario neural; en N3 la red late y se calla entera |
 | **F5** | Sonido propio: clicks de spike, throb del drone en la banda dominante, voces de evento. Requiere §9.4c y §9.4d | Suena a registro multiunidad real; en delta se siente el pulso; el silencio DOWN se oye |
@@ -848,20 +905,21 @@ compartido.
 
 ---
 
-## 10. Decisiones abiertas — resumen
+## 10. Decisiones tomadas
 
-Todas tienen recomendación; ninguna bloquea empezar por F0.
+Cerradas con el usuario el **2026-08-11**. Ya no son opciones: son el marco del que cuelga todo lo
+anterior.
 
-| # | Decisión | Opciones | Recomendación |
-|---|---|---|---|
-| 1 | **Cuántas neuronas** | 8 / **12+6 glía** / 18 / ~40 | ⭐ **12 neuronas + 6 astrocitos** (§3.0). Cada sinapsis se ve, los 18 slots tienen identidad, la proporción E/I queda casi real. ~40 queda agendado y su costo ya está acotado |
-| 2 | **Detalle de la sinapsis** | Zoom de cámara / **escala exagerada** / inset 2D | ⭐ **Escala exagerada declarada + detalle bajo demanda** (§1). No toca la cámara; el detalle fino solo aparece en las sinapsis activas |
-| 3 | **Topología** | Aleatoria / **por distancia** / mundo pequeño | ⭐ **Dependiente de la distancia**, grado medio 2.5 (§4.1). Es lo que produce ondas viajeras sin programarlas |
-| 4 | **Acoplamiento** | Kuramoto continuo / **pulsos (Mirollo–Strogatz)** | ⭐ **Por pulsos, con `couplingK: 0`** (§2). Es lo que le da cuerpo visible al acoplamiento |
-| 5 | **Slots del censo** | **Generalizar `isAerial`** / dejarlo | ⭐ **Generalizar** a `slotClass` (§9.4b). ~8 líneas y evita logs incoherentes |
-| 6 | **Acento del HUD** | `#f2a0c8` rosa / otro | ⭐ **`#f2a0c8`** (§5.3). No colisiona con los cinco existentes; convención de tinción neural |
-| 7 | **`temperature` en el HUD** | 37 °C fijo / banda dominante en Hz | ⭐ **37 °C fijo** por ahora; la banda en Hz pide etiqueta parametrizable en `createHud`, mejora deseable y no bloqueante (§9.4e) |
-| 8 | **Cámara** | Órbita on / off | ⭐ **Órbita on**, al revés que la célula: la red es fija y el giro lento ayuda a leer la profundidad (§5.1) |
+| # | Decisión | Estado |
+|---|---|---|
+| 1 | **Cuántas neuronas** | ✅ **12 neuronas + 6 astrocitos** (§3.0). Cada sinapsis se ve, los 18 slots tienen identidad, E/I queda en 83/17. Las ~40 quedan agendadas y su costo ya está acotado (§9.4a) |
+| 2 | **Detalle de la sinapsis** | ✅ **Escala exagerada declarada + detalle bajo demanda** (§1, §4.5). No toca la cámara; el detalle fino solo aparece en las sinapsis activas. Descartados el zoom de cámara (pelea con OrbitControls) y el inset 2D (lámina de libro de texto) |
+| 3 | **Topología** | ✅ **Dependiente de la distancia**, grado medio 2.5 (§4.1). Es lo que produce ondas viajeras sin programarlas |
+| 4 | **Acoplamiento** | ✅ **Híbrido**: pulsos (sinapsis química, el grueso y lo visible) + Kuramoto débil `couplingK ≈ 0.35` (uniones gap y campo efáptico, el piso de ritmo). §2. **Consecuencia**: el término continuo debe correr sobre la topología sináptica, no sobre proximidad → §9.4a2 |
+| 5 | **Slots del censo** | ✅ **Generalizar `isAerial` a `slotClass`** (§9.4b). ~8 líneas; los slots inhibitorios y de glía reciben nombres de su clase y el log deja de poder decir "piramidal calla a sus vecinas". `land`/`water`/`city` quedan idénticos |
+| 6 | **Acento del HUD** | ✅ **`#f2a0c8`** rosa pastel (§5.3). Descartados `#8fd0ff` (se confunde con la laguna) y `#ffd166` (cerca de la ciudad) |
+| 7 | **Fila de métrica del HUD** | ✅ **Banda dominante en Hz**, no temperatura (§6.1). Pide etiqueta/unidad parametrizables + `setMetric` (§9.4e, ~6 líneas). Resuelve de paso la mejora que la célula dejó anotada para el pH |
+| 8 | **Cámara** | ✅ **Órbita on**, al revés que la célula: la red es fija, no hay movimiento propio que el giro pueda tapar, y ayuda a leer la profundidad de los axones que se cruzan (§5.1). Cero código |
 
 ---
 
@@ -874,7 +932,11 @@ El repo tiene varias sesiones trabajando sobre `main`. Para este mundo:
 - Los archivos compartidos que sí se tocan más adelante son pocos y bien delimitados:
   `registry.js` (una entrada), `agents.js` (un censo + §9.4b), `narrator.js` (un léxico),
   `ecosystem.js` (un perfil), `i18n.js` (dos mapas), `config.js` (un bloque `neuron`),
-  `main.js` (§9.4a y §9.4d, ~7 líneas en total) y `audio/engine.js` (§9.4c).
+  `sim/fireflies.js` (§9.4a2, **una línea**), `ui/hud.js` (§9.4e, ~4 líneas),
+  `main.js` (§9.4a, §9.4d y §9.4e, ~9 líneas en total) y `audio/engine.js` (§9.4c).
+- El único de esos que es zona caliente compartida es `sim/fireflies.js`: es el corazón del motor y
+  lo usan los seis mundos. El cambio es una sola línea (`swarm.adjacency ||`) con default idéntico
+  al de hoy, pero conviene avisar antes de tocarlo.
 - **Ninguno de esos cambios modifica comportamiento existente**: son adiciones o parametrizaciones
   con default idéntico al de hoy. Aun así, rebasar sobre `main` antes de implementar.
 - Tests: `npx vitest run --exclude '**/.claude/**'` (sin el `--exclude`, vitest recorre también los
