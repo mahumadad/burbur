@@ -209,6 +209,33 @@ export const CONFIG = {
     mtBeads: 8,             // cuentas de tubulina α/β visibles por microtúbulo
     height: 3.2,            // altura de la lámina celular sobre el sustrato
   },
+  // Mundo NEURONA: una microred cortical vista desde arriba. Los somas están
+  // fijos; lo que se mueve es la señal. Ver
+  // docs/superpowers/specs/2026-08-11-diseno-mundo-neurona.md
+  neuron: {
+    // Cableado de la red (sim/netwire.js): 12 neuronas (10 piramidales + 2
+    // interneuronas) + 6 astrocitos. Topología dependiente de la distancia.
+    network: {
+      neurons: 12, inhibitory: 2, glia: 6, lambda: 0.5,
+      degreeMin: 1, degreeMax: 4, interDegreeMin: 4, interDegreeMax: 6,
+      interLocalR: 0.85, spread: 0.9, minSep: 0.26,
+      axonPoints: 9, axonBend: 0.28, axonNoise: 0.02, nodes: 5,
+    },
+    somaR: 0.05,        // radio del soma (normalizado)
+    height: 3.0,        // altura de la lámina neural sobre el plano
+    // Arbor dendrítico: árbol ramificado en el plano, congelado en el build.
+    dendrite: { levels: 3, branches: 3, len: 0.16, lenDecay: 0.62, spread: 1.2, jitter: 0.22, spines: 4 },
+    neuropil: 3800,     // puntos de fondo (la maraña de procesos que no se dibuja)
+    capillarySegs: 44,  // segmentos de la línea serpenteante del capilar
+    glia: { arms: 8, armLen: 0.11 },   // radios de la estrella del astrocito
+    // Los astrocitos son los únicos que se desplazan, y muy lento (§3.1).
+    wander: {
+      density: 0.5, wanderTurn: 1.2, wanderPush: 0.010,
+      kickMin: 0.02, kickRange: 0.03, separation: 0.06, sepRadius: 0.14,
+      drag: 0.94, maxSpeed: 0.022, softR: 0.72, centerPull: 0.5, bound: 0.9,
+      obstaclePush: 0, flowFreq: 3.0, flowPush: 0.008, pathPull: 0, pathRadius: 0.1,
+    },
+  },
   // Mundo MICELIO: la red que crece y se come su propio tronco.
   // Ver docs/superpowers/specs/2026-08-11-diseno-mundo-micelio.md
   fungus: {

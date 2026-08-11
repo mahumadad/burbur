@@ -60,7 +60,8 @@ async function start() {
     // El mundo puede declarar qué slots vuelan (`def.aerial`): esos solo reciben
     // aves. Sin declararlo, el censo asigna como siempre.
     const pop = createCensus(def.census, CONFIG.fireflies.count, undefined,
-      def.aerial ? (i) => def.aerial(i, CONFIG) : null)
+      def.aerial ? (i) => def.aerial(i, CONFIG) : null,
+      def.slotClass ? (i) => def.slotClass(i, CONFIG) : null)
     // El vocabulario del mundo (fases y climas) cambia con el mundo; el reloj no.
     ecosystem.setProfile(def.ecosystem)
     const scene = def.build(app, CONFIG, pop.visible.map((v) => v.name))

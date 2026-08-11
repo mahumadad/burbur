@@ -183,6 +183,14 @@ export async function createAudio(cfg) {
     bloopEnv.triggerAttackRelease(0.13, t)
   }
 
+  // Voz de la NEURONA: un tick eléctrico seco y corto (nada húmedo — la célula
+  // ya tomó ese registro). Más agudo para interneuronas (disparo rápido), más
+  // grave para la glía. El sonido propio del mundo (clicks de spike, ritmos) es F5.
+  const tickBP = new Tone.Filter(2600, 'bandpass').connect(faunaPan); tickBP.Q.value = 4
+  const tickEnv = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: 0.03, sustain: 0, release: 0.02 }).connect(tickBP)
+  const tickNoise = new Tone.Noise('white').start(); tickNoise.connect(tickEnv)
+  function tick(hz) { tickBP.frequency.value = hz; try { tickEnv.triggerAttackRelease(0.02) } catch (_) {} }
+
   const rand = Math.random
   function fauna(type, dir, name = '') {
     // Primero el sample REAL del animalito; si no hay/no cargó, voz sintética.
@@ -210,6 +218,9 @@ export async function createAudio(cfg) {
       // Vida celular: bloops por tipo. Invasores más agudos; motores, graves.
       const f = type === 'invader' ? 320 + rand() * 130 : type === 'motor' ? 130 : 190 + rand() * 90
       bloop(f, t)
+    } else if (type === 'neuron' || type === 'interneuron' || type === 'glia' ||
+               type === 'neurotransmitter' || type === 'tissue') {
+      tick(type === 'interneuron' ? 3400 : type === 'glia' ? 1200 : 2600)
     } else if (type === 'soil_fauna') {
       rustleEnv.triggerAttackRelease(0.08, t) // roce menudo de bicho de suelo
     } else if (type === 'mycelium' || type === 'colony') {

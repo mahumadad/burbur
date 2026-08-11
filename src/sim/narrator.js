@@ -221,6 +221,120 @@ export const CELL_LEXICON = {
   },
 }
 
+// Neurona: vocabulario de electrofisiología (spec §8). Acciones por TIPO
+// (neuronas, interneuronas, glía, señales, tejido) + por NOMBRE para las
+// estructuras sinápticas, que hacen cosas demasiado distintas entre sí.
+const NEURON_ACTIONS = {
+  neuron: [
+    { l: 'dispara una ráfaga corta', s: 'dispara' },
+    { l: 'se carga hasta el umbral y descarga', s: 'descarga' },
+    { l: 'queda en refractario un instante', s: 'se calla' },
+    { l: 'suma entradas y no llega a disparar', s: 'no llega' },
+    { l: 'se enciende justo cuando lo hace su vecina', s: 'sigue a su vecina' },
+  ],
+  interneuron: [
+    { l: 'dispara rápido y sin pausa', s: 'traquetea' },
+    { l: 'calla a sus vecinas de golpe', s: 'calla al vecindario' },
+    { l: 'abre una ventana de silencio', s: 'abre silencio' },
+    { l: 'recorta la ráfaga que venía', s: 'recorta' },
+  ],
+  glia: [
+    { l: 'barre lo que quedó en la hendidura', s: 'barre la hendidura' },
+    { l: 'estira un pie hacia una sinapsis', s: 'estira un pie' },
+    { l: 'deja pasar una onda lenta de calcio', s: 'ondula de calcio' },
+    { l: 'alimenta a la sinapsis que trabaja', s: 'alimenta' },
+  ],
+  neurotransmitter: [
+    { l: 'inunda la hendidura', s: 'inunda' },
+    { l: 'encuentra su receptor', s: 'aterriza' },
+    { l: 'se escapa hacia afuera', s: 'se escapa' },
+  ],
+  signal: [
+    { l: 'barre la red de un lado al otro', s: 'barre' },
+    { l: 'se apaga en el borde', s: 'se apaga' },
+  ],
+  tissue: [
+    { l: 'late al fondo, ajeno a todo', s: 'late al fondo' },
+    { l: 'entrega oxígeno y sigue', s: 'irriga' },
+  ],
+  // ── por nombre: cada estructura sináptica hace lo suyo ──
+  'el botón terminal': [
+    { l: 'suelta su pool listo de vesículas', s: 'libera' },
+    { l: 'se queda sin vesículas listas', s: 'se agota' },
+    { l: 'recibe el pulso y no libera nada', s: 'falla' },
+  ],
+  'la hendidura sináptica': [
+    { l: 'se llena de neurotransmisor y se vacía', s: 'se llena y se vacía' },
+    { l: 'queda limpia otra vez', s: 'queda limpia' },
+  ],
+  'el nodo de Ranvier': [
+    { l: 'enciende y pasa el relevo', s: 'pasa el relevo' },
+  ],
+  'la bomba sodio-potasio': [
+    { l: 'devuelve el gradiente a su sitio, gastando', s: 'restaura el gradiente' },
+  ],
+  'el cono axónico': [
+    { l: 'junta la corriente y larga el pulso', s: 'larga el pulso' },
+  ],
+  'la espina dendrítica': [
+    { l: 'se enciende al recibir', s: 'se enciende' },
+  ],
+  'el receptor AMPA': [
+    { l: 'se abre apenas llega el glutamato', s: 'se abre' },
+  ],
+  'el receptor NMDA': [
+    { l: 'espera despolarización para dejar pasar el calcio', s: 'espera' },
+  ],
+}
+
+const NEURON_AMBIENT = [
+  { l: 'Un pulso recorre un axón y se pierde en el borde', s: 'un pulso se pierde' },
+  { l: 'En algún lugar de la red, una sinapsis falla en silencio', s: 'una sinapsis falla' },
+  { l: 'El neuropilo cruje de actividad que no se ve', s: 'cruje el neuropilo' },
+  { l: 'Una mitocondria se detiene en un terminal y se queda', s: 'para una mitocondria' },
+  { l: 'Un capilar late, ajeno a la conversación', s: 'late el capilar' },
+  { l: 'El ritmo de fondo se hace más lento', s: 'el ritmo se hace lento' },
+]
+
+export const NEURON_LEXICON = {
+  actions: NEURON_ACTIONS,
+  ambient: NEURON_AMBIENT,
+  fallbackType: 'neuron',
+  place: 'la red',
+  moment: (ctx) => ({
+    log: `El ritmo se acomoda mientras ${weatherES(ctx.weather)} baña la red.`,
+    short: 'se acomoda el ritmo',
+  }),
+  overview: (ctx) => ({
+    log: `${cap(weatherES(ctx.weather))} se asienta sobre la red mientras se ahonda ${phaseES(ctx.phase)}.`,
+    short: 'panorama',
+  }),
+  // El "día" es un ciclo de sueño: no amanece, cambia de estado.
+  shift: (ctx) => ({
+    log: `El estado gira hacia ${phaseES(ctx.phase)}.`,
+    short: `cambio · ${phaseES(ctx.phase)}`,
+  }),
+  // El conflicto tiene dos caras: la inhibición (una interneurona calla a sus
+  // vecinas) y la convulsión (la sincronía desbocada). La decide `ev.kind`.
+  // Fraseo sin género: los nombres del censo mezclan masculinos y femeninos.
+  conflict: (ctx, ev) => {
+    if (ev.kind === 'seizure') {
+      return { log: 'Todas disparan juntas. La red se traba en su propio eco.', short: 'convulsión' }
+    }
+    if (ev.kind === 'postictal') {
+      return { log: 'Se apaga todo. Nadie dispara. La red vuelve despacio.', short: 'silencio postictal' }
+    }
+    return { log: `${cap(ev.agent)} calla a sus vecinas; varios somas se apagan a la vez.`, short: `${ev.agent} inhibe` }
+  },
+  // Momentos de los estados cerebrales (F4/F6): husos, ondas UP/DOWN, la crisis.
+  byKind: {
+    spindle: () => ({ log: 'Un huso de sueño cruza la red y se deshace.', short: 'huso' }),
+    down: () => ({ log: 'La red se calla entera. Medio segundo de nada.', short: 'estado DOWN' }),
+    up: () => ({ log: 'Vuelve de golpe: todas retoman a la vez.', short: 'estado UP' }),
+    kcomplex: () => ({ log: 'Un complejo K sacude la red y se disuelve.', short: 'complejo K' }),
+  },
+}
+
 // ── MICELIO ──────────────────────────────────────────────────────────────────
 // El terreno es la comida y la red es el organismo. Acciones por tipo (fauna del
 // suelo, la red, las colonias, el sustrato) + por nombre para las estructuras que
