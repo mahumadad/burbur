@@ -191,6 +191,25 @@ export async function createAudio(cfg) {
   const tickNoise = new Tone.Noise('white').start(); tickNoise.connect(tickEnv)
   function tick(hz) { tickBP.frequency.value = hz; try { tickEnv.triggerAttackRelease(0.02) } catch (_) {} }
 
+  // ─── Click del SPIKE (mundo neurona) ──────────────────────────────────────
+  // Un potencial de acción sonificado es literalmente esto: un click seco y
+  // brevísimo, sin reverb. Muchos juntos suenan a lluvia / palomitas de maíz —
+  // el registro multiunidad real. Paneado por la posición de la neurona.
+  const spikeGain = new Tone.Gain(0.30).connect(limiter)
+  const spikePan = new Tone.Panner(0).connect(spikeGain)
+  const spikeBP = new Tone.Filter(2800, 'bandpass').connect(spikePan); spikeBP.Q.value = 1.1
+  const spikeEnv = new Tone.AmplitudeEnvelope({ attack: 0.0004, decay: 0.008, sustain: 0, release: 0.004 }).connect(spikeBP)
+  const spikeNoise = new Tone.Noise('white').start(); spikeNoise.connect(spikeEnv)
+  function spike(pan = 0, bright = 1) {
+    spikePan.pan.value = Math.max(-1, Math.min(1, pan))
+    spikeBP.frequency.value = 1700 + bright * 2400
+    try { spikeEnv.triggerAttackRelease(0.006) } catch (_) {}
+  }
+  // Ritmo cerebral (delta/theta/alfa/gamma) → velocidad del throb del drone: en
+  // sueño profundo late lento e hipnótico; despierto, un temblor rápido. Es la
+  // forma correcta de oír los ritmos (están por debajo del rango de tono).
+  function setThrob(hz) { throbLFO.frequency.rampTo(Math.max(0.05, hz), 0.6) }
+
   const rand = Math.random
   function fauna(type, dir, name = '') {
     // Primero el sample REAL del animalito; si no hay/no cargó, voz sintética.
@@ -319,5 +338,6 @@ export async function createAudio(cfg) {
   return {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
     setRain, drip, setFlashVol, setDroneVol, setBedVol, setMood, rattle,
+    spike, setThrob,
   }
 }
