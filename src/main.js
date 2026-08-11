@@ -132,9 +132,9 @@ async function start() {
       const label = clockLabel(eco)
       for (const ev of evs) {
         eventLog.push(ev, label)
-        // Cada tipo de agente tiene su voz; el ambiente usa un acento suave.
+        // Cada agente tiene su voz (fauna). Los acentos sintéticos de los eventos
+        // de "sonido" ambiental se quitaron: quedaban como pings raros sobre el drone.
         if (ev.agentType) audio.fauna(ev.agentType, ev.dir, ev.agent)
-        else if (ev.dir && ev.type === 'sound') audio.accent(ev.dir, ev.log.length)
       }
     }
 
@@ -156,11 +156,9 @@ async function start() {
       }
     }
 
-    // La actividad del mundo modula cuántos individuos llegan a latir.
-    const flashes = updateSwarm(swarm, CONFIG.fireflies, dt)
-    for (const fl of flashes) {
-      if (Math.random() < 0.25 + eco.activity * 0.75) audio.triggerFlash(fl.y, fl.intensity)
-    }
+    // El enjambre avanza (los latidos son SOLO visuales): se quitaron las notas
+    // melódicas de las luciérnagas — sobre el drone sonaban como "pings locos".
+    updateSwarm(swarm, CONFIG.fireflies, dt)
     const env = ambient.update(dt)
     const wind = Math.max(env.wind, eco.rain * 0.4)
     eco.wind = wind // el mundo lo usa para mecer el pasto y soltar hojas

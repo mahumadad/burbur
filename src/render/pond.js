@@ -4,6 +4,9 @@ import { createDraw, createPointCloud } from './engine/points.js'
 import { createHaze } from './engine/haze.js'
 import { createAgentKit } from './engine/agents3d.js'
 import { createTrails } from './engine/trails.js'
+import { lichenRosette, mossClump, LICHEN_ORANGE, LICHEN_PALE } from './engine/crust.js'
+import { createRain, createSnow } from './engine/weather.js'
+import { buildFallenLog } from './engine/deadwood.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
@@ -36,8 +39,9 @@ export function createPond(container, cfg, agentNames = []) {
   const Y = [0.004, 0.01, 0.028]        // agua base (casi negro)
   const Mt = [0.02, 0.07, 0.23]         // azul profundo
   const Nt = [0.115, 0.38, 1.0]         // azul eléctrico (glow)
-  const SAND_LO = [0.66, 0.43, 0.415]   // arcilla (jt)
-  const SAND_HI = [0.935, 0.72, 0.635]  // arena clara (J)
+  // Piedra oscura, mojada (roca de río/mar de Chile): gris-carbón frío, no arena.
+  const SAND_LO = [0.065, 0.072, 0.085]  // roca húmeda en sombra
+  const SAND_HI = [0.30, 0.315, 0.35]    // canto iluminado (gris frío)
   const RIM = [0.07, 0.68, 0.62]        // brillo cian de borde (Et)
   const clamp01 = (v) => Math.max(0, Math.min(1, v))
   const smooth = (t) => { const c = clamp01(t); return c * c * (3 - 2 * c) }
@@ -86,7 +90,7 @@ export function createPond(container, cfg, agentNames = []) {
     return Math.hypot(lx / L.rx, lz / L.rz) // <1 dentro de la huella
   }
   function kt(x, z) { let m = 0; for (const L of lobes) m = Math.max(m, 1 - Math.min(1, lobeQ(L, x, z))); return m }
-  function wt(x, z) { let m = 0; for (const L of lobes) m = Math.max(m, smooth((1.5 - lobeQ(L, x, z)) / 1.2)); return m }
+  function wt(x, z) { let m = 0; for (const L of lobes) m = Math.max(m, smooth((3.2 - lobeQ(L, x, z)) / 2.9)); return m }
   function edgeMask(x, z) { // rim en la línea de agua (q≈1)
     let m = 0; for (const L of lobes) m = Math.max(m, clamp01(1 - Math.abs(lobeQ(L, x, z) - 0.96) / 0.28)); return m
   }
@@ -216,21 +220,31 @@ export function createPond(container, cfg, agentNames = []) {
         varying vec2 vXZ; varying vec3 vCol;
         void main() {
           // Shimmer: reflejos que se deslizan sobre la superficie.
+          // Oleaje multi-octava (olas grandes + rizado fino), como la ref de agua.
           float w = sin(vXZ.x * 0.09 + uTime * 0.7) * sin(vXZ.y * 0.075 - uTime * 0.55)
-                  + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35);
+                  + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35)
+                  + 0.28 * sin(vXZ.x * 0.24 - vXZ.y * 0.19 + uTime * 1.35)
+                  + 0.16 * sin(vXZ.x * 0.51 + vXZ.y * 0.44 - uTime * 2.1);
           float glint = smoothstep(0.75, 1.4, w);
+          // Cáusticas: red fina que se arrastra sobre el agua.
+          float c1 = sin(vXZ.x * 0.33 + uTime * 0.9) * sin(vXZ.y * 0.29 - uTime * 0.75);
+          float caustic = pow(max(0.0, c1), 3.0) * 0.5;
           // Wake: anillos que se expanden donde pasa un elemento.
           float wake = 0.0;
           for (int i = 0; i < N; i++) {
             vec4 r = uRipples[i];
             if (r.w <= 0.001) continue;
             float d = distance(vXZ, r.xy);
-            wake += smoothstep(3.2, 0.0, abs(d - r.z)) * r.w;
+            // Tren de ondas: varias crestas que se alejan del impacto y se
+            // amortiguan con la distancia (como una gota real en el agua).
+            float ring = sin((d - r.z) * 1.9) * exp(-abs(d - r.z) * 0.42);
+            float env = smoothstep(9.0, 0.0, abs(d - r.z));
+            wake += max(0.0, ring) * env * r.w;
           }
           wake = min(wake, 1.5);
-          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + wake * vec3(0.32, 0.60, 0.98);
+          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72) + wake * vec3(0.32, 0.60, 0.98);
           float lum = dot(vCol, vec3(0.5, 0.6, 0.7));
-          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + wake * 0.55, 0.0, 0.92);
+          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + caustic * 0.1 + wake * 0.55, 0.0, 0.92);
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -286,13 +300,13 @@ export function createPond(container, cfg, agentNames = []) {
     }
     // Espuma blanca en la línea de agua (con phase = balanceo).
     if (shore.length) {
-      const foamN = Math.min(2600, Math.floor(70 * (L.rx + L.rz)))
+      const foamN = Math.min(7000, Math.floor(210 * (L.rx + L.rz)))
       for (let i = 0; i < foamN; i++) {
         const p2 = shore[q() * shore.length | 0]
         const lx = p2[0] - L.x, lz = p2[1] - L.z, dd = Math.hypot(lx, lz) || 1
         const be = Math.pow(q(), 2) * 2, va = (q() - 0.5) * 1.2
         pushPoint(p2[0] + lx / dd * be - lz / dd * va, ht + 0.06 + Math.pow(q(), 2.2) * 0.9, p2[1] + lz / dd * be + lx / dd * va,
-          [1, 1, 1], 0.1 + q() * 0.2, 0.05 + q() * 0.95)
+          [1, 1, 1], 0.055 + q() * 0.1, 0.05 + q() * 0.95)
       }
       // 1–2 ramas secas (driftwood) por isla.
       const branches = 1 + (q() * 2 | 0)
@@ -310,20 +324,31 @@ export function createPond(container, cfg, agentNames = []) {
     }
     if (up.length) {
       const area = L.rx * L.rz
-      const lichenN = Math.min(1700, Math.floor(area * 4.6))
-      for (let i = 0; i < lichenN; i++) {
+      // LÍQUENES: rosetas planas (naranja y gris-verde) sembradas en manchas.
+      const rosettes = Math.min(60, Math.max(6, Math.floor(area * 0.16)))
+      for (let i = 0; i < rosettes; i++) {
         const vi = up[q() * up.length | 0]
-        if (fbm(pos.getX(vi) * 0.5 + seed * 1.7, pos.getZ(vi) * 0.5, 2) < 0.42) continue
-        const A = 0.9 + q() * 0.12
-        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.1, L.z + pos.getZ(vi), [1, 0.827 * A, 0.071], 0.09 + q() * 0.14, 0)
+        const fx = pos.getX(vi), fy = pos.getY(vi), fz = pos.getZ(vi)
+        // El ruido decide DÓNDE hay colonia: deja piedra desnuda entre parches.
+        if (fbm(fx * 0.35 + seed * 1.7, fz * 0.35, 2) < 0.42) continue
+        lichenRosette(pushPoint, L.x + fx, L.cy + fy, L.z + fz, {
+          radius: 0.5 + q() * 1.5,
+          color: q() < 0.55 ? LICHEN_ORANGE : LICHEN_PALE,
+          size: 0.085 + q() * 0.06,
+        })
       }
-      const mossN = Math.min(750, Math.floor(area * 2.1))
-      for (let i = 0; i < mossN; i++) {
+      // MUSGO: cúmulos abultados que coronan la piedra (donde junta humedad).
+      const clumps = Math.min(26, Math.max(3, Math.floor(area * 0.07)))
+      for (let i = 0; i < clumps; i++) {
         const vi = up[q() * up.length | 0]
-        if (fbm(pos.getX(vi) * 0.4 + seed * 2.3 + 9, pos.getZ(vi) * 0.4, 2) < 0.55) continue
-        pushPoint(L.x + pos.getX(vi), L.cy + pos.getY(vi) + 0.08, L.z + pos.getZ(vi), [0.26 + q() * 0.12, 0.42 + q() * 0.14, 0.24], 0.18 + q() * 0.22, 0)
+        const fx = pos.getX(vi), fy = pos.getY(vi), fz = pos.getZ(vi)
+        if (nrm.getY(vi) < 0.42) continue
+        if (fbm(fx * 0.3 + seed * 2.3 + 9, fz * 0.3, 2) < 0.5) continue
+        mossClump(pushPoint, L.x + fx, L.cy + fy, L.z + fz, {
+          radius: 0.8 + q() * 1.8, height: 0.35 + q() * 0.5, density: 0.8 + q() * 0.6,
+        })
       }
-      let want = 8 + (q() * 10 | 0)
+      let want = 26 + (q() * 22 | 0)
       for (let guard = 0; want > 0 && guard < 400; guard++) {
         const vi = up[q() * up.length | 0]
         if (nrm.getY(vi) < 0.5) continue
@@ -381,7 +406,7 @@ export function createPond(container, cfg, agentNames = []) {
       for (let a = 0; a < n; a++) {
         const o = q() * 6.2832, s = Math.pow(q(), 0.7) * rad
         pushPoint(sp[0] + Math.cos(o) * s, ht + 0.08 + Math.pow(q(), 2) * 0.5, sp[1] + Math.sin(o) * s,
-          [1, 1, 1], 0.11 + q() * 0.2, 0.05 + q() * 0.95)
+          [1, 1, 1], 0.07 + q() * 0.12, 0.05 + q() * 0.95)
       }
     }
   }
@@ -404,7 +429,7 @@ export function createPond(container, cfg, agentNames = []) {
 
   // ─── NIEBLA azul (Bt): 4200 puntos aditivos sobre la laguna ───────────────
   const hazeUniforms = createHaze(scene, {
-    R: mt * 1.28, G, count: P.hazeCount, color: [0.14, 0.42, 1.0], alpha: 0.16,
+    R: mt * 1.72, G, count: P.hazeCount, color: [0.12, 0.35, 1.0], alpha: 0.2,
     heightFn: () => P.waterLevel,
   }).uniforms
 
@@ -429,11 +454,103 @@ export function createPond(container, cfg, agentNames = []) {
       dive: params.dive, hover: params.hover, rollMul: params.rollMul,
       spinY: params.spinY, effR: params.effR,
       // Las 2 primeras son garzas: pican al agua a cazar peces.
-      hunter: i < 2, huntCool: 3 + q() * 4, striking: 0, struck: false, targetFish: -1,
+      hunter: i < 2, hstate: 'fly', stateT: 2 + q() * 4, striking: 0, struck: false, targetFish: -1, perch: null,
     })
     trailColors.push(KIND_COLOR[kind])
   }
-  const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial)
+  // ─── RANAS: bichitos que se suben a las piedras y de a ratos saltan al agua.
+  // Cada una elige un punto ALTO de una isla, se posa un rato, y salta a otra.
+  const FROGN = 7
+  const frogs = []
+  function frogPerch() {
+    const L = lobes[q() * lobes.length | 0]
+    const a = q() * 6.2832, t = q() * 0.62      // dentro de la huella de la isla
+    const fx = L.x + Math.cos(a) * L.rx * t, fz = L.z + Math.sin(a) * L.rz * t
+    const top = lobeTop(fx, fz)
+    return { x: fx, z: fz, y: (top > -Infinity ? top : ht) + 0.35 }
+  }
+  const frogCloud = createPointCloud(FROGN * 3, draw.pointMaterial)
+  for (let i = 0; i < FROGN; i++) {
+    const p0 = frogPerch()
+    frogs.push({ ...p0, tx: p0.x, tz: p0.z, ty: p0.y, wait: 1 + q() * 5, jump: 0 })
+    for (let k = 0; k < 3; k++) {
+      const j = (i * 3 + k) * 3
+      // Verde rana con vientre más claro.
+      frogCloud.col[j] = k === 2 ? 0.72 : 0.22
+      frogCloud.col[j + 1] = k === 2 ? 0.82 : 0.62 + q() * 0.2
+      frogCloud.col[j + 2] = k === 2 ? 0.55 : 0.2
+      frogCloud.size[i * 3 + k] = k === 2 ? 0.16 : 0.3
+    }
+  }
+  scene.add(frogCloud.mesh)
+  function updateFrogs(step) {
+    for (let i = 0; i < FROGN; i++) {
+      const f = frogs[i]
+      if (f.jump > 0) {
+        // Salto: parábola entre la piedra actual y la siguiente.
+        f.jump = Math.max(0, f.jump - step / 0.9)
+        const k = 1 - f.jump
+        f.x += (f.tx - f.x) * 0.12
+        f.z += (f.tz - f.z) * 0.12
+        f.y = f.y + (f.ty - f.y) * 0.12 + Math.sin(k * Math.PI) * 0.22
+        if (f.jump === 0) { f.x = f.tx; f.z = f.tz; f.y = f.ty; f.wait = 2 + q() * 7 }
+      } else {
+        f.wait -= step
+        if (f.wait <= 0) { const p1 = frogPerch(); f.tx = p1.x; f.tz = p1.z; f.ty = p1.y; f.jump = 1 }
+      }
+      // Cuerpo (2 puntos) + ojo.
+      const b = i * 3
+      frogCloud.pos[b * 3] = f.x; frogCloud.pos[b * 3 + 1] = f.y; frogCloud.pos[b * 3 + 2] = f.z
+      frogCloud.pos[(b + 1) * 3] = f.x + 0.22; frogCloud.pos[(b + 1) * 3 + 1] = f.y - 0.05; frogCloud.pos[(b + 1) * 3 + 2] = f.z + 0.1
+      frogCloud.pos[(b + 2) * 3] = f.x - 0.12; frogCloud.pos[(b + 2) * 3 + 1] = f.y + 0.16; frogCloud.pos[(b + 2) * 3 + 2] = f.z - 0.08
+    }
+    frogCloud.commit()
+  }
+
+  // ─── TRONCO(S) DE ÁRBOL flotando en el agua ───────────────────────────────
+  const floatLogs = []
+  for (let li = 0; li < 1 + (q() < 0.5 ? 1 : 0); li++) {
+    // Mismo tronco caído orgánico del bosque (tubo ahusado + ramas), flotando.
+    const g = buildFallenLog({ length: 13 + q() * 9, radius: 1.5 + q() * 0.9 })
+    const a = q() * 6.2832, rr = 4 + q() * (mt * 0.5)
+    g.position.set(Math.cos(a) * rr, ht + 0.35, Math.sin(a) * rr)
+    g.rotation.y = q() * 6.2832
+    scene.add(g)
+    floatLogs.push({ g, drift: q() * 6.2832, spin: (q() - 0.5) * 0.06, phase: q() * 6.2832 })
+  }
+  function updateLogs(step, t) {
+    for (const L of floatLogs) {
+      // Deriva lenta + cabeceo + giro suave; se mantiene dentro de la laguna.
+      const sp = 0.6
+      L.g.position.x += Math.cos(L.drift) * sp * step
+      L.g.position.z += Math.sin(L.drift) * sp * step
+      const rr = Math.hypot(L.g.position.x, L.g.position.z)
+      if (rr > mt * 0.85) L.drift += Math.PI + (q() - 0.5)
+      L.g.position.y = ht + 0.35 + Math.sin(t * 0.9 + L.phase) * 0.12
+      L.g.rotation.y += L.spin * step
+      L.g.rotation.x = Math.sin(t * 0.7 + L.phase) * 0.05
+    }
+  }
+
+  // AGENTES EXTRA (decorativos): más vida en la laguna sin tocar el swarm/censo
+  // del host (esos son los `n` nombrados). No llevan etiqueta ni estela.
+  const EXTRA = 16
+  const extras = []
+  for (let i = 0; i < EXTRA; i++) {
+    const kind = pool[q() * pool.length | 0]
+    const { group, params } = buildSpecies(kind, kit)
+    group.scale.setScalar(0.85 + q() * 0.5)
+    scene.add(group)
+    extras.push({
+      group, cage: params.rollMul > 0 ? group.children[0] : null,
+      idx: n + i, homeY: 0.4 + q() * 1.2,
+      dive: params.dive, hover: params.hover, spinY: params.spinY,
+    })
+  }
+
+  // yOffset negativo: las estelas se siembran POR ENCIMA del agente para que
+  // floten sobre la superficie del agua (si no, quedan sumergidas e invisibles).
+  const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial, -0.3)
 
   // Cardúmenes de peces bajo el agua (boids). state.fish expone posiciones.
   const fish = createFishRender(scene, cfg, q)
@@ -491,15 +608,23 @@ export function createPond(container, cfg, agentNames = []) {
     }
   }
 
-  // Garzas: unos pocos agentes pican al agua y atrapan un pez (→ depredación).
+  // Garzas: la mayor parte del tiempo VUELAN o se POSAN en una piedra; sólo de
+  // vez en cuando bajan a pescar. Estados: 'fly' | 'perch' | 'strike'.
+  function heronPerch() {
+    const L = lobes[q() * lobes.length | 0]
+    const ang = q() * 6.2832, t = 0.2 + q() * 0.5
+    const px = L.x + Math.cos(ang) * L.rx * t, pz = L.z + Math.sin(ang) * L.rz * t
+    const top = lobeTop(px, pz)
+    return { x: px, z: pz, y: (top > -Infinity ? top : ht) + 1.2 }
+  }
   function huntHerons(step, predations) {
     const F = fish.state.fish
     for (let i = 0; i < n; i++) {
       const a = agents[i]
       if (!a.hunter) continue
-      if (a.striking > 0) {
+      a.stateT -= step
+      if (a.hstate === 'strike') {
         a.striking -= step
-        // Picado: la garza baja al agua y vuelve (parábola en el tiempo).
         const k = Math.max(0, 1 - Math.abs(a.striking / 0.7 - 0.5) * 2)
         worldPos[i * 3 + 1] = ht + 1.5 - k * 4.2
         const f = F[a.targetFish]
@@ -515,16 +640,29 @@ export function createPond(container, cfg, agentNames = []) {
             }
           }
         }
-        if (a.striking <= 0) { a.striking = 0; a.huntCool = 5 + q() * 6 }
-      } else {
-        a.huntCool -= step
-        if (a.huntCool <= 0) {
-          let best = -1, bestD = 45
-          for (let fi = 0; fi < F.length; fi++) {
-            const d = Math.hypot(F[fi].x * mt - worldPos[i * 3], F[fi].z * mt - worldPos[i * 3 + 2])
-            if (d < bestD) { bestD = d; best = fi }
-          }
-          if (best >= 0) { a.striking = 0.7; a.struck = false; a.targetFish = best } else a.huntCool = 1 + q()
+        if (a.striking <= 0) { a.hstate = 'fly'; a.stateT = 6 + q() * 8 }
+      } else if (a.hstate === 'perch') {
+        // Quieta sobre la piedra (con leve balanceo). No deambula.
+        worldPos[i * 3] += (a.perch.x - worldPos[i * 3]) * 0.12
+        worldPos[i * 3 + 2] += (a.perch.z - worldPos[i * 3 + 2]) * 0.12
+        worldPos[i * 3 + 1] = a.perch.y + Math.sin(clock * 1.3 + a.idx) * 0.08
+        roamers[i].x = worldPos[i * 3] / LR; roamers[i].z = worldPos[i * 3 + 2] / LR
+        roamers[i].vx *= 0.8; roamers[i].vz *= 0.8
+        if (a.stateT <= 0) { a.hstate = 'fly'; a.stateT = 5 + q() * 7 }
+      } else { // 'fly' — vuela normal; al terminar decide qué hacer
+        if (a.stateT <= 0) {
+          const r = q()
+          if (r < 0.35) {            // posarse en una piedra
+            a.hstate = 'perch'; a.perch = heronPerch(); a.stateT = 5 + q() * 8
+          } else if (r < 0.5) {      // ir a pescar (ocasional)
+            let best = -1, bestD = 55
+            for (let fi = 0; fi < F.length; fi++) {
+              const d = Math.hypot(F[fi].x * mt - worldPos[i * 3], F[fi].z * mt - worldPos[i * 3 + 2])
+              if (d < bestD) { bestD = d; best = fi }
+            }
+            if (best >= 0) { a.hstate = 'strike'; a.striking = 0.7; a.struck = false; a.targetFish = best }
+            else a.stateT = 2 + q() * 3
+          } else { a.stateT = 4 + q() * 6 } // seguir volando
         }
       }
     }
@@ -532,12 +670,25 @@ export function createPond(container, cfg, agentNames = []) {
 
   // Deambular sobre el agua: roamers normalizados → radio de laguna.
   const roamers = createRoamers(cfg.wander, n, q)
-  const LR = mt * 0.92
+  const extraRoamers = createRoamers(cfg.wander, EXTRA, q)
+  const LR = mt * 1.05
   const worldPos = new Float32Array(n * 3)
   let simTime = 0
   function mapPositions(dt, t) {
     simTime += dt
     updateRoamers(roamers, cfg.wander, dt, q, simTime, null, null, null)
+    updateRoamers(extraRoamers, cfg.wander, dt, q, simTime + 31.7, null, null, null)
+    for (let i = 0; i < EXTRA; i++) {
+      const a = extras[i], r = extraRoamers[i]
+      let j = ht - a.dive + a.homeY * 0.3 + Math.sin(t * 1.4 + a.idx * 2.1) * (0.34 + a.hover * 0.12)
+      if (j < bedY + 0.9) j = bedY + 0.9
+      a.group.position.set(r.x * LR, j, r.z * LR)
+      if (a.spinY) a.group.rotation.y += a.spinY * dt
+      if (j < ht + 1.2) {
+        a.group.rotation.x = Math.sin(t * 1.7 + a.idx) * 0.085
+        a.group.rotation.z = Math.cos(t * 1.5 + a.idx) * 0.085
+      }
+    }
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
       // Física de agua (spec §4.3): unas bucean (dive>0), otras planean (dive<0).
@@ -557,7 +708,8 @@ export function createPond(container, cfg, agentNames = []) {
   function lensNDC(px, py) {
     let sx = px, sy = py
     for (let it = 0; it < 3; it++) {
-      const rn = Math.hypot(sx, sy) / 0.7071
+      // rn del shader = |cc|/0.7071 con cc = uv-0.5 (max 0.5) → en NDC es |ndc|/1.4142.
+      const rn = Math.hypot(sx, sy) / 1.4142
       const f = (1 - _fk) + _fk * rn * rn
       sx = px / f; sy = py / f
     }
@@ -566,7 +718,7 @@ export function createPond(container, cfg, agentNames = []) {
 
   // Wake: pool de ondas que se expanden y desvanecen; se siembran donde un
   // elemento cruza/roza la superficie (agentes cerca del nivel, peces al tope).
-  let rippleHead = 0, rippleTimer = 0
+  let rippleHead = 0, rippleTimer = 0, dropTimer = 0
   function spawnRipple(x, z, str) {
     waterUniforms.uRipples.value[rippleHead].set(x, z, 0.5, str)
     rippleHead = (rippleHead + 1) % RIPPLES
@@ -580,16 +732,28 @@ export function createPond(container, cfg, agentNames = []) {
     rippleTimer -= step
     if (rippleTimer <= 0) {
       // Varios focos por tick: agentes cerca de la superficie + peces al tope.
+      // Cuanto más rápido va un agente cerca de la superficie, más agua mueve.
       let spawned = 0
-      for (let t = 0; t < 8 && spawned < 3; t++) {
+      for (let t = 0; t < 14 && spawned < 5; t++) {
         const i = q() * n | 0
-        if (Math.abs(worldPos[i * 3 + 1] - ht) < 1.8) { spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 0.9 + q() * 0.3); spawned++ }
+        const dy = Math.abs(worldPos[i * 3 + 1] - ht)
+        if (dy > 2.2) continue
+        const r = roamers[i]
+        const sp = Math.hypot(r.vx, r.vz) * LR
+        const near = 1 - dy / 2.2
+        spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], (0.5 + Math.min(1.2, sp * 0.9)) * near)
+        spawned++
       }
       const f = fish.state.fish
       for (let t = 0; t < 3; t++) { const k = q() * f.length | 0; if (f[k] && f[k].y > ht - 2.4) spawnRipple(f[k].x * mt, f[k].z * mt, 0.5) }
       rippleTimer = 0.07 + q() * 0.1
     }
   }
+
+  // ─── CLIMA: lluvia y nieve sobre la laguna (mismo motor que el bosque) ────
+  // La lluvia arranca por encima del agua, no del suelo del bosque.
+  const rain = createRain(scene, mt * 1.35, ht + 1)
+  const snow = createSnow(scene, mt * 1.35, ht + 1, pointUniforms.uProj)
 
   stage.setResizeHook((m) => {
     pointUniforms.uProj.value = m.proj
@@ -611,6 +775,8 @@ export function createPond(container, cfg, agentNames = []) {
     fish.update(step, clock)      // mueve los peces primero
     huntHerons(step, predations)  // garzas pican (puede sobreescribir su y)
     updateBugs(step, clock)
+    updateFrogs(step)
+    updateLogs(step, clock)
     fishEatBugs()
     for (let i = 0; i < n; i++) {
       const a = agents[i], r = roamers[i]
@@ -647,6 +813,9 @@ export function createPond(container, cfg, agentNames = []) {
     if (ptrX !== null) {
       let bestD = 0.14
       for (let i = 0; i < n; i++) {
+        // Ocluido por una isla (el agente está por debajo de su superficie ahí):
+        // no mostrar su etiqueta sobre la roca. `lobeTop` = -Inf fuera de islas.
+        if (worldPos[i * 3 + 1] < lobeTop(worldPos[i * 3], worldPos[i * 3 + 2]) + 0.5) continue
         _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 3, worldPos[i * 3 + 2]).project(stage.camera)
         if (_proj.z > 1) continue
         const [vx, vy] = lensNDC(_proj.x, _proj.y) // NDC VISUAL (con el lente)
@@ -662,6 +831,26 @@ export function createPond(container, cfg, agentNames = []) {
       stage.labelEl.style.opacity = '1'
     } else {
       stage.labelEl.style.opacity = '0'
+    }
+
+    // Clima: cae lluvia (o nieve si hiela) y cada gota pica el agua.
+    if (eco) {
+      const snowing = eco.temperature <= -3
+      const rainI = snowing ? 0 : eco.rain
+      rain.update(step, rainI)
+      snow.update(step, clock, snowing ? (0.6 + eco.rain * 0.6) : 0)
+      // Gotas sobre la superficie: ondas chicas y numerosas según la intensidad.
+      if (rainI > 0.02) {
+        dropTimer -= step
+        if (dropTimer <= 0) {
+          const drops = 1 + (q() * (1 + rainI * 5) | 0)
+          for (let d = 0; d < drops; d++) {
+            const a = q() * 6.2832, rr = Math.sqrt(q()) * mt * 1.1
+            spawnRipple(Math.cos(a) * rr, Math.sin(a) * rr, 0.22 + rainI * 0.3)
+          }
+          dropTimer = 0.03 + q() * 0.06
+        }
+      }
     }
 
     updateRipples(step)
