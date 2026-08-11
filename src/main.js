@@ -111,6 +111,10 @@ async function start() {
 
   let last = performance.now()
   let lightningCooldown = 4
+  // Antiflood de los pulsos de ATP (M2): token bucket de ~6/s sostenidos. El
+  // pop visual del mundo no pasa por acá — solo limita cuánto SUENA.
+  const PULSE_TOKENS_MAX = 6
+  let pulseTokens = PULSE_TOKENS_MAX
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000)
     last = now
@@ -171,17 +175,30 @@ async function start() {
     if (ax.insects !== false && env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
     if (ax.owl !== false && env.owl) audio.owl()
     const predations = scene.update(swarm, dt, eco)
-    // Un cazador atrapó a un bicho → evento de conflicto narrado.
+    // El bucket se recarga en el tiempo, no por evento: sostiene ~6/s incluso
+    // en frames sin pulsos.
+    pulseTokens = Math.min(PULSE_TOKENS_MAX, pulseTokens + PULSE_TOKENS_MAX * dt)
+    // Eventos grandes del mundo activo: la predación del bosque (manda
+    // hunterIdx) o eventos propios de otros mundos (mandan agent/agentType ya
+    // resueltos, o solo kind, para lo que no tiene individuo en el censo).
     if (predations && predations.length) {
       const label = clockLabel(eco)
       for (const p of predations) {
-        const who = pop.visible[p.hunterIdx]
-        if (!who) continue
-        const ev = { type: 'conflict', agent: who.name, agentIdx: p.hunterIdx, dir: p.dir }
-        const text = narrate({ ...ev, agentType: who.type },
+        // El pulso de ATP es sonido puro (el latido del consumo): no se narra.
+        if (p.type === 'pulse') {
+          if (pulseTokens >= 1) { pulseTokens -= 1; audio.triggerFlash(p.y, 0.5) }
+          continue
+        }
+        const idx = p.agentIdx ?? p.hunterIdx
+        const who = idx != null ? pop.visible[idx] : null
+        const agent = p.agent ?? who?.name
+        const agentType = p.agentType ?? who?.type
+        if (!agent && !p.kind) continue // solo se descarta lo vacío de verdad
+        const ev = { type: p.type ?? 'conflict', agent, agentIdx: idx, dir: p.dir, kind: p.kind }
+        const text = narrate({ ...ev, agentType },
           { phase: eco.phase, weather: eco.weather }, undefined, world.def.lexicon)
-        eventLog.push({ ...ev, ...text }, label)
-        audio.fauna(who.type, p.dir)
+        eventLog.push({ ...ev, agentType, ...text }, label)
+        if (agentType) audio.fauna(agentType, p.dir, agent)
       }
     }
     requestAnimationFrame(frame)
