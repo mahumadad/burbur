@@ -1327,7 +1327,7 @@ export function createScene(container, cfg, agentNames = []) {
     const md = dt * moveScale
     simTime += md
     updateRoamers(roamers, cfg.wander, md, rnd, simTime, paths, nearestOnPaths, treeObstacles)
-    updatePerchers(perchAgents, roamers, poiPerch, cfg.behaviors, md, rnd)
+    updatePerchers(perchAgents, roamers, poiPerch, cfg.behaviors, md, rnd, rainShelter)
     for (let i = 0; i < n; i++) {
       const src = roamers[i]
       const x = src.x * R, z = src.z * R
@@ -1387,7 +1387,7 @@ export function createScene(container, cfg, agentNames = []) {
   }
   const ss01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
   let clock = 0
-  let snowCover = 0, wet = 0, moveScale = 1
+  let snowCover = 0, wet = 0, moveScale = 1, rainShelter = 0
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
@@ -1481,6 +1481,8 @@ export function createScene(container, cfg, agentNames = []) {
       // Los agentes se frenan con nieve/frío.
       // Con lluvia (sobre todo fuerte) todo se calma: agentes, pájaros y bichos.
       moveScale = snowing ? 0.4 : (1 - eco.rain * 0.45) * (eco.temperature <= 1 ? 0.85 : 1)
+      // Con lluvia los pájaros se refugian: se posan en árboles/rocas y se quedan.
+      rainShelter = eco.rain
 
       // Estaciones: ciclo lento (~210 s = un "año"). Brote → hoja plena → ámbar
       // + caída → ramas peladas. La lluvia tira algunas hojas y borra flores.
