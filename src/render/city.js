@@ -30,6 +30,10 @@ const BUILDING_PALETTE = [
 // `p.towers` del original: multiplicador global de la probabilidad de torre
 // por bloque. Valor de paridad = 1 (no expuesto como opción todavía).
 const TOWERS = 1
+// `p.grass`/`p.flowers` del original: multiplicadores globales de densidad
+// de pasto y flores. Valores de paridad = 1 (no expuestos todavía).
+const GRASS = 1
+const FLOWERS = 1
 
 // Mundo CIUDAD ("Block ecosystem"). Usa el stage compartido; el suelo es el
 // puerto fiel de `pn`/`mn`/`ln` del bundle original: retícula 150×150 con
@@ -632,11 +636,335 @@ export function createCityScene(container, cfg, agentNames = []) {
   }
   Tn()
 
+  // ─── Dn: PASTO — puerto fiel ────────────────────────────────────────────
+  // `Math.floor(46000*grass)+Math.floor(700*grass)` hojas (grass=1 → 46700):
+  // 46000 sobre manzanas + 700 en una franja rala de borde de calle. Cada
+  // hoja es un LINE SEGMENT de 2 tramos (base→medio→punta) con degradado de
+  // color vertical (oscuro abajo, brillante en la punta) — igual mecánica
+  // que las hojas del bosque (`scene.js`), pero en MALLA PROPIA: el bundle
+  // arma su propio BufferGeometry posición+color y lo agrega como
+  // THREE.LineSegments con LineBasicMaterial({vertexColors:true}); NO pasa
+  // por el sistema compartido `draw` (igual que hacen Sn/Cn/wn/Tn con sus
+  // propias mallas).
+  //
+  // Siembra sobre manzana: posición al azar en una manzana ponderada por
+  // área (`En`), descartada si cae en la calle (`nn>-1`) o sobre un
+  // edificio (`un`), y luego con probabilidad `g` según fertilidad (`Fe`) y
+  // brillo de cercanía a edificio (`fn`) — así el pasto se agolpa en zonas
+  // fértiles y alrededor de las torres. La inclinación de cada hoja sigue
+  // un campo de ruido coherente (`fbm`) — "el pasto se peina en corrientes".
+  //
+  // `ze(f,out)`: rampa de color pasto→amarillento. El bundle provisto solo
+  // muestra la LLAMADA `ze(valor,s)`, no su cuerpo — se reconstruye aquí
+  // siguiendo el mismo patrón que la rampa análoga del bosque
+  // (`grassColor`/`GRASS_RAMP` de scene.js) pero más apagada, coherente con
+  // "todo del lado oscuro" para que las torres dominen.
+  const GRASS_RAMP_LO = [0.05, 0.09, 0.02]
+  const GRASS_RAMP_HI = [0.30, 0.44, 0.11]
+  function ze(f, out) {
+    out[0] = GRASS_RAMP_LO[0] + (GRASS_RAMP_HI[0] - GRASS_RAMP_LO[0]) * f
+    out[1] = GRASS_RAMP_LO[1] + (GRASS_RAMP_HI[1] - GRASS_RAMP_LO[1]) * f
+    out[2] = GRASS_RAMP_LO[2] + (GRASS_RAMP_HI[2] - GRASS_RAMP_LO[2]) * f
+  }
+  function Dn() {
+    const e = Math.floor(46000 * GRASS)
+    const t = e * 2
+    const n = Math.floor(700 * GRASS)
+    const total = e + n
+    const pos = new Float32Array(total * 12)
+    const col = new Float32Array(total * 12)
+    let o = 0
+    const s = [0, 0, 0]
+    let l
+    for (let c = 0; c < t && o < e; c++) {
+      const u = En()
+      const d = u.cx + (rnd() * 2 - 1) * (u.hx - 0.8)
+      const f = u.cz + (rnd() * 2 - 1) * (u.hz - 0.8)
+      if (nn(u, d, f) > -1 || un(d, f, 0.35)) continue
+      const m = fertility(d, f)
+      const h = fn(d, f)
+      const g = 0.14 + 0.86 * clamp(m * 1.05 + h * 0.9, 0, 1)
+      if (rnd() > g) continue
+      const gy = ln(d, f)
+      const v = (1.6 + rnd() * 1.7) * (0.8 + 0.55 * Math.max(m, h * 0.8))
+      const y = fbm(d * 0.02 + 51, f * 0.02 + 13, 2) * 12.566 + (rnd() - 0.5) * 1.4
+      const b = 0.25 + rnd() * 0.7
+      const x = Math.cos(y) * b
+      const S = Math.sin(y) * b
+      ze(clamp(Math.max(m, h * 0.7) + (rnd() - 0.5) * 0.2, 0, 1), s)
+      const C = 0.45 + 0.55 * (1 - smoothstep(Wt * 0.58, Wt * 1.02, Math.hypot(d, f)))
+      const w = s[0] * C, T = s[1] * C, E = s[2] * C
+      l = o * 12
+      pos[l] = d; pos[l + 1] = gy; pos[l + 2] = f
+      pos[l + 3] = d + x * 0.35; pos[l + 4] = gy + v * 0.62; pos[l + 5] = f + S * 0.35
+      pos[l + 6] = pos[l + 3]; pos[l + 7] = pos[l + 4]; pos[l + 8] = pos[l + 5]
+      pos[l + 9] = d + x; pos[l + 10] = gy + v; pos[l + 11] = f + S
+      col[l] = w * 0.35; col[l + 1] = T * 0.35; col[l + 2] = E * 0.35
+      col[l + 3] = w * 0.85; col[l + 4] = T * 0.85; col[l + 5] = E * 0.85
+      col[l + 6] = col[l + 3]; col[l + 7] = col[l + 4]; col[l + 8] = col[l + 5]
+      col[l + 9] = Math.min(1, w * 1.15); col[l + 10] = Math.min(1, T * 1.15); col[l + 11] = Math.min(1, E * 1.15)
+      o++
+    }
+    // Franja rala de pasto de borde de calle: entre 1 y `Gt` unidades del
+    // borde de manzana (dentro de la calle, cerca del bordillo).
+    let D = 0
+    for (let c = 0; c < n * 4 && D < n; c++) {
+      const O = (rnd() * 2 - 1) * Wt * 0.92
+      const k = (rnd() * 2 - 1) * Wt * 0.92
+      const A = an(O, k)
+      if (A < 1 || A > Gt) continue
+      const j = 0.6 + rnd() * 1
+      const M = rnd() * 6.2832
+      const N = 0.2 + rnd() * 0.4
+      const P = Math.cos(M) * N
+      const F = Math.sin(M) * N
+      const I = 0.1 + rnd() * 0.16
+      l = o * 12
+      pos[l] = O; pos[l + 1] = we; pos[l + 2] = k
+      pos[l + 3] = O + P * 0.4; pos[l + 4] = we + j * 0.6; pos[l + 5] = k + F * 0.4
+      pos[l + 6] = pos[l + 3]; pos[l + 7] = pos[l + 4]; pos[l + 8] = pos[l + 5]
+      pos[l + 9] = O + P; pos[l + 10] = we + j; pos[l + 11] = k + F
+      col[l] = 0.02; col[l + 1] = 0.05; col[l + 2] = 0.012
+      col[l + 3] = I * 0.35; col[l + 4] = I; col[l + 5] = I * 0.22
+      col[l + 6] = col[l + 3]; col[l + 7] = col[l + 4]; col[l + 8] = col[l + 5]
+      col[l + 9] = I * 0.45; col[l + 10] = Math.min(1, I * 1.2); col[l + 11] = I * 0.3
+      o++; D++
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(pos.slice(0, o * 12), 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(col.slice(0, o * 12), 3))
+    scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true })))
+  }
+  Dn()
+
+  // ─── kn: FLORES — puerto fiel de la ESTRUCTURA; helpers reconstruidos ─────
+  // El bundle real llama `it(x,y,z,size,color,sway)` (flor con tallo, con
+  // mecido si sway=1), `tt(x,y,z,color,size)` (flor/pétalo suelto sin
+  // tallo, un solo punto) y `Ft(x,z,size,y)` (arbusto interior de manzana)
+  // — pero ninguna de las tres, ni `rt()` (color de flor al azar) ni `Be`
+  // (paleta con nombre cream/orange/red/yellow), están definidas en el
+  // fragmento del bundle disponible (`.superpowers/port/dn-kn-an-real.min.js`):
+  // solo se ven sus LLAMADAS. La ESTRUCTURA de `kn` (conteos, radios, gates
+  // de colocación, orden de `rnd()`) es puerto VERBATIM; `it`/`tt`/`Ft`/`rt`/
+  // `Be` son reconstrucciones que enrutan por el sistema compartido `draw`
+  // (tallo=línea, cabeza/pétalo=punto), coherentes con el patrón ya
+  // establecido en el bosque (`flower()` de scene.js) pero sin inventar la
+  // paleta a ciegas: `rt()` reusa el MISMO arreglo de 5 colores que el
+  // bundle sí deja verbatim para el "estallido" de pétalos (`oe([[...]])`
+  // en el bucle de arbustos florecidos); `Be` aproxima cream/orange/red/
+  // yellow con tonos cálidos consistentes con `BUILDING_PALETTE`.
+  const FLOWER_PALETTE = [
+    [0.16, 0.30, 0.98],
+    [1, 0.22, 0.12],
+    [1, 0.85, 0.22],
+    [0.97, 0.97, 1],
+    [1, 0.55, 0.10],
+  ]
+  const Be = {
+    cream: [0.99, 0.92, 0.78],
+    orange: [1, 0.55, 0.12],
+    red: [0.95, 0.18, 0.14],
+    yellow: [1, 0.85, 0.15],
+  }
+  function rt() { return pick(FLOWER_PALETTE) }
+  // Flor con tallo: 2 tramos de línea (base→medio→punta, degradado hacia el
+  // color de la cabeza) + cabeza como punto. `sway` habilita el mecido del
+  // shader de puntos (fase aleatoria), igual que el pasto/flora del bosque.
+  function it(x, y, z, size, color, sway) {
+    const h = (1.3 + rnd() * 1.5) * size
+    const ang = rnd() * 6.2832
+    const lean = (0.3 + rnd() * 0.5) * size
+    const lx = Math.cos(ang) * lean, lz = Math.sin(ang) * lean
+    const mx = x + lx * 0.4, my = y + h * 0.55, mz = z + lz * 0.4
+    const tx = x + lx, ty = y + h, tz = z + lz
+    const stemLo = [color[0] * 0.3, color[1] * 0.38, color[2] * 0.22]
+    const stemMid = [color[0] * 0.55, color[1] * 0.6, color[2] * 0.4]
+    draw.pushLine(x, y, z, mx, my, mz, stemLo, stemMid)
+    draw.pushLine(mx, my, mz, tx, ty, tz, stemMid, color)
+    draw.pushPoint(tx, ty + 0.05 * size, tz, color, (0.4 + rnd() * 0.3) * size, sway ? rnd() : 0)
+  }
+  // Pétalo/flor suelta sin tallo: un único punto.
+  function tt(x, y, z, color, size) {
+    draw.pushPoint(x, y, z, color, size, 0)
+  }
+  // Arbusto interior de manzana: un punto grande con tono de pasto (reusa
+  // `ze`); el bundle no le pasa color propio.
+  function Ft(x, z, size, y) {
+    const c = [0, 0, 0]
+    ze(0.2 + rnd() * 0.35, c)
+    draw.pushPoint(x, y, z, c, size, 0)
+  }
+  // Siembra `n` flores con tallo en un disco de radio `r` alrededor de
+  // (cx,cz), evitando calle y edificios.
+  function On(cx, cz, n, r, color) {
+    for (let a = 0; a < n; a++) {
+      const ang = rnd() * 6.2832
+      const dist = r * Math.sqrt(rnd()) * (1 + rnd() * 0.5)
+      const x = cx + Math.cos(ang) * dist
+      const z = cz + Math.sin(ang) * dist
+      if (an(x, z) > -1.1 || un(x, z, 0.4)) continue
+      it(x, ln(x, z), z, 0.45 + rnd() * 0.6, color, 1)
+    }
+  }
+  function kn() {
+    const e = FLOWERS
+    let t, n
+    // Flores alrededor de cada edificio colocado.
+    for (t = 0; t < placed.length; t++) {
+      const r = placed[t]
+      const i = 2 + ((rnd() * 2) | 0)
+      for (n = 0; n < i; n++) {
+        const a = rnd() * 6.2832
+        On(
+          r.cx + Math.cos(a) * (r.hx + 2.5 + rnd() * 3),
+          r.cz + Math.sin(a) * (r.hz + 2.5 + rnd() * 3),
+          Math.round((8 + rnd() * 14) * e),
+          2.2 + rnd() * 2.2,
+          rt(),
+        )
+      }
+    }
+    for (t = 0; t < blocks.length; t++) {
+      const o = blocks[t]
+      // Flores de borde de manzana.
+      const s = 1 + ((rnd() * 3) | 0)
+      for (n = 0; n < s; n++) {
+        const c = rnd() * 6.2832
+        On(
+          o.cx + Math.cos(c) * (o.hx - 3.5),
+          o.cz + Math.sin(c) * (o.hz - 3.5),
+          Math.round((6 + rnd() * 12) * e),
+          2.5 + rnd() * 2.5,
+          rt(),
+        )
+      }
+      // Arbustos en el interior de la manzana.
+      let l = rnd() < 0.75 ? 3 + ((rnd() * 7) | 0) : 0
+      let u = 0
+      while (l > 0 && u++ < 60) {
+        const d = rnd() * 6.2832
+        const f = o.cx + Math.cos(d) * (o.hx - 2.5) * rnd()
+        const m = o.cz + Math.sin(d) * (o.hz - 2.5) * rnd()
+        if (nn(o, f, m) > -1.4 || un(f, m, 0.6)) continue
+        Ft(f, m, 0.7 + rnd() * 0.6, ln(f, m) - 0.15)
+        l--
+      }
+      // "Estallidos" de pétalos (racimo denso sin tallo).
+      const h = 1 + ((rnd() * 3) | 0)
+      for (n = 0; n < h; n++) {
+        const g = rnd() * 6.2832
+        const bx = o.cx + Math.cos(g) * (o.hx - 3) * rnd()
+        const bz = o.cz + Math.sin(g) * (o.hz - 3) * rnd()
+        if (nn(o, bx, bz) > -1.5) continue
+        const y = pick(FLOWER_PALETTE)
+        const b = Math.round((14 + rnd() * 22) * e)
+        for (let x = 0; x < b; x++) {
+          const S = rnd() * 6.2832
+          const C = Math.pow(rnd(), 0.7) * (1.6 + rnd() * 1.6)
+          const w = bx + Math.cos(S) * C
+          const T = bz + Math.sin(S) * C
+          if (an(w, T) > -0.8) continue
+          tt(w, ln(w, T) + 0.25 + rnd() * 0.5, T, y, 0.1 + rnd() * 0.12)
+        }
+      }
+      // Flores de bordillo (pegadas al borde exterior de la manzana).
+      const E = Math.round((16 + rnd() * 20) * e)
+      for (n = 0; n < E; n++) {
+        const D = rnd() * 6.2832
+        const O = o.cx + Math.cos(D) * (o.hx + 0.5)
+        const k = o.cz + Math.sin(D) * (o.hz + 0.5)
+        const A = an(O, k)
+        if (A < 0.3 || A > 2.6) continue
+        tt(O, we + 0.12 + rnd() * 0.3, k, rnd() < 0.6 ? Be.cream : Be.orange, 0.1 + rnd() * 0.12)
+      }
+    }
+    // Flores con tallo esparcidas por manzanas al azar (ponderadas por área).
+    const j = Math.round(130 * e)
+    for (t = 0; t < j; t++) {
+      const M = En()
+      const N = M.cx + (rnd() * 2 - 1) * (M.hx - 2)
+      const P = M.cz + (rnd() * 2 - 1) * (M.hz - 2)
+      if (nn(M, N, P) > -1.2 || un(N, P, 0.4)) continue
+      it(N, ln(N, P), P, 0.5 + rnd() * 0.7, rt(), 1)
+    }
+    // Flores sueltas (sin tallo) esparcidas por manzanas al azar.
+    const F = Math.round(320 * e)
+    for (t = 0; t < F; t++) {
+      const I = En()
+      const L = I.cx + (rnd() * 2 - 1) * (I.hx - 1.5)
+      const R = I.cz + (rnd() * 2 - 1) * (I.hz - 1.5)
+      if (nn(I, L, R) > -1 || un(L, R, 0.3)) continue
+      const z = rnd() < 0.14 ? Be.red : rnd() < 0.5 ? Be.cream : Be.yellow
+      tt(L, ln(L, R) + 0.9 + rnd() * 1.1, R, z, 0.12 + rnd() * 0.14)
+    }
+  }
+  kn()
+
+  // ─── An: POLVO/BRUMA — puerto fiel ──────────────────────────────────────
+  // 2400 puntos naranjas, más densos cerca del borde de manzana (`an` =
+  // distancia con signo a la manzana más cercana; `rnd() > exp(-s/3)`
+  // descarta a medida que uno se aleja de las 7 unidades de rango). Mesh y
+  // shader PROPIOS (no pasa por `draw`): ShaderMaterial con tamaño de punto
+  // en unidades de mundo (clamp 1..96px, tamaño base 2.6-7.8) y color fijo
+  // naranja `(1,.52,.15)` con blending aditivo — mismo patrón que el shader
+  // de puntos de `draw`, pero el bundle real lo arma aparte para este
+  // efecto puntual. Se reusa el MISMO objeto `draw.uniforms.uProj` para que
+  // el resize hook existente también actualice esta malla sin duplicar
+  // wiring.
+  function An() {
+    const target = 2400
+    const pos = []
+    const size = []
+    let r = 0
+    for (let i = target * 8; r < target && i-- > 0;) {
+      const a = (rnd() * 2 - 1) * Wt
+      const o = (rnd() * 2 - 1) * Wt
+      const s = an(a, o)
+      if (s < 0.1 || s > 7 || rnd() > Math.exp(-s / 3)) continue
+      pos.push(a, we + 0.25 + rnd() * 2.4, o)
+      size.push(2.6 + rnd() * 5.2)
+      r++
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+    geo.setAttribute('hsize', new THREE.BufferAttribute(new Float32Array(size), 1))
+    const dustMaterial = new THREE.ShaderMaterial({
+      uniforms: { uProj: draw.uniforms.uProj },
+      vertexShader: [
+        'attribute float hsize; uniform float uProj;',
+        'void main(){',
+        '  vec4 mv=modelViewMatrix*vec4(position,1.0);',
+        '  gl_PointSize=clamp(hsize*uProj/max(-mv.z,0.001),1.0,96.0);',
+        '  gl_Position=projectionMatrix*mv;',
+        '}',
+      ].join('\n'),
+      fragmentShader: [
+        'precision mediump float;',
+        'void main(){',
+        '  vec2 uv=gl_PointCoord-0.5; float d2=dot(uv,uv);',
+        '  if(d2>0.25) discard;',
+        '  float a=1.0-sqrt(d2)*2.0; a=a*a*0.13;',
+        '  gl_FragColor=vec4(1.0,0.52,0.15,1.0)*a;',
+        '}',
+      ].join('\n'),
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+    })
+    const pts = new THREE.Points(geo, dustMaterial)
+    pts.frustumCulled = false
+    scene.add(pts)
+  }
+  An()
+
   stage.setResizeHook((m) => { draw.uniforms.uProj.value = m.proj })
 
-  // IMPORTANTE: finalizePoints sube el buffer de puntos a la GPU una sola vez.
-  // Las tareas siguientes (edificios, pasto, polvo, agentes) deben empujar
-  // sus puntos con draw.pushPoint ANTES de esta llamada — no después de ella.
+  // IMPORTANTE: finalizePoints/finalizeLines suben los buffers de `draw` a
+  // la GPU una sola vez. Todo `draw.pushPoint`/`draw.pushLine` (los tallos y
+  // cabezas de flor de `kn`) debe empujarse ANTES de esta llamada — no
+  // después de ella. `Dn` (pasto) y `An` (polvo) NO pasan por `draw`: arman
+  // su propia malla, como el bundle real.
+  draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true }))
   draw.finalizePoints(scene)
 
   function update(swarm, dt, eco) {
