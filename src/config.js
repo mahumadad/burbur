@@ -128,6 +128,17 @@ export const CONFIG = {
       turnRate: 0.7, bias: 1.2, noise: 0.8,
       maxSpeed: 0.14, protrusionGain: 1.6, atpFloor: 0.3,
     },
+    // Ciclo celular real (spec 2026-08-11-ciclo-y-division-celula.md §4): un
+    // macrófago vive casi siempre en G0 y solo entra en ciclo con señal
+    // mitogénica SOSTENIDA (nutrientes o inflamación). Ver sim/cellCycle.js.
+    cycle: {
+      atpMin: 0.55,
+      mitogenicMedia: ['nutrient rich', 'inflamed'],
+      readinessRate: 0.05,     // ~20 s sostenidos para decidirse
+      readinessDecay: 0.12,    // se desarma más rápido de lo que se arma
+      g1: 18, s: 22, g2: 12, m: 16, cyto: 8,
+      refractory: 90,          // no se divide en cadena
+    },
     // Sustrato: se dibuja como un TILE periódico que se repite y hace wrap, así
     // nunca se acaba por mucho que la célula avance (antes se deslizaba fuera de
     // cuadro y todo parecía estático). Las fibras de matriz (ECM) dan la

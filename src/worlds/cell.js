@@ -10,15 +10,16 @@ import { createRails, updateRails, nearestOnRails } from '../sim/rails.js'
 import { createAtpPool, spawnQuantum, updateAtp } from '../sim/atp.js'
 import { createInvaders, spawnInvader, updateInvaders } from '../sim/invaders.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
-import { MITOTIC_PHASES } from '../sim/ecosystem.js'
 import { roleFor, applyRoleBias } from '../sim/traffic.js'
 import { createMotors, updateMotors, motorPosition } from '../sim/motors.js'
 import { mitosisState } from '../sim/mitosis.js'
+import { STAGE, createCycle, updateCycle, mitoticSubPhase } from '../sim/cellCycle.js'
 import { createMitosisDraw } from './cell/mitosis.js'
 import { createPhagosomes } from './cell/phagocytosis.js'
 import { createMitoFusion } from './cell/mitoFusion.js'
 import { mediumMods, createMediumEffects } from './cell/medium.js'
 import { addTissueNeighbors } from './cell/tissue.js'
+import { createDaughters } from './cell/daughter.js'
 
 // MUNDO CÉLULA — un macrófago reptando sobre un sustrato, visto desde arriba.
 //
@@ -89,7 +90,13 @@ export function createCellScene(container, cfg, agentNames = []) {
   const kit = createAgentKit(rc)
 
   // ─── Simulación (todo puro, de src/sim) ───────────────────────────────────
-  const membrane = createMembrane(cc.membrane, rnd)
+  // Copia MUTABLE del config de membrana: al dividirse, la madre encoge su
+  // `baseR` y lo recupera durante ~40s (§6 del spec). `cc.membrane` es el
+  // CONFIG global compartido entre mundos — mutarlo directo dejaría la
+  // célula "achicada" para siempre, incluso en la próxima escena.
+  const membraneCfg = { ...cc.membrane }
+  const baseRNominal = cc.membrane.baseR
+  const membrane = createMembrane(membraneCfg, rnd)
   const motility = createMotility(cc.motility, rnd)
   const rails = createRails(cc.rails, rnd)
   const motors = createMotors(cc.motors, rails.rails.length, rnd)
@@ -97,6 +104,13 @@ export function createCellScene(container, cfg, agentNames = []) {
   const invaders = createInvaders(cc.invaders)
   const n = cfg.fireflies.count
   const roamers = createRoamers(cc.wander, n, rnd)
+  // Ciclo celular real (§7): máquina aparte, gateada por señal, que ya NO es
+  // el reloj del mundo (eso lo sigue siendo eco.phase, el ritmo funcional).
+  const cycle = createCycle(cc.cycle)
+  // Encogimiento post-división: null = no está encogiendo/recuperando.
+  let shrinkClock = null
+  const SHRINK_TO = 0.72     // fracción del baseR nominal tras dividir
+  const SHRINK_RECOVER = 40  // segundos hasta recuperar el tamaño nominal
   // Fuente de quimioatrayente (coords normalizadas, fijas al sustrato): la
   // célula la persigue. Al alcanzarla, aparece otra lejos. `prevSub` sirve para
   // arrastrar la fuente con el sustrato cada frame.
@@ -177,6 +191,9 @@ export function createCellScene(container, cfg, agentNames = []) {
   // ─── TEJIDO VECINO (M10): contornos parciales de otras células, paisaje ──
   // Dentro de `substrate` para deslizarse con él: se acercan y alejan al migrar.
   addTissueNeighbors(substrate, { R, H, rnd, color: PALETTE.cyanSat })
+
+  // ─── LA HIJA (§6): pool de 3, nace al dividirse el ciclo ──────────────────
+  const daughters = createDaughters(substrate, { R, rnd, color: rgb(PALETTE.cyanSat) })
 
   // ─── ADHESIONES FOCALES: nacen bajo el frente, quedan CLAVADAS al sustrato ─
   // y desfilan hacia atrás relativas a la célula — el indicador de velocidad más
@@ -646,9 +663,6 @@ export function createCellScene(container, cfg, agentNames = []) {
   let clock = 0
   let rounding = 0, roundTarget = 0
   let calciumCooldown = 5
-  // Flag del evento de división (M4): se emite una sola vez por ciclo, al
-  // cruzar furrow >= 0.95, y se rearma cuando furrow vuelve a 0.
-  let divisionFired = false
 
   function drawMembrane(front, furrow = 0, tint = 0) {
     memBuf.begin()
@@ -907,26 +921,49 @@ export function createCellScene(container, cfg, agentNames = []) {
     // M7 — que el medio se vea: modificadores puros derivados de eco.weather
     // (más blebbing, menos ATP, invasores más seguido, mitocondrias apagadas).
     const mm = mediumMods(eco ? eco.weather : undefined, eco ? eco.rain : 0)
-    // En mitosis la célula suelta las adherencias, se redondea y deja de reptar.
-    // Entra y sale con rampa: el redondeo real tarda, no es un interruptor.
-    const inMitosis = eco ? MITOTIC_PHASES.has(eco.phase) : false
+
+    // Ciclo celular real (§7 del spec): máquina APARTE del reloj del mundo,
+    // gateada por señal (ATP + medio mitogénico). Vive casi siempre en G0.
+    const cycleEvents = updateCycle(cycle, cc.cycle, step, {
+      atp: atp.budget, medium: eco ? eco.weather : undefined,
+    })
+    for (const ev of cycleEvents) {
+      events.push({ type: 'moment', agent: 'el núcleo', agentType: 'structure', kind: ev.kind })
+      if (ev.kind === 'divide') {
+        // Nace la hija, pegada a la madre y desplazada perpendicular al eje
+        // del huso; la madre encoge — cada hija se lleva la mitad.
+        const motherR = radiusAt(membrane, Math.PI / 2) * R
+        daughters.spawn({ subX: motility.subX, subZ: motility.subZ, motherR })
+        membraneCfg.baseR = baseRNominal * SHRINK_TO
+        shrinkClock = 0
+      }
+    }
+    // Recuperación del tamaño nominal tras dividir, en rampa (~40 s).
+    if (shrinkClock !== null) {
+      shrinkClock += step
+      const u = Math.min(1, shrinkClock / SHRINK_RECOVER)
+      membraneCfg.baseR = baseRNominal * (SHRINK_TO + (1 - SHRINK_TO) * u)
+      if (u >= 1) shrinkClock = null
+    }
+
+    // En mitosis (fase M/citocinesis DEL CICLO, ya no del reloj) la célula
+    // suelta las adherencias, se redondea y deja de reptar. Entra y sale con
+    // rampa: el redondeo real tarda, no es un interruptor.
+    const inMitosis = cycle.stage === STAGE.M || cycle.stage === STAGE.CYTO
     roundTarget = inMitosis ? 1 : 0
     rounding += (roundTarget - rounding) * (1 - Math.exp(-step / 2.5))
 
     // Mitosis (M4): condensación de cromatina, alineación, separación y
-    // surco del ciclo actual, traducidos por el módulo puro sim/mitosis.js.
-    const mit = mitosisState(eco ? eco.phase : undefined, eco ? eco.phaseT : 0)
-    if (mit.furrow >= 0.95 && !divisionFired) {
-      divisionFired = true
-      events.push({ type: 'moment', agent: 'el núcleo', agentType: 'structure', kind: 'division' })
-    }
-    if (mit.furrow < 0.02) divisionFired = false
+    // surco, traducidos por el módulo puro sim/mitosis.js a partir de la
+    // sub-fase que expone el ciclo (ya no de eco.phase).
+    const sub = mitoticSubPhase(cycle)
+    const mit = mitosisState(sub.phase, sub.phaseT)
 
     // ── Simulación ──────────────────────────────────────────────────────────
     updateMotility(motility, cc.motility, step, rnd, {
       source, atp: atp.budget, adhesion: 0.5, rounding,
     })
-    updateMembrane(membrane, cc.membrane, step, rnd, clock, {
+    updateMembrane(membrane, membraneCfg, step, rnd, clock, {
       frontAngle: motility.frontAngle,
       protrusion: motility.protrusion,
       // M7 (acidic): un empujón visual extra al blebbing, solo en el render
@@ -1073,6 +1110,7 @@ export function createCellScene(container, cfg, agentNames = []) {
     mitosisDraw.update(mit)
     drawInvaders()
     drawAdhesions(motility.subX, motility.subZ)
+    daughters.update(step, { subX: motility.subX, subZ: motility.subZ })
     for (let i = 0; i < cc.atp.capacity; i++) {
       const q = atp.quanta[i]
       atpCloud.pos[i * 3] = q.alive ? q.x * R : 0
