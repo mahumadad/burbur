@@ -198,7 +198,17 @@ export const CONFIG = {
     // Ajustado al look de placa de cultivo (referencia del usuario): más puntas
     // = borde más plumoso; más ramificación + autotropismo = rosetón radial que
     // se esparce parejo; más widthGain = rizomorfos (cordones) marcados.
-    mycelium: { maxNodes: 1600, maxEdges: 1700, maxTips: 140, stepLen: 0.033, tipSpeed: 0.055, turnRate: 2.0, noise: 0.8, tropism: 0.7, autotropism: 0.75, branchRate: 0.7, fuseRadius: 0.02, widthGain: 0.95, widthDecay: 0.035, flowDecay: 0.35, pruneBelow: 0.1, pruneRate: 0.5, bound: 0.62 },
+    // Rosetón de placa: `radial` orienta las puntas hacia afuera del inóculo
+    // (crecimiento radial, no garabato). `tipSpeed` bajo + poco pre-crecido =
+    // la colonia se toma el tronco DE A POCO, que es lo que se quiere ver.
+    // Denso: muchas puntas y ramificación alta, pasos cortos.
+    mycelium: {
+      maxNodes: 2600, maxEdges: 2800, maxTips: 260,
+      stepLen: 0.016, tipSpeed: 0.017, turnRate: 1.6, noise: 0.55,
+      tropism: 0.55, autotropism: 0.9, radial: 2.6, branchRate: 1.1,
+      fuseRadius: 0.009, widthGain: 0.95, widthDecay: 0.035, flowDecay: 0.35,
+      pruneBelow: 0.1, pruneRate: 0.5, bound: 0.62,
+    },
     // Cuánto esfuerzo de forrajeo aplica cada punta por segundo. Es lo que
     // agota el sustrato y, por lo tanto, lo que hace que la red se remodele.
     eatRate: 2.2,
