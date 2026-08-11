@@ -11,7 +11,12 @@ const CSS = `
   -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
           mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
 }
-.evlog h4 { margin: 0 0 9px; font-size: 10.5px; letter-spacing: 0.14em; color: #eafff0; font-weight: 600; }
+.evlog h4 { margin: 0 0 9px; font-size: 10.5px; letter-spacing: 0.14em; color: #eafff0; font-weight: 600;
+  display: flex; align-items: center; cursor: pointer; }
+.evlog h4 .tgl { margin-left: auto; padding-left: 16px; opacity: .5; font-weight: 400; }
+.evlog.collapsed { width: auto; max-height: none; -webkit-mask-image: none; mask-image: none; }
+.evlog.collapsed h4 { margin: 0; }
+.evlog.collapsed [data-f="rows"] { display: none; }
 .evlog .row { display: flex; gap: 9px; margin-bottom: 7px; }
 .evlog .ts { color: #6a8; flex: 0 0 auto; }
 .evlog .tx { color: #cfe; }
@@ -48,9 +53,16 @@ export function createEventLog(accent = '#8fe04a', max = 14) {
 
   const box = document.createElement('div')
   box.className = 'evlog'
-  box.innerHTML = `<h4>REGISTRO</h4><div data-f="rows"></div>`
+  box.innerHTML = `<h4>REGISTRO<span class="tgl">–</span></h4><div data-f="rows"></div>`
   document.body.appendChild(box)
   const rowsEl = box.querySelector('[data-f="rows"]')
+
+  // Minimizar: tap en el título colapsa/expande. En mobile arranca colapsado.
+  const h4 = box.querySelector('h4')
+  const tgl = h4.querySelector('.tgl')
+  function setCollapsed(c) { box.classList.toggle('collapsed', c); tgl.textContent = c ? '+' : '–' }
+  h4.addEventListener('click', () => setCollapsed(!box.classList.contains('collapsed')))
+  if (window.innerWidth < 700) setCollapsed(true)
 
   const rows = []
   function push(ev, timeLabel) {

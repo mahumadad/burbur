@@ -11,7 +11,12 @@ const CSS = `
   letter-spacing: 0.06em; text-transform: uppercase; color: #cfe6d6;
   user-select: none;
 }
-.eco h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; color: #eafff0; font-weight: 600; }
+.eco h4 { margin: 0 0 8px; font-size: 11px; letter-spacing: 0.12em; color: #eafff0; font-weight: 600;
+  display: flex; align-items: center; cursor: pointer; }
+.eco h4 .tgl { margin-left: auto; padding-left: 16px; opacity: .5; font-weight: 400; }
+.eco.collapsed { width: auto; }
+.eco.collapsed h4 { margin: 0; }
+.eco.collapsed > :not(h4) { display: none !important; }
 .eco .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--accent, #8fe04a); margin-right: 7px; vertical-align: middle; }
 .eco .row { display: flex; justify-content: space-between; gap: 10px; }
@@ -35,7 +40,7 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
   el.className = 'eco'
   // El acento lo controla :root (--accent) según el mundo activo; el CSS ya lo lee.
   el.innerHTML = `
-    <h4><span class="dot"></span>ECOSISTEMA</h4>
+    <h4><span class="dot"></span>ECOSISTEMA<span class="tgl">–</span></h4>
     <div class="row"><span data-l="time">HORA</span><span data-f="time">—</span></div>
     <div class="row"><span data-l="weather">CLIMA</span><span data-f="weather">—</span></div>
     <div class="row" data-row="season"><span data-l="season">ESTACIÓN</span><span data-f="season">—</span></div>
@@ -49,6 +54,14 @@ export function createHud(accent = '#8fe04a', hooks = {}) {
     <div class="row"><span>MÚSICA</span><input type="range" data-f="music" min="0" max="100" value="100"></div>
     <div class="row"><span>MUNDO</span><input type="range" data-f="world" min="0" max="100" value="100"></div>`
   document.body.appendChild(el)
+
+  // Minimizar: tap en el título colapsa/expande. En pantallas chicas (mobile)
+  // arranca colapsado para no tapar el mundo.
+  const h4 = el.querySelector('h4')
+  const tgl = h4.querySelector('.tgl')
+  function setCollapsed(c) { el.classList.toggle('collapsed', c); tgl.textContent = c ? '+' : '–' }
+  h4.addEventListener('click', () => setCollapsed(!el.classList.contains('collapsed')))
+  if (window.innerWidth < 700) setCollapsed(true)
 
   const f = {}
   el.querySelectorAll('[data-f]').forEach((n) => { f[n.dataset.f] = n })
