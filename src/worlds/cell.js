@@ -11,6 +11,10 @@ import { createAtpPool, spawnQuantum, updateAtp } from '../sim/atp.js'
 import { createInvaders, spawnInvader, updateInvaders } from '../sim/invaders.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { MITOTIC_PHASES } from '../sim/ecosystem.js'
+import { roleFor, applyRoleBias } from '../sim/traffic.js'
+import { createMotors, updateMotors, motorPosition } from '../sim/motors.js'
+import { mitosisState } from '../sim/mitosis.js'
+import { createMitosisDraw } from './cell/mitosis.js'
 
 // MUNDO CÉLULA — un macrófago reptando sobre un sustrato, visto desde arriba.
 //
@@ -40,6 +44,19 @@ const C_INVADER = rgb(PALETTE.magenta)
 const C_ATP_POP = rgb(PALETTE.yellow)
 const C_SUBSTRATE = [0.30, 0.34, 0.52]
 
+// Distancia angular mínima (0..π) entre dos ángulos, dando la vuelta corta.
+function angDist(a, b) {
+  const d = Math.abs(a - b) % (Math.PI * 2)
+  return d > Math.PI ? Math.PI * 2 - d : d
+}
+// Surco de citocinesis (M4): gaussiana centrada en los dos ángulos
+// perpendiculares al eje del huso (que es el eje x local, ver cell/mitosis.js).
+const FURROW_SIGMA = 0.55
+function furrowGauss(a) {
+  const d = Math.min(angDist(a, Math.PI / 2), angDist(a, -Math.PI / 2))
+  return Math.exp(-(d * d) / (2 * FURROW_SIGMA * FURROW_SIGMA))
+}
+
 // Pool FIJO de "pops" de consumo de ATP (M2): un punto que crece y se apaga
 // en ~0.25s en cada entrega. Fijo a propósito, como el resto de los pools del
 // mundo — con más entregas que slots libres, algunas simplemente no destellan.
@@ -51,6 +68,9 @@ export function createCellScene(container, cfg, agentNames = []) {
   const cc = cfg.cell
   const rc = cfg.render
   const H = cc.height
+  // Radio y altura del núcleo: se usan acá y en el dibujo de la mitosis (M4).
+  const NR = cc.nucleusR * R
+  const NY = H * 0.25
 
   const stage = createStage(container, cfg)
   const { scene, camera, controls } = stage
@@ -65,6 +85,7 @@ export function createCellScene(container, cfg, agentNames = []) {
   const membrane = createMembrane(cc.membrane, rnd)
   const motility = createMotility(cc.motility, rnd)
   const rails = createRails(cc.rails, rnd)
+  const motors = createMotors(cc.motors, rails.rails.length, rnd)
   const atp = createAtpPool(cc.atp)
   const invaders = createInvaders(cc.invaders)
   const n = cfg.fireflies.count
@@ -158,8 +179,6 @@ export function createCellScene(container, cfg, agentNames = []) {
   // ─── NÚCLEO, NUCLEOLO, ER Y GOLGI: el paisaje interior, estático ──────────
   // Recetas de spec §4.2bis, extraídas de los modelos 3D de referencia.
   {
-    const NR = cc.nucleusR * R
-    const NY = H * 0.25
     // Domo SÓLIDO translúcido: le da cuerpo al núcleo bajo el wireframe (el
     // usuario pidió elementos más sólidos, no solo líneas). Blend normal, muy
     // tenue, para que se lea como un volumen vidrioso sin tapar lo de dentro.
@@ -212,17 +231,9 @@ export function createCellScene(container, cfg, agentNames = []) {
         )
       }
     }
-    // Cromatina: hebras que serpentean dentro del núcleo, densas.
-    for (let i = 0; i < 40; i++) {
-      let x = (rnd() - 0.5) * NR, y = (rnd() - 0.5) * NR, z = (rnd() - 0.5) * NR
-      for (let k = 0; k < 8; k++) {
-        const nx2 = x + (rnd() - 0.5) * NR * 0.5
-        const ny2 = y + (rnd() - 0.5) * NR * 0.5
-        const nz2 = z + (rnd() - 0.5) * NR * 0.5
-        draw.pushLine(x, NY + y, z, nx2, NY + ny2, nz2, C_CHROMATIN, C_CHROMATIN)
-        x = nx2; y = ny2; z = nz2
-      }
-    }
+    // Cromatina: ver cell/mitosis.js (M4) — pasó a un buffer DINÁMICO propio
+    // (chromatinBuf) porque se condensa y se separa durante la mitosis; una
+    // geometría estática subida una sola vez no puede animarse.
 
     // Filamentos intermedios: jaula de lazos ondulados alrededor del núcleo
     // (el "muelle" del modelo de citoesqueleto). Sostienen el núcleo.
@@ -382,6 +393,11 @@ export function createCellScene(container, cfg, agentNames = []) {
   draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.75 }))
   draw.finalizePoints(scene)
 
+  // ─── MITOSIS (M4): cromatina/cromosomas/huso, redibujados cada frame ──────
+  const mitosisDraw = createMitosisDraw({
+    scene, NR, NY, rnd, chromatinColor: C_CHROMATIN, spindleColor: C_CORTEX,
+  })
+
   // ─── MEMBRANA: dos contornos (la bicapa) + un punto por vértice ───────────
   const MV = cc.membrane.verts
   const memMat = new THREE.LineBasicMaterial({ vertexColors: true })
@@ -438,6 +454,12 @@ export function createCellScene(container, cfg, agentNames = []) {
   }
   scene.add(mtBeads.mesh)
 
+  // ─── MOTORES (M5): kinesina/dineína caminando sobre los rieles ───────────
+  // El color se recalcula cada frame porque al reengancharse cambian de rumbo.
+  const motorCloud = createPointCloud(cc.motors.count, draw.pointMaterial)
+  const C_KINESIN = rgb(PALETTE.cyanEye), C_DYNEIN = rgb(PALETTE.bond)
+  scene.add(motorCloud.mesh)
+
   // ─── ATP: los cuantos, que son también el latido sonoro del mundo ─────────
   const atpCloud = createPointCloud(cc.atp.capacity, draw.pointMaterial)
   for (let i = 0; i < cc.atp.capacity; i++) {
@@ -487,9 +509,12 @@ export function createCellScene(container, cfg, agentNames = []) {
     }
   }
   const KINDS = ['mitochondrion', 'vesicle', 'lysosome', 'endosome']
+  // Rol de tráfico por organelo (M3): qué motor lo lleva y hacia dónde.
+  const roles = []
   const agents = []
   for (let i = 0; i < n; i++) {
     const kind = KINDS[i % KINDS.length]
+    roles.push(roleFor(kind))
     const group = new THREE.Group()
     if (kind === 'mitochondrion') {
       // Cápsula con CRESTAS transversales onduladas (receta del modelo usdz,
@@ -595,13 +620,22 @@ export function createCellScene(container, cfg, agentNames = []) {
   let clock = 0
   let rounding = 0, roundTarget = 0
   let calciumCooldown = 5
+  // Flag del evento de división (M4): se emite una sola vez por ciclo, al
+  // cruzar furrow >= 0.95, y se rearma cuando furrow vuelve a 0.
+  let divisionFired = false
 
-  function drawMembrane(front) {
+  function drawMembrane(front, furrow = 0) {
     memBuf.begin()
     const step = (Math.PI * 2) / MV
     for (let i = 0; i < MV; i++) {
       const a = i * step, b = ((i + 1) % MV) * step
-      const r1 = radiusAt(membrane, a) * R, r2 = radiusAt(membrane, b) * R
+      let r1 = radiusAt(membrane, a) * R, r2 = radiusAt(membrane, b) * R
+      // Surco de citocinesis: se estrangula en la banda perpendicular al eje
+      // del huso, hasta ~55% del radio con furrow=1.
+      if (furrow > 0) {
+        r1 *= 1 - furrow * 0.55 * furrowGauss(a)
+        r2 *= 1 - furrow * 0.55 * furrowGauss(b)
+      }
       const x1 = Math.cos(a) * r1, z1 = Math.sin(a) * r1
       const x2 = Math.cos(b) * r2, z2 = Math.sin(b) * r2
       // El frente activo se pinta cian; el resto, blanco.
@@ -731,6 +765,23 @@ export function createCellScene(container, cfg, agentNames = []) {
     mtBeads.commit()
   }
 
+  /** Motores (M5): un punto por motor sobre su riel, coloreado según sentido. */
+  function drawMotors() {
+    for (let i = 0; i < motors.length; i++) {
+      const m = motors[i]
+      const p = motorPosition(m, rails) // ya incluye el origen, en coords normalizadas
+      motorCloud.pos[i * 3] = p.x * R
+      motorCloud.pos[i * 3 + 1] = H * 0.15
+      motorCloud.pos[i * 3 + 2] = p.z * R
+      // Dos tonos según sentido: kinesina (+1, hacia afuera) vs dineína (-1,
+      // hacia adentro). Se recalcula cada frame porque al reengancharse cambian.
+      const c = m.dir === 1 ? C_KINESIN : C_DYNEIN
+      motorCloud.col[i * 3] = c[0]; motorCloud.col[i * 3 + 1] = c[1]; motorCloud.col[i * 3 + 2] = c[2]
+      motorCloud.size[i] = m.cargo ? 0.5 : 0.35
+    }
+    motorCloud.commit()
+  }
+
   function drawInvaders() {
     invBuf.begin()
     for (const inv of invaders) {
@@ -827,6 +878,15 @@ export function createCellScene(container, cfg, agentNames = []) {
     roundTarget = inMitosis ? 1 : 0
     rounding += (roundTarget - rounding) * (1 - Math.exp(-step / 2.5))
 
+    // Mitosis (M4): condensación de cromatina, alineación, separación y
+    // surco del ciclo actual, traducidos por el módulo puro sim/mitosis.js.
+    const mit = mitosisState(eco ? eco.phase : undefined, eco ? eco.phaseT : 0)
+    if (mit.furrow >= 0.95 && !divisionFired) {
+      divisionFired = true
+      events.push({ type: 'moment', agent: 'el núcleo', agentType: 'structure', kind: 'division' })
+    }
+    if (mit.furrow < 0.02) divisionFired = false
+
     // ── Simulación ──────────────────────────────────────────────────────────
     updateMotility(motility, cc.motility, step, rnd, {
       source, atp: atp.budget, adhesion: 0.5, rounding,
@@ -838,6 +898,7 @@ export function createCellScene(container, cfg, agentNames = []) {
       rounding,
     })
     updateRails(rails, cc.rails, step, rnd)
+    updateMotors(motors, rails, cc.motors, step, rnd)
 
     // Las mitocondrias sueltan ATP; el destello del swarm marca el pulso.
     if (swarm) {
@@ -915,6 +976,9 @@ export function createCellScene(container, cfg, agentNames = []) {
 
     // ── Organelos: deambulan SOBRE los rieles, contenidos por la membrana ───
     updateRoamers(roamers, cc.wander, step, rnd, clock, rails, nearestOnRails)
+    // Sesgo direccional (M3): lo secretor deriva hacia la membrana, lo
+    // digestivo hacia el centro — el tráfico se lee sin etiquetas.
+    applyRoleBias(roamers, roles, cc.traffic, step)
     for (let i = 0; i < n; i++) {
       const r = roamers[i]
       // La contención no es un círculo: es el contorno vivo de la membrana.
@@ -939,9 +1003,11 @@ export function createCellScene(container, cfg, agentNames = []) {
     }
 
     // ── Dibujo ──────────────────────────────────────────────────────────────
-    drawMembrane(motility.frontAngle)
+    drawMembrane(motility.frontAngle, mit.furrow)
     drawCortex(motility.frontAngle, motility.protrusion * (1 - rounding))
     drawRails()
+    drawMotors()
+    mitosisDraw.update(mit)
     drawInvaders()
     drawAdhesions(motility.subX, motility.subZ)
     for (let i = 0; i < cc.atp.capacity; i++) {
