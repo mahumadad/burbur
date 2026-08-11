@@ -28,8 +28,12 @@ function pintarPoligono(ctx, pts, cx, cy, escala, rot, color) {
 const rgb = (c, k = 1) =>
   `rgb(${Math.round(c[0] * 255 * k)},${Math.round(c[1] * 255 * k)},${Math.round(c[2] * 255 * k)})`
 
-/** Cinco siluetas repartidas en la celda, para que el racimo se lea como copa. */
-function pintarRacimo(ctx, pts, ox, oy, colores) {
+/**
+ * Cinco siluetas repartidas en la celda, para que el racimo se lea como copa.
+ * Si `centro` viene dado (flores), pinta además un puntito de estambres al medio
+ * de cada silueta.
+ */
+function pintarRacimo(ctx, pts, ox, oy, colores, centro = null) {
   const disposicion = [
     [0.50, 0.50, 0.86, 0.0], [0.30, 0.34, 0.66, -0.7], [0.70, 0.32, 0.66, 0.6],
     [0.32, 0.70, 0.60, 2.4], [0.70, 0.70, 0.60, -2.2],
@@ -39,7 +43,14 @@ function pintarRacimo(ctx, pts, ox, oy, colores) {
     const c = colores[i % colores.length]
     // Las de atrás van más oscuras: da profundidad sin luz real.
     const k = i === 0 ? 1 : 0.78
-    pintarPoligono(ctx, pts, ox + fx * CELDA, oy + fy * CELDA, esc * CELDA, rot, rgb(c, k))
+    const cx = ox + fx * CELDA, cy = oy + fy * CELDA
+    pintarPoligono(ctx, pts, cx, cy, esc * CELDA, rot, rgb(c, k))
+    if (centro) {
+      ctx.beginPath()
+      ctx.arc(cx, cy, esc * CELDA * 0.14, 0, Math.PI * 2)
+      ctx.fillStyle = rgb(centro, k)
+      ctx.fill()
+    }
   }
 }
 
@@ -60,7 +71,7 @@ export function buildAtlas(especie, THREE) {
   }
 
   if (def.colors.flower) {
-    pintarRacimo(ctx, leafShape(especie, 'flower'), CELDA, 0, def.colors.flower)
+    pintarRacimo(ctx, leafShape(especie, 'flower'), CELDA, 0, def.colors.flower, def.colors.center)
   }
   if (def.colors.fruit) {
     pintarPoligono(ctx, leafShape(especie, 'fruit'),

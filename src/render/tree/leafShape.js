@@ -20,7 +20,9 @@ export function leafShape(especie, tipo = 'leaf') {
   if (tipo === 'fruit') return circulo(0.42, 0)
   if (tipo === 'flower') {
     const petalos = s.petals || 5
-    return circulo(0.44, petalos, 0.13)   // margarita: lóbulos anchos
+    // `blossomNotch` marca cuánto se hunde la punta de cada pétalo: alto en el
+    // sakura (la muesca del cerezo), suave o nulo en flores redondas.
+    return blossom(petalos, s.blossomNotch != null ? s.blossomNotch : 0.15)
   }
   const f = { ...FORMA_POR_DEFECTO, ...(s.leaf || {}) }
   const pts = []
@@ -36,6 +38,27 @@ export function leafShape(especie, tipo = 'leaf') {
   }
   // Espejo para cerrar el contorno por el otro lado.
   for (let i = N - 1; i >= 0; i--) pts.push([-pts[i][0], pts[i][1]])
+  return pts
+}
+
+/**
+ * Flor de pétalos separados. Cada pétalo es un lóbulo redondo con una MUESCA en
+ * la punta (la marca del cerezo): entre pétalos el contorno cae casi al centro,
+ * y en la punta de cada uno se hunde según `notch`. Con `notch` alto sale una
+ * flor de sakura; con `notch` bajo, una flor redonda tipo margarita.
+ */
+function blossom(petalos, notch = 0.15, rInterior = 0.14) {
+  const pts = []
+  const M = 112
+  for (let i = 0; i < M; i++) {
+    const a = (i / M) * Math.PI * 2
+    // Ángulo local dentro del pétalo, en [-π, π], 0 en el centro del pétalo.
+    const local = (((a * petalos) + Math.PI) % (Math.PI * 2)) - Math.PI
+    const cuerpo = Math.max(0, Math.cos(local / 2))        // 1 al centro, 0 en el valle
+    const muesca = 1 - notch * Math.exp(-((local / 0.42) ** 2)) // se hunde en la punta
+    const r = rInterior + (0.5 - rInterior) * cuerpo * muesca
+    pts.push([Math.cos(a) * r, Math.sin(a) * r])
+  }
   return pts
 }
 
