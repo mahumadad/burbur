@@ -259,6 +259,11 @@ export const CONFIG = {
       // hechas. Sin esto, en cuanto todas las puntas se fusionan la colonia se
       // queda sin frentes y el mundo se congela para siempre.
       lateralRate: 40,
+      // Guerra entre colonias. Dos hongos incompatibles se reconocen ANTES de
+      // tocarse y se frenan: queda una franja de nadie con una barrera
+      // pigmentada — la "zone line" oscura de la madera podrida. Es competencia
+      // por interferencia entre dos organismos, no reacción-difusión.
+      antagonism: 1.8, barrierRate: 14,
       // Al llegar al canto del tronco, esta fracción de las puntas dobla y sigue
       // comiendo por la PANZA en vez de salir a la tierra.
       wrapChance: 0.45,

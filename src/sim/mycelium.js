@@ -161,9 +161,10 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
   // hay contacto, y si no lo hay sigue bordeando el tronco por abajo.
   const canLeaveAt = field && typeof field.canLeave === 'function' ? field.canLeave : null
   const soil = cfg.soil || null
-  // La celda vale exactamente el radio de "sentir la propia red": así las 9
-  // celdas vecinas cubren tanto el autotropismo como la anastomosis.
-  const grid = rebuildGrid(net, cfg.fuseRadius * 4)
+  // La celda vale el mayor de los radios de búsqueda (el del antagonismo), así
+  // las 9 celdas vecinas cubren también el autotropismo y la anastomosis.
+  const FOE_R = cfg.fuseRadius * 6
+  const grid = rebuildGrid(net, FOE_R)
 
   for (let i = 0; i < tips.length; i++) {
     const tip = tips[i]
@@ -222,6 +223,44 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       }
     }
 
+    // 3bis. ANTAGONISMO. Dos hongos incompatibles se reconocen ANTES de tocarse
+    //    —los inhibidores difunden— así que la punta que huele a la otra colonia
+    //    se frena y se aparta. Eso deja el "deadlock": una franja de nadie entre
+    //    las dos redes, con su barrera pigmentada, en vez de dos micelios
+    //    interpenetrados. Es competencia por interferencia, no reacción-difusión.
+    let foe = 0
+    if (cfg.antagonism > 0) {
+      let rx = 0, rz = 0, foeColony = -1
+      const near = collectNear(grid, tip.x, tip.z)
+      for (let k = 0; k < near.length; k++) {
+        const n = nodes[near[k]]
+        if (!n.alive || n.colony === tip.colony) continue
+        const dx = tip.x - n.x, dz = tip.z - n.z
+        const d2 = dx * dx + dz * dz
+        if (d2 > 1e-9 && d2 < FOE_R * FOE_R) {
+          const d = Math.sqrt(d2)
+          const w = 1 - d / FOE_R
+          rx += (dx / d) * w
+          rz += (dz / d) * w
+          if (w > foe) { foe = w; foeColony = n.colony }
+        }
+      }
+      if (rx !== 0 || rz !== 0) {
+        ang = turnToward(ang, Math.atan2(rz, rx), cfg.turnRate * cfg.antagonism * dt)
+      }
+      // La barrera pigmentada se deposita en el frente TRABADO, no sólo donde
+      // dos hifas chocan: con el antagonismo a distancia casi nunca llegan a
+      // tocarse, y sin embargo la raya oscura en la madera existe igual.
+      // Sin umbral: la barrera se deposita a un ritmo proporcional a cuánto
+      // FRENA el enemigo a esta punta, así se concentra sola donde el frente
+      // está más trabado. Con un umbral fijo no se depositaba nada cuando el
+      // antagonismo era fuerte, porque entonces las puntas se apartan tan lejos
+      // que nunca llegan a acercarse al valor de corte.
+      if (foe > 0 && rand() < (cfg.barrierRate || 6) * foe * foe * dt) {
+        events.push({ type: 'barrier', x: tip.x, z: tip.z, side: tip.side, colony: tip.colony, otherColony: foeColony })
+      }
+    }
+
     // CRECIMIENTO RADIAL: la punta se orienta hacia afuera desde el inóculo de
     // su colonia. Es lo que hace que la colonia avance como un frente circular
     // —el rosetón de una placa— en vez de enredarse sobre sí misma. Cuanto más
@@ -249,7 +288,8 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
     }
 
     // 4. Avanza. Solo la punta se mueve — el resto de la red queda quieto.
-    const step = cfg.tipSpeed * soilSpeed * dt
+    // Cerca de la otra colonia la punta casi se detiene: el frente se traba.
+    const step = cfg.tipSpeed * soilSpeed * (1 - 0.85 * foe) * dt
     const prevX = tip.x, prevZ = tip.z
     tip.x += Math.cos(ang) * step
     tip.z += Math.sin(ang) * step

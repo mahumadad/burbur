@@ -973,6 +973,46 @@ export function createFungusScene(container, cfg, agentNames = []) {
     frontBuf.commit()
   }
 
+  // ─── LÍNEA DE DEMARCACIÓN (zone line). Donde dos colonias incompatibles se
+  // traban, ninguna avanza y las dos depositan pigmento: en la madera podrida
+  // eso es la raya oscura que separa un hongo del otro. Es una MANCHA, no una
+  // estela: se acumula y no se va, así que se dibuja con blending normal (el
+  // aditivo del micelio no puede oscurecer) y por encima de la red.
+  const ZONE_MAX = 1200
+  const zoneMarks = []           // {x, z, side, ang, len}
+  const C_ZONE = [0.26, 0.11, 0.03]   // pardo melanizado
+  const zoneMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })
+  const zoneBuf = createLineBuffer(ZONE_MAX, zoneMat)
+  zoneBuf.mesh.renderOrder = 3   // después de la red, para poder taparla
+  scene.add(zoneBuf.mesh)
+  let zoneDirty = true
+
+  function addZoneMark(ev) {
+    // Se muestrea: el frente trabado dispara muchos eventos sobre el mismo punto
+    // y no hace falta una marca por cada uno.
+    if (rnd() > 0.25) return
+    if (zoneMarks.length >= ZONE_MAX) zoneMarks.shift()
+    zoneMarks.push({
+      x: ev.x, z: ev.z, side: ev.side || 1,
+      ang: rnd() * Math.PI * 2, len: 0.9 + rnd() * 1.6,
+    })
+    zoneDirty = true
+  }
+
+  function drawZone() {
+    if (!zoneDirty) return
+    zoneDirty = false
+    zoneBuf.begin()
+    for (const m of zoneMarks) {
+      const x = m.x * R, z = m.z * R
+      const y = netY(m.x, m.z, m.side) + 0.35
+      const dx = Math.cos(m.ang) * m.len, dz = Math.sin(m.ang) * m.len
+      const f = edgeFade(m.x, m.z)
+      zoneBuf.push(x - dx, y, z - dz, x + dx, y, z + dz, tint(C_ZONE, f), tint(C_ZONE, f))
+    }
+    zoneBuf.commit()
+  }
+
   // ─── LA CARA CORTADA SE COME. El disco de anillos es madera fresca expuesta:
   // es lo primero que coloniza el hongo, y lo hace RADIALMENTE desde el centro
   // hacia la corteza, siguiendo la veta. En planta (x,z) la cara es una línea
@@ -1213,7 +1253,9 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)
     // Demarcación: dos colonias se tocan y NO se fusionan → línea negra (spec §5).
     for (const ev of netEvents) {
-      if (ev.type === 'barrier' && rnd() < 0.03) {
+      if (ev.type !== 'barrier') continue
+      addZoneMark(ev)
+      if (rnd() < 0.02) {
         events.push({ type: 'conflict', agent: 'Pleurotus', agentType: 'colony', kind: 'demarcation' })
       }
     }
@@ -1234,6 +1276,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
     drawFront()
     updateFace(step)
     drawFace()
+    drawZone()
     drawTips()
 
     // ─── Fauna del suelo: deambula libre, contenida en el disco ───────────
