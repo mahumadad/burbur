@@ -163,6 +163,17 @@ export async function createAudio(cfg) {
   const buzzEnv = new Tone.AmplitudeEnvelope({ attack: 0.004, decay: 0.1, sustain: 0.2, release: 0.05 }).connect(buzzFilter)
   const buzzNoise = new Tone.Noise('white').start(); buzzNoise.connect(buzzEnv)
 
+  // Voz de la CÉLULA: un "bloop" húmedo y redondo (nada de pájaro) para los
+  // eventos del mundo interior (organelos, motores, invasores).
+  const bloopLP = new Tone.Filter(700, 'lowpass').connect(faunaPan); bloopLP.Q.value = 2.5
+  const bloopEnv = new Tone.AmplitudeEnvelope({ attack: 0.004, decay: 0.16, sustain: 0, release: 0.08 }).connect(bloopLP)
+  const bloopOsc = new Tone.Oscillator(200, 'sine').start(); bloopOsc.connect(bloopEnv)
+  function bloop(f, t) {
+    bloopOsc.frequency.setValueAtTime(f * 1.4, t)
+    bloopOsc.frequency.exponentialRampToValueAtTime(f, t + 0.12) // caidita "gota"
+    bloopEnv.triggerAttackRelease(0.13, t)
+  }
+
   const rand = Math.random
   function fauna(type, dir, name = '') {
     faunaPan.pan.value = PAN[dir] ?? 0
@@ -183,6 +194,11 @@ export async function createAudio(cfg) {
     } else if (type === 'static_object') {
       if (/stream/.test(n)) buzzEnv.triggerAttackRelease(0.25, t) // agua
       else buzzEnv.triggerAttackRelease(0.1, t)
+    } else if (type === 'organelle' || type === 'invader' || type === 'motor' ||
+               type === 'structure' || type === 'signal') {
+      // Vida celular: bloops por tipo. Invasores más agudos; motores, graves.
+      const f = type === 'invader' ? 320 + rand() * 130 : type === 'motor' ? 130 : 190 + rand() * 90
+      bloop(f, t)
     } else {
       chirp(700, 620, 0.14, t) // humano: silbido suave
     }
