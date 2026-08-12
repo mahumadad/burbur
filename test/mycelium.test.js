@@ -239,6 +239,22 @@ describe('mycelium: lado del tronco y modo suelo', () => {
     expect(onLog(t.x, t.z)).toBe(false)     // se fue al suelo
   })
 
+  it('gravedad de flanco: sobre la madera la punta deriva hacia el canto (flankDir)', () => {
+    // Con flankDir apuntando a +z y flankGravity > 0, una punta que arranca
+    // derecho por +x se curva hacia +z (baja por el costado). Sin gravedad no.
+    const base = { ...STRAIGHT, turnRate: 2 }
+    const field = { resourceAt: () => 0, moisture: 0.5, onLog: () => true, flankDir: () => [0, 1] }
+    const run = (flankGravity) => {
+      const cfg = { ...base, flankGravity }
+      const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(20))
+      net.tips[0].ang = 0
+      const rand = seeded(21)
+      for (let i = 0; i < 40; i++) updateNetwork(net, cfg, 1 / 30, rand, field)
+      return net.tips[0].z
+    }
+    expect(run(3)).toBeGreaterThan(run(0) + 0.05)
+  })
+
   it('los nodos que deja la punta heredan su lado', () => {
     const cfg = { ...STRAIGHT, wrapChance: 1 }
     const net = createNetwork(cfg, [{ x: 0, z: 0, colony: 1 }], seeded(6))

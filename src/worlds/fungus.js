@@ -313,6 +313,19 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const axisAbove = lr * (1 - sink) * R * LOG_HEIGHT_SCALE + centerY(u)
     return axisAbove <= lr * R * LOG_HEIGHT_SCALE
   }
+  /** Dirección (en planta) hacia el CANTO más cercano del tronco: el versor
+   * perpendicular al eje, con el signo del lado en que está (x,z). La sim la usa
+   * como "gravedad de flanco" para que la hifa baje colonizando el costado en vez
+   * de quedarse en la cresta. Devuelve null fuera del tronco y TAMBIÉN donde el
+   * tronco toca el suelo: ahí el canto es la salida a la tierra, así que empujar
+   * hacia él sólo aceleraría la fuga al suelo y adelgazaría el tronco (medido).
+   * Sólo actúa en el MEDIO del tronco, donde el canto lleva a la panza. */
+  function flankDirXZ(x, z) {
+    const [u, v] = worldToUV(x, z)
+    if (!insideLog(u, v) || soilContactXZ(x, z)) return null
+    const s = v >= 0 ? 1 : -1
+    return [perpX(u) * s, perpZ(u) * s]
+  }
 
   // ─── CORTEZA DE PLACAS. La corteza de un tronco viejo no son surcos
   // paralelos: son PLACAS poligonales irregulares separadas por fisuras hondas
@@ -802,7 +815,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
   {
     const warmField = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture: 0.9, onLog: onLogXZ, canLeave: soilContactXZ,
+      moisture: 0.9, onLog: onLogXZ, canLeave: soilContactXZ, flankDir: flankDirXZ,
     }
     // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
     // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
@@ -1306,7 +1319,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
 
     const field = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture, onLog: onLogXZ, canLeave: soilContactXZ,
+      moisture, onLog: onLogXZ, canLeave: soilContactXZ, flankDir: flankDirXZ,
     }
     const events = []
     const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)

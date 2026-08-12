@@ -274,6 +274,19 @@ export function updateNetwork(net, cfg, dt, rand = Math.random, field) {
       }
     }
 
+    // GRAVEDAD DE FLANCO: sobre la MADERA la punta deriva hacia el canto (la
+    // dirección en que |v| crece), así BAJA colonizando el costado del tronco en
+    // vez de quedarse en la cresta y escaparse axialmente al suelo. Sin esto la
+    // red se apiña en el lomo y los flancos quedan pelados: el hongo se come toda
+    // la superficie expuesta —arriba y a los lados—, como en una placa. En la
+    // tierra no aplica: ahí manda el abanico radial (`field.flankDir` da null).
+    if (!onSoil && cfg.flankGravity && field && typeof field.flankDir === 'function') {
+      const fd = field.flankDir(tip.x, tip.z)
+      if (fd && (fd[0] !== 0 || fd[1] !== 0)) {
+        ang = turnToward(ang, Math.atan2(fd[1], fd[0]), cfg.turnRate * cfg.flankGravity * dt)
+      }
+    }
+
     // Contención: una colonia no se expande al infinito sobre terreno estéril.
     // Pasado `bound` la punta se reorienta hacia adentro — el equivalente al
     // die-back del borde cuando ya no hay de qué comer. Sin esto el micelio se
