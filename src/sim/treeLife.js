@@ -11,7 +11,7 @@ export function createTreeLife(cfg, rand = Math.random) {
     stage: 'sapling',
     anos: 0,         // años completos cumplidos (entero)
     age: 0,          // edad fraccionaria = anos + seasonT
-    growth: 0,       // años de rama reveladas (0..cfg.maxYear)
+    growth: 0,       // avance visual del crecimiento (0..cfg.maxYear), en TIEMPO REAL
     vigor: 0.25,     // 0..1, cuánta hoja es capaz de sostener
     tilt: 0,         // 0..1, cuánto lleva inclinado al caer
     caido: 0,        // años que lleva en el suelo
@@ -68,8 +68,13 @@ export function updateTreeLife(st, cfg, dt, seasonT) {
   }
 
   st.age = st.anos + seasonT
-  // Crecimiento acumulativo: nunca retrocede, y se detiene en maxYear.
-  st.growth = Math.min(cfg.maxYear, Math.max(st.growth, st.age))
+  // Crecimiento visual en TIEMPO REAL: sube hasta llenar la copa (maxYear) en
+  // cfg.growSecs segundos y ahí se detiene. Desacoplado de la edad a propósito —
+  // un año dura minutos, así que revelar la copa al ritmo de la edad era
+  // imperceptible. La edad/madurez/caída/rebrote (abajo) siguen contándose en
+  // años; solo el ritmo con que se ESTIRA la rama es de segundos. Nunca retrocede.
+  const velCrec = cfg.maxYear / (cfg.growSecs || 120)
+  st.growth = Math.min(cfg.maxYear, st.growth + velCrec * dt)
 
   const etapaPrevia = st.stage
   if (st.age >= cfg.fallAt) st.stage = 'fallen'

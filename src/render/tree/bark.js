@@ -11,7 +11,7 @@
  *   (cactus, Task 6). Se declara desde ya para que la firma no cambie después.
  */
 export function buildBark(branches, THREE, noise2, ribs = 0) {
-  const pos = [], idx = [], years = [], bases = []
+  const pos = [], idx = [], years = [], offs = [], bases = []
 
   for (const b of branches) {
     const spine = b.spine
@@ -43,6 +43,7 @@ export function buildBark(branches, THREE, noise2, ribs = 0) {
           p.z + (bx.z * Math.cos(a) + by.z * Math.sin(a)) * rad,
         )
         years.push(b.year)
+        offs.push(b.off || 0)
         bases.push(b.base.x, b.base.y, b.base.z)
       }
     }
@@ -58,21 +59,25 @@ export function buildBark(branches, THREE, noise2, ribs = 0) {
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
   geo.setAttribute('aYear', new THREE.BufferAttribute(new Float32Array(years), 1))
+  geo.setAttribute('aOff', new THREE.BufferAttribute(new Float32Array(offs), 1))
   geo.setAttribute('aBase', new THREE.BufferAttribute(new Float32Array(bases), 3))
   geo.setIndex(idx)
 
   const uniforms = { uGrowth: { value: 0 } }
 
   // El shader de crecimiento: cada vértice se interpola desde el arranque de su
-  // rama hasta su posición final cuando uGrowth alcanza su año.
+  // rama hasta su posición final. La rama emerge en una ventana CORTA (0.4 de
+  // año) que arranca en `aYear + aOff`, no en todo el año: así cada rama se ve
+  // "salir" de golpe y escalonada respecto a sus vecinas, en vez de que toda una
+  // capa se estire lento y a la vez.
   const onBeforeCompile = (shader) => {
     shader.uniforms.uGrowth = uniforms.uGrowth
     shader.vertexShader = `
-      attribute float aYear; attribute vec3 aBase; uniform float uGrowth;
+      attribute float aYear; attribute float aOff; attribute vec3 aBase; uniform float uGrowth;
     ` + shader.vertexShader.replace(
       '#include <begin_vertex>',
       `vec3 transformed = mix(aBase, position,
-         smoothstep(aYear, aYear + 1.0, uGrowth));`,
+         smoothstep(aYear + aOff, aYear + aOff + 0.4, uGrowth));`,
     )
   }
 

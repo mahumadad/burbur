@@ -25,8 +25,27 @@ function pintarPoligono(ctx, pts, cx, cy, escala, rot, color) {
   ctx.restore()
 }
 
-const rgb = (c, k = 1) =>
-  `rgb(${Math.round(c[0] * 255 * k)},${Math.round(c[1] * 255 * k)},${Math.round(c[2] * 255 * k)})`
+const rgb = (c, k = 1) => {
+  const v = (i) => Math.max(0, Math.min(255, Math.round(c[i] * 255 * k)))
+  return `rgb(${v(0)},${v(1)},${v(2)})`
+}
+
+/**
+ * Fruto como ESFERA sombreada, no un disco plano: gradiente radial del reflejo
+ * (arriba-izquierda) al borde en sombra, más un brillo especular. Así la manzana
+ * se ve redonda de verdad en vez de una pelota roja chata.
+ */
+function pintarFruto(ctx, cx, cy, r, base, alto) {
+  const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.4, r * 0.12, cx, cy, r)
+  g.addColorStop(0, rgb(alto, 1.12))     // reflejo cálido
+  g.addColorStop(0.5, rgb(base))
+  g.addColorStop(1, rgb(base, 0.45))     // borde en sombra
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
+  ctx.fillStyle = g; ctx.fill()
+  // Brillo especular: un puntito claro descentrado.
+  ctx.beginPath(); ctx.arc(cx - r * 0.34, cy - r * 0.4, r * 0.17, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill()
+}
 
 /**
  * Cinco siluetas repartidas en la celda, para que el racimo se lea como copa.
@@ -34,9 +53,13 @@ const rgb = (c, k = 1) =>
  * de cada silueta.
  */
 function pintarRacimo(ctx, pts, ox, oy, colores, centro = null) {
+  // Cinco siluetas SEPARADAS y más chicas: antes iban grandes (0.6–0.86) y muy
+  // encimadas en el centro, así que se fundían en una mancha y "no se veía la
+  // forma de hoja". Ahora se reparten por la celda con poco solape, cada una
+  // apuntando distinto, y se leen como hojas sueltas.
   const disposicion = [
-    [0.50, 0.50, 0.86, 0.0], [0.30, 0.34, 0.66, -0.7], [0.70, 0.32, 0.66, 0.6],
-    [0.32, 0.70, 0.60, 2.4], [0.70, 0.70, 0.60, -2.2],
+    [0.50, 0.28, 0.50, 0.0], [0.26, 0.44, 0.44, -0.9], [0.74, 0.44, 0.44, 0.9],
+    [0.36, 0.72, 0.42, 2.7], [0.66, 0.70, 0.42, -2.6],
   ]
   for (let i = 0; i < disposicion.length; i++) {
     const [fx, fy, esc, rot] = disposicion[i]
@@ -74,8 +97,8 @@ export function buildAtlas(especie, THREE) {
     pintarRacimo(ctx, leafShape(especie, 'flower'), CELDA, 0, def.colors.flower, def.colors.center)
   }
   if (def.colors.fruit) {
-    pintarPoligono(ctx, leafShape(especie, 'fruit'),
-      CELDA * 0.5, CELDA * 1.5, CELDA * 0.8, 0, rgb(def.colors.fruit[0]))
+    pintarFruto(ctx, CELDA * 0.5, CELDA * 1.5, CELDA * 0.34,
+      def.colors.fruit[0], def.colors.fruit[1] || def.colors.fruit[0])
   }
   if (def.colors.leaf) {
     pintarPoligono(ctx, hoja, CELDA * 1.5, CELDA * 1.5, CELDA * 0.9, 0, rgb(def.colors.leaf[0]))

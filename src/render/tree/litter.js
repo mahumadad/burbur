@@ -83,9 +83,12 @@ export function createLitter({ THREE, count = 320, ground = 0, pointUniforms }) 
       void main() {
         vec2 uv = gl_PointCoord - 0.5;
         float d = length(uv) * 2.0;
-        if (vKind > 1.5) {                       // FRUTO: disco lleno
+        if (vKind > 1.5) {                       // FRUTO: esfera sombreada
           if (d > 1.0) discard;
-          gl_FragColor = vec4(vC, 1.0 - smoothstep(0.85, 1.0, d));
+          // Sombreado: se oscurece hacia abajo-derecha, con reflejo arriba-izq.
+          float sh = clamp(1.0 - dot(uv + vec2(0.18), uv + vec2(0.18)) * 1.6, 0.4, 1.0);
+          vec3 col = vC * sh + vec3(0.55) * smoothstep(0.3, 0.0, length(uv + vec2(0.16)));
+          gl_FragColor = vec4(col, 1.0 - smoothstep(0.85, 1.0, d));
           return;
         }
         if (vKind > 0.5) {                       // PÉTALO: disco suave

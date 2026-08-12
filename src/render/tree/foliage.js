@@ -58,11 +58,16 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     const ordenMax = tips.reduce((m, t) => Math.max(m, t.order), 0)
     fuente = tips.filter((t) => t.order === ordenMax)
   }
-  const n = def.flowerOnly ? fuente.length : Math.min(tips.length, def.clusters)
+  // `clusters` es la densidad de copa REAL: antes se topaba en `tips.length`, así
+  // que árboles con pocas puntas (el abedul, 244) nunca alcanzaban su densidad y
+  // se veían ralos. Al no topar, los racimos de más reutilizan puntas con un
+  // jitter propio (el `j` de abajo) y llenan la copa en vez de quedar apilados.
+  const n = def.flowerOnly ? fuente.length : def.clusters
   const geo = geometriaCruz(THREE)
 
   const iPos = new Float32Array(n * 3)
   const iYear = new Float32Array(n)
+  const iOff = new Float32Array(n)
   const iScale = new Float32Array(n)
   const iRot = new Float32Array(n)
   const iCell = new Float32Array(n * 2)   // desplazamiento en el atlas
@@ -90,6 +95,10 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
     iPos[i * 3 + 1] = t.p.y + (rnd() - 0.5) * j
     iPos[i * 3 + 2] = t.p.z + (rnd() - 0.5) * j
     iYear[i] = t.year
+    // Hereda el desfase de emergencia de su ramita: la hoja se revela cuando la
+    // rama que la sostiene termina de salir, no antes (evita hojas flotando sin
+    // rama). Sin `off` (racimos viejos), 0 → comportamiento de siempre.
+    iOff[i] = t.off || 0
     iScale[i] = 1.1 + rnd() * 0.9
     iRot[i] = rnd() * 6.2832
     // Reparto: flor, fruto y hoja. La flor y el fruto nunca se dibujan a la
@@ -119,6 +128,7 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
 
   geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(iPos, 3))
   geo.setAttribute('iYear', new THREE.InstancedBufferAttribute(iYear, 1))
+  geo.setAttribute('iOff', new THREE.InstancedBufferAttribute(iOff, 1))
   geo.setAttribute('iScale', new THREE.InstancedBufferAttribute(iScale, 1))
   geo.setAttribute('iRot', new THREE.InstancedBufferAttribute(iRot, 1))
   geo.setAttribute('iCell', new THREE.InstancedBufferAttribute(iCell, 2))
@@ -138,13 +148,14 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
   const mat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false, side: THREE.DoubleSide,
     vertexShader: `
-      attribute vec3 iPos; attribute float iYear; attribute float iScale;
+      attribute vec3 iPos; attribute float iYear; attribute float iOff; attribute float iScale;
       attribute float iRot; attribute vec2 iCell;
       uniform float uT, uGrowth, uLeaf, uFlower, uFruit;
       varying vec2 vUv; varying float vFlor; varying float vFruto; varying float vFade;
       void main() {
-        // ¿Ya le tocó a esta rama? (crecimiento acumulativo)
-        float vivo = smoothstep(iYear, iYear + 1.0, uGrowth);
+        // ¿Ya salió la ramita que sostiene esta hoja? Misma ventana corta y
+        // escalonada que la corteza (bark.js): se revela en iYear + iOff.
+        float vivo = smoothstep(iYear + iOff, iYear + iOff + 0.4, uGrowth);
         vFlor = step(0.25, iCell.x);
         vFruto = step(0.25, iCell.y);
         // Densidad estacional: la hoja sigue uLeaf, la flor uFlower, el fruto
@@ -182,6 +193,7 @@ export function buildFoliage(tips, def, atlas, THREE, rnd) {
   return {
     mesh, uniforms, geometry: geo, material: mat,
     years: iYear,   // año de cada racimo: sirve para saber cuánta copa está revelada
+    offs: iOff,     // desfase de emergencia de cada racimo (mismo que usa el shader)
     leafAnchors: new Float32Array(leafAnchors),
     flowerAnchors: new Float32Array(flowerAnchors),
     fruitAnchors: new Float32Array(fruitAnchors),

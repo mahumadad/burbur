@@ -42,16 +42,21 @@ export function growSkeleton(cfg, rnd) {
 
     const punta = b.order >= cfg.depth
     const rEnd = punta ? 0.03 : b.radius * (0.52 + rnd() * 0.16)
+    // Desfase de emergencia DENTRO del año de la rama (0..0.55): las ramas de un
+    // mismo orden no brotan todas a la vez, sino escalonadas — así se ve cada
+    // rama "salir" por su cuenta en vez de que aparezca una capa entera de golpe.
+    // El tronco (orden 0) arranca en 0 para que el árbol asome de inmediato.
+    const off = b.order === 0 ? 0 : rnd() * 0.55
     branches.push({
       spine, r0: b.radius, r1: rEnd, order: b.order,
-      year: b.order, base: b.start.clone(),
+      year: b.order, off, base: b.start.clone(),
     })
 
     if (punta) {
-      tips.push({ p: spine[spine.length - 1].clone(), dir: d.clone(), order: b.order, year: b.order })
+      tips.push({ p: spine[spine.length - 1].clone(), dir: d.clone(), order: b.order, year: b.order, off })
       // Las ramitas intermedias también cargan follaje, si no la copa queda hueca.
       for (let k = 1; k < spine.length - 1; k++) {
-        tips.push({ p: spine[k].clone(), dir: d.clone(), order: b.order, year: b.order })
+        tips.push({ p: spine[k].clone(), dir: d.clone(), order: b.order, year: b.order, off })
       }
       continue
     }

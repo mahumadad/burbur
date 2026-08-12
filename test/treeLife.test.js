@@ -4,10 +4,14 @@ import { createTreeLife, updateTreeLife, seedMature } from '../src/sim/treeLife.
 const CFG = {
   youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12,
   fallenYears: 2, maxYear: 6,
+  // Rampa de crecimiento en TIEMPO REAL (segundos), no en años. Con el reloj
+  // comprimido de estas pruebas (1 año = 60 pasos × 1/60 s = 1 s), growSecs=10
+  // significa que la copa se llena en ~10 "años" de prueba.
+  growSecs: 10,
 }
 
 const DT = 1 / 60
-const PASOS_POR_ANO = 60   // un "año" de prueba = 60 pasos
+const PASOS_POR_ANO = 60   // un "año" de prueba = 60 pasos (= 1 s de reloj real)
 
 /** Avanza `anos` años completos, dando vueltas al reloj de estación. */
 function avanzar(st, cfg, anos) {
@@ -45,7 +49,18 @@ describe('ciclo de vida del árbol', () => {
       expect(st.growth).toBeGreaterThanOrEqual(previo)
       previo = st.growth
     }
-    expect(st.growth).toBeLessThanOrEqual(CFG.maxYear)
+    // A los ~10 "años" de prueba (= growSecs) ya llegó al tope y se quedó ahí.
+    expect(st.growth).toBe(CFG.maxYear)
+  })
+
+  it('la copa se llena en ~growSecs segundos, no en años', () => {
+    const st = createTreeLife(CFG, () => 0.5)
+    // Medio growSecs → copa a medio revelar; growSecs completo → tope.
+    avanzar(st, CFG, 5)
+    expect(st.growth).toBeGreaterThan(2)
+    expect(st.growth).toBeLessThan(CFG.maxYear)
+    avanzar(st, CFG, 6)
+    expect(st.growth).toBe(CFG.maxYear)
   })
 
   it('el vigor sube hasta maduro y baja en la senescencia', () => {
@@ -66,14 +81,12 @@ describe('ciclo de vida del árbol', () => {
     expect(ev.rebroto).toBe(1)
     expect(st.stage).toBe('sapling')
     expect(st.age).toBeLessThan(1)
-    // DESVIACIÓN respecto al plan: la aserción original era `toBe(0)`, pero
-    // tras el rebrote quedan ~59/60 de año simulado corriendo como plantón, y
-    // `growth` sigue a `age` de forma continua (igual que `age`, nunca llega a
-    // 1). Que `growth` se quede en 0 casi un año entero dejaría cualquier
-    // árbol recién nacido o rebrotado colapsado/invisible en el render (ver
-    // bark.js: smoothstep(aYear, aYear+1, uGrowth) colapsa la rama en su base
-    // cuando uGrowth es 0), justo el artefacto que el plan pide evitar. El
-    // criterio correcto es el mismo que ya usa `age`.
+    // Al rebrotar, `growth` vuelve a 0 y re-crece en TIEMPO REAL (rampa de
+    // growSecs). Tras el rebrote queda ~1 s de reloj corriendo como plantón, así
+    // que la copa apenas empieza a revelarse: mucho menos que el tope, pero > 0
+    // (nunca se queda colapsada en la base, el artefacto que hay que evitar —
+    // ver bark.js: smoothstep(aYear, aYear+1, uGrowth) colapsa la rama con 0).
+    expect(st.growth).toBeGreaterThan(0)
     expect(st.growth).toBeLessThan(1)
   })
 

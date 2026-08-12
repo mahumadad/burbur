@@ -81,7 +81,8 @@ export function createTreeFactory(THREE, noise2) {
         if (fol && fol.years.length) {
           let s = 0
           for (let i = 0; i < fol.years.length; i++) {
-            const u = Math.min(1, Math.max(0, y - fol.years[i]))
+            // Misma ventana que el shader: smoothstep(iYear+iOff, +0.4, y).
+            const u = Math.min(1, Math.max(0, (y - fol.years[i] - fol.offs[i]) / 0.4))
             s += u * u * (3 - 2 * u)
           }
           this._folFrac = s / fol.years.length

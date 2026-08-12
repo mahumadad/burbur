@@ -32,7 +32,7 @@ export const SPECIES = {
       edge: 0xe8e8d4,
     },
     form: { len: 11, radius: 0.8, depth: 5, gnarl: 0.25, droop: 0.35, kids: [2, 3] },
-    clusters: 400,
+    clusters: 560,   // copa tupida: el abedul es EL árbol verde del bosque
   },
 
   // Manzano: flor blanca-rosada corta y temprana, y después el fruto.
@@ -55,7 +55,7 @@ export const SPECIES = {
       edge: 0xd9d9ba,
     },
     form: { len: 7, radius: 0.95, depth: 4, gnarl: 0.75, droop: 0.1, kids: [2, 4] },
-    clusters: 420,
+    clusters: 520,
   },
 
   // Sakura: pocas hojas, floración rosada larga (la "primavera extendida" que
@@ -67,9 +67,11 @@ export const SPECIES = {
   sakura: {
     curve: curva({
       flower: [0.90, 0.02, 0.24, 0.40],
+      // Lluvia de pétalos característica del sakura, pero con la caída EXTRA por
+      // clima bajada (antes 55/46): que no se pele tan rápido cuando llueve.
       baseDrop: 34,
-      dropRain: 55,
-      dropWind: 46,
+      dropRain: 26,
+      dropWind: 24,
     }),
     shape: { leaf: { width: 0.5, tip: 1.4, lobes: 13, lobeDepth: 0.13 }, petals: 5, blossomNotch: 0.42 },
     colors: {
@@ -84,7 +86,7 @@ export const SPECIES = {
       edge: 0xd9d9ba,
     },
     form: { len: 8, radius: 0.85, depth: 5, gnarl: 0.45, droop: 0.25, kids: [2, 3] },
-    clusters: 500,
+    clusters: 640,
   },
 
   // Cactus: sin hoja y sin otoño. Solo florece en las puntas, en primavera.

@@ -1003,8 +1003,12 @@ export function createCityScene(container, cfg, agentNames = []) {
 
   // Ciclo de vida (Task 4): años en los que un sakura pasa de plantón a
   // adulto, envejece, cae y rebrota. Mismos años que usará el bosque.
-  const VIDA_CFG = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+  const VIDA_CFG = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6, growSecs: 120 }
   const DEBUG_GROWN = new URLSearchParams(location.search).has('grown')
+  // Crecimiento de los sakuras DESACTIVADO a pedido: nacen adultos y se quedan
+  // así (sin crecer, sin caída/rebrote). La estación (floración/otoño/caída de
+  // pétalos) sigue funcionando. Poner en true para reactivar el ciclo.
+  const CRECIMIENTO_LUSH = false
 
   // Busca un punto válido para un sakura: bien adentro de una manzana
   // (`nn`≤-6, lejos de la calle) y lejos de cualquier edificio ya colocado
@@ -1044,7 +1048,8 @@ export function createCityScene(container, cfg, agentNames = []) {
       t.vida = createTreeLife(VIDA_CFG, rnd)
       // Depuración: ?grown deja los árboles adultos de entrada (con ?season fija
       // el año no da la vuelta y si no se quedarían de plantón para siempre).
-      if (DEBUG_GROWN) seedMature(t.vida, VIDA_CFG)
+      // Con el crecimiento desactivado, TODOS nacen adultos.
+      if (DEBUG_GROWN || !CRECIMIENTO_LUSH) seedMature(t.vida, VIDA_CFG)
       t.setGrowth(t.vida.growth)
       t.origin = origin
       t.perch = null   // un plantón no ofrece posadero (se registra al crecer)
@@ -1805,8 +1810,11 @@ export function createCityScene(container, cfg, agentNames = []) {
       const litterEnv = { wind: eco.wind || 0, windDir: eco.windDir || 0 }
       for (let ti = 0; ti < sakuras.length; ti++) {
         const t = sakuras[ti]
-        const ev = updateTreeLife(t.vida, VIDA_CFG, step, seasonT)
-        t.setGrowth(t.vida.growth)
+        // Crecimiento desactivado: el sakura queda adulto y fijo. La estación sigue.
+        const ev = CRECIMIENTO_LUSH
+          ? updateTreeLife(t.vida, VIDA_CFG, step, seasonT)
+          : { cayo: false, rebroto: false }
+        if (CRECIMIENTO_LUSH) t.setGrowth(t.vida.growth)
         const frac = t.foliageFrac()
         // Emisión POR ÁRBOL desde SUS anclas, escalada por vigor × copa real: un
         // sakura vacío no emite, y los pétalos nacen solo donde tiene copa.

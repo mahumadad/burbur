@@ -33,8 +33,10 @@ export const DEFAULT_CURVE = {
   autumnShed: 34,      // hojas/s en el pico del otoño
   gustShed: 46,        // hojas/s por unidad de racha (siempre < autumnShed en efecto)
   baseDrop: 16,        // pétalos/s con la floración plena y sin clima
-  dropRain: 40,
-  dropWind: 34,
+  // Caída extra por clima BAJADA a pedido (antes 40/34): con lluvia/viento caen
+  // más pétalos, pero suave — la flor no se desnuda de golpe.
+  dropRain: 18,
+  dropWind: 16,
 }
 
 /**
@@ -70,20 +72,24 @@ export function phenology(env, curve = DEFAULT_CURVE) {
   // Racha: la lluvia y el viento sacuden la copa por igual.
   const gust = rain + wind * 0.7
   // El término de otoño no depende de la lluvia: en otoño cae igual, llueva o no.
-  // El término de racha es el único activo fuera del otoño, y pesa menos.
-  const shed = leaf * (c.autumnShed * autumn + c.gustShed * gust * 0.35)
+  // El término de racha (0.05) es un ACENTO leve, no el evento: con lluvia/viento
+  // caen SOLO algunas hojas, sin desvestir el árbol. La caída de verdad es el
+  // otoño. (Se bajó 0.35→0.10→0.05 a pedido: verde estable, lluvia apenas roza.)
+  const shed = leaf * (c.autumnShed * autumn + c.gustShed * gust * 0.05)
   const petals = flower * (c.baseDrop + rain * c.dropRain + wind * c.dropWind)
 
   // El prado: la lluvia FUERTE cierra las flores; la llovizna casi no las toca.
   const meadow = 1 - ss01(0.5, 1.0, rain)
 
-  // Lo que se VE no es lo que HAY: con lluvia la copa se ralea y las flores se
-  // cierran. Es lo que hace legible que "si llueve también se caen algunas
-  // hojas" — las partículas sueltas casi no se notan a esta distancia.
+  // Lo que se VE no es lo que HAY: con lluvia la copa se ralea un poco y las
+  // flores se cierran algo, pero SIN borrarse — antes (0.3 hoja / 0.7 flor) la
+  // lluvia dejaba el árbol casi pelado y la flor invisible mientras igual caían
+  // pétalos, así que "nunca se veían las flores puestas". Ahora la lluvia atenúa
+  // suave (la flor sigue algo más frágil que la hoja) y la copa se mantiene.
   // Importante: `shed` usa `leaf` SIN atenuar, porque si no la lluvia reduciría
   // la caída en vez de aumentarla.
-  const leafShown = leaf * (1 - rain * 0.3)
-  const flowerShown = flower * (1 - rain * 0.7)
+  const leafShown = leaf * (1 - rain * 0.15)
+  const flowerShown = flower * (1 - rain * 0.35)
 
   return { bud, leaf, flower, fruit, autumn, meadow, shed, petals, leafShown, flowerShown }
 }

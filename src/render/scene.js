@@ -1104,8 +1104,12 @@ export function createScene(container, cfg, agentNames = []) {
   const lush = []
   // Mismos años que el sakura de la ciudad (Task 4): plantón→joven→maduro→
   // senescente→caído→rebrote.
-  const VIDA_CFG_LUSH = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6 }
+  const VIDA_CFG_LUSH = { youngAt: 2, matureAt: 5, senescentAt: 9, fallAt: 12, fallenYears: 2, maxYear: 6, growSecs: 120 }
   const DEBUG_GROWN = new URLSearchParams(location.search).has('grown')
+  // Crecimiento de los árboles lush DESACTIVADO a pedido: nacen adultos y se
+  // quedan así (sin crecer, sin caída/rebrote). La estación (floración/otoño/
+  // caída de hoja) sigue funcionando. Poner en true para reactivar el ciclo.
+  const CRECIMIENTO_LUSH = false
 
   // Punto de siembra para un árbol lush: dentro de la isla, lejos de los
   // árboles de puntos (`treeObstacles`) y de los otros lush ya plantados.
@@ -1143,7 +1147,8 @@ export function createScene(container, cfg, agentNames = []) {
     t.vida = createTreeLife(VIDA_CFG_LUSH, rnd)
     // Depuración: ?grown deja los árboles adultos de entrada, porque con ?season
     // fija el año no da la vuelta y si no se quedarían de plantón para siempre.
-    if (DEBUG_GROWN) seedMature(t.vida, VIDA_CFG_LUSH)
+    // Con el crecimiento desactivado, TODOS nacen adultos.
+    if (DEBUG_GROWN || !CRECIMIENTO_LUSH) seedMature(t.vida, VIDA_CFG_LUSH)
     t.setGrowth(t.vida.growth)
     t.origin = origin
     t.perch = null   // un plantón no ofrece posadero (se registra al crecer)
@@ -1524,8 +1529,12 @@ export function createScene(container, cfg, agentNames = []) {
       for (let ti = 0; ti < lush.length; ti++) {
         const t = lush[ti]
         const ph = phenDe(t.especie)
-        const ev = updateTreeLife(t.vida, VIDA_CFG_LUSH, step, seasonT)
-        t.setGrowth(t.vida.growth)
+        // Crecimiento desactivado: el árbol se queda adulto y fijo (no se llama
+        // a updateTreeLife ni a setGrowth). La estación de abajo sí sigue.
+        const ev = CRECIMIENTO_LUSH
+          ? updateTreeLife(t.vida, VIDA_CFG_LUSH, step, seasonT)
+          : { cayo: false, rebroto: false }
+        if (CRECIMIENTO_LUSH) t.setGrowth(t.vida.growth)
         // Cuánta copa hay realmente puesta: un árbol vacío (plantón recién
         // rebrotado) no debe botar nada, por más que la estación sea de caída.
         const frac = t.foliageFrac()
