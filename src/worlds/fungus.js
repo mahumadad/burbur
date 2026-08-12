@@ -313,6 +313,19 @@ export function createFungusScene(container, cfg, agentNames = []) {
     const axisAbove = lr * (1 - sink) * R * LOG_HEIGHT_SCALE + centerY(u)
     return axisAbove <= lr * R * LOG_HEIGHT_SCALE
   }
+  /** Dirección (en planta) hacia el CANTO más cercano del tronco: el versor
+   * perpendicular al eje, con el signo del lado en que está (x,z). La sim la usa
+   * como "gravedad de flanco" para que la hifa baje colonizando el costado en vez
+   * de quedarse en la cresta. Devuelve null fuera del tronco y TAMBIÉN donde el
+   * tronco toca el suelo: ahí el canto es la salida a la tierra, así que empujar
+   * hacia él sólo aceleraría la fuga al suelo y adelgazaría el tronco (medido).
+   * Sólo actúa en el MEDIO del tronco, donde el canto lleva a la panza. */
+  function flankDirXZ(x, z) {
+    const [u, v] = worldToUV(x, z)
+    if (!insideLog(u, v) || soilContactXZ(x, z)) return null
+    const s = v >= 0 ? 1 : -1
+    return [perpX(u) * s, perpZ(u) * s]
+  }
 
   // ─── CORTEZA DE PLACAS. La corteza de un tronco viejo no son surcos
   // paralelos: son PLACAS poligonales irregulares separadas por fisuras hondas
@@ -781,14 +794,15 @@ export function createFungusScene(container, cfg, agentNames = []) {
   draw.finalizePoints(scene)
 
   // ─── LA RED (dinámica): sim/mycelium.js, el corazón del mundo (spec §3) ───
-  // Las dos colonias —Pleurotus (0) y Trametes (1)— prenden JUNTAS, en un mismo
-  // parche chico sobre el lomo, y desde ahí se comen el tronco. Antes arrancaban
-  // en puntas opuestas y el mundo abría con el tronco ya repartido; así se ve el
-  // avance y el encuentro. Las semillas van por `uvToWorld` (el eje CURVO): con
-  // el eje recto caían fuera del tronco en las puntas.
-  const patchU = -0.14
-  const [s0x, s0z] = uvToWorld(patchU - 0.05, logR * 0.30)
-  const [s1x, s1z] = uvToWorld(patchU + 0.05, -logR * 0.30)
+  // Las dos colonias —Pleurotus (0) y Trametes (1)— prenden en puntos DISTANTES
+  // del lomo, cada una cerca de un extremo, y crecen la una hacia la otra: así se
+  // ve cada rosetón abrirse desde su propio inóculo y trabarse al encontrarse en
+  // una línea de demarcación al medio (antes prendían en un mismo parche chico y
+  // los dos frentes se interpenetraban hasta leerse como una sola mancha). Van por
+  // `uvToWorld` (el eje CURVO): con el eje recto caían fuera del tronco en las
+  // puntas. `v` chico las mantiene sobre la cresta, visibles desde la cámara.
+  const [s0x, s0z] = uvToWorld(-0.33, logR * 0.20)   // colonia 0 → hacia la punta quebrada
+  const [s1x, s1z] = uvToWorld(0.30, -logR * 0.20)   // colonia 1 → hacia la cara cortada
   const seed0 = { x: s0x, z: s0z, colony: 0 }
   const seed1 = { x: s1x, z: s1z, colony: 1 }
   const net = createNetwork(cc.mycelium, [seed0, seed1], rnd)
@@ -801,7 +815,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
   {
     const warmField = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture: 0.9, onLog: onLogXZ, canLeave: soilContactXZ,
+      moisture: 0.9, onLog: onLogXZ, canLeave: soilContactXZ, flankDir: flankDirXZ,
     }
     // Solo un arranque: el mundo abre con la colonia recién prendida y se la ve
     // TOMARSE el tronco en vivo, que es la gracia. (Con un pre-crecido largo
@@ -1305,7 +1319,7 @@ export function createFungusScene(container, cfg, agentNames = []) {
 
     const field = {
       resourceAt: (x, z) => Math.min(1, resourceAt(sub, x, z).carbon),
-      moisture, onLog: onLogXZ, canLeave: soilContactXZ,
+      moisture, onLog: onLogXZ, canLeave: soilContactXZ, flankDir: flankDirXZ,
     }
     const events = []
     const netEvents = updateNetwork(net, cc.mycelium, step * growthMul, rnd, field)

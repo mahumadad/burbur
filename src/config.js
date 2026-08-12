@@ -322,6 +322,12 @@ export const CONFIG = {
       // Al llegar al canto del tronco, esta fracción de las puntas dobla y sigue
       // comiendo por la PANZA en vez de salir a la tierra.
       wrapChance: 0.45,
+      // GRAVEDAD DE FLANCO: sobre la MADERA la punta deriva hacia el canto (la
+      // dirección en que crece el offset perpendicular al eje), así BAJA por los
+      // costados del tronco en vez de apiñarse en la cresta y escaparse axial al
+      // suelo. Sin esto el 65% de la red se amontonaba en el 40% superior del
+      // ancho y los flancos quedaban pelados. En la tierra no aplica.
+      flankGravity: 1.6,
       // En TIERRA el micelio crece distinto: más rápido, mucho más ramificado y
       // más radial — el abanico algodonoso que se abre alrededor del tronco.
       // `speed` por debajo de 1: en la tierra el avance radial va MÁS LENTO que
