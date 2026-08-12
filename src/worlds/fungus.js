@@ -781,14 +781,15 @@ export function createFungusScene(container, cfg, agentNames = []) {
   draw.finalizePoints(scene)
 
   // ─── LA RED (dinámica): sim/mycelium.js, el corazón del mundo (spec §3) ───
-  // Las dos colonias —Pleurotus (0) y Trametes (1)— prenden JUNTAS, en un mismo
-  // parche chico sobre el lomo, y desde ahí se comen el tronco. Antes arrancaban
-  // en puntas opuestas y el mundo abría con el tronco ya repartido; así se ve el
-  // avance y el encuentro. Las semillas van por `uvToWorld` (el eje CURVO): con
-  // el eje recto caían fuera del tronco en las puntas.
-  const patchU = -0.14
-  const [s0x, s0z] = uvToWorld(patchU - 0.05, logR * 0.30)
-  const [s1x, s1z] = uvToWorld(patchU + 0.05, -logR * 0.30)
+  // Las dos colonias —Pleurotus (0) y Trametes (1)— prenden en puntos DISTANTES
+  // del lomo, cada una cerca de un extremo, y crecen la una hacia la otra: así se
+  // ve cada rosetón abrirse desde su propio inóculo y trabarse al encontrarse en
+  // una línea de demarcación al medio (antes prendían en un mismo parche chico y
+  // los dos frentes se interpenetraban hasta leerse como una sola mancha). Van por
+  // `uvToWorld` (el eje CURVO): con el eje recto caían fuera del tronco en las
+  // puntas. `v` chico las mantiene sobre la cresta, visibles desde la cámara.
+  const [s0x, s0z] = uvToWorld(-0.33, logR * 0.20)   // colonia 0 → hacia la punta quebrada
+  const [s1x, s1z] = uvToWorld(0.30, -logR * 0.20)   // colonia 1 → hacia la cara cortada
   const seed0 = { x: s0x, z: s0z, colony: 0 }
   const seed1 = { x: s1x, z: s1z, colony: 1 }
   const net = createNetwork(cc.mycelium, [seed0, seed1], rnd)
