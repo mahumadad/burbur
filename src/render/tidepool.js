@@ -12,7 +12,7 @@ import { createSchools, updateSchools, scatterFish } from '../sim/fish.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies } from './pond/species.js'
 import { createSeastar, updateSeastar, SEASTAR_CFG } from '../sim/seastar.js'
-import { HASH_NOISE_FBM, CAUSTIC_FIELD } from './engine/waterChunks.js'
+import { HASH_NOISE_FBM, CAUSTIC_FIELD, GERSTNER, PROC_NORMAL } from './engine/waterChunks.js'
 
 // Mundo POZA DE MAREA: una poza rocosa de la costa chilena vista DESDE ABAJO
 // DEL AGUA — la primera cámara volteada del proyecto. Una taza de roca con un
@@ -196,56 +196,111 @@ export function createTidepool(container, cfg, agentNames = []) {
   // disco claro justo encima — y el resto de la superficie devuelve la luz del
   // fondo por reflexión total. Las cáusticas son la misma malla senoidal.
   const RIPPLES = 18
+  // Genera el cuerpo GLSL que suma las N olas Gerstner de la config. Los
+  // parámetros son estáticos, así que se hornean como constantes (sin arrays de
+  // uniforms). `choppiness` (uniform) escala la amplitud en runtime.
+  function gerstnerSumGLSL(waves) {
+    let body = 'vec3 gerstnerSum(vec2 p, float t, float chop, out vec3 nrm){\n  nrm = vec3(0.0);\n  vec3 disp = vec3(0.0);\n'
+    for (const w of waves) {
+      const dx = Math.cos(w.dir).toFixed(4), dz = Math.sin(w.dir).toFixed(4)
+      body += `  disp += gerstnerWave(p, t, vec2(${dx}, ${dz}), ${w.wavelength.toFixed(2)}, ${w.amp.toFixed(3)} * chop, ${w.steepness.toFixed(3)}, nrm);\n`
+    }
+    body += '  nrm = normalize(vec3(nrm.x, 1.0, nrm.z));\n  return disp;\n}'
+    return body
+  }
   const waterUniforms = {
-    uTime: { value: 0 },
+    uTime: waterShared.uTime,          // compartido con lecho/roca
+    uLight: waterShared.uLight,        // compartido
     uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uAgitate: { value: 0 },
-    uLight: { value: 1 },     // cuánta luz entra (0 de noche → cáusticas apagadas)
+    uChop: { value: W.choppiness },
+    uSkyTint: { value: new THREE.Vector3(...W.skyTint) },
+    uDeep: { value: new THREE.Vector3(0.02, 0.10, 0.16) },
+    uCausticTint: { value: new THREE.Vector3(...W.causticColor) },
+    uSnell: { value: W.snellSharpness },
+    uFoamT: { value: W.foamThreshold },
+    uFoamI: { value: W.foamIntensity },
+    uPortillo: { value: new THREE.Vector2(Math.cos(P.portillo.ang), Math.sin(P.portillo.ang)) },
   }
   let waterMesh = null
   {
-    const geo = new THREE.PlaneGeometry(P.bowlRadius * 3.2, P.bowlRadius * 3.2, 120, 120)
+    const geo = new THREE.PlaneGeometry(P.bowlRadius * 3.2, P.bowlRadius * 3.2, 160, 160)
     geo.rotateX(-Math.PI / 2)
     const mat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
       transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
       vertexShader: `
-        uniform float uTime; uniform float uAgitate;
-        varying vec2 vXZ;
+        #define N ${RIPPLES}
+        uniform float uTime, uAgitate, uChop;
+        varying vec2 vWXZ; varying vec3 vView; varying vec3 vWNrm; varying float vCrest;
+        ${HASH_NOISE_FBM}
+        ${GERSTNER}
+        ${PROC_NORMAL}
+        ${gerstnerSumGLSL(W.gerstner)}
         void main() {
-          vXZ = position.xz;
-          vec3 p = position;
-          // La superficie ondula de verdad: al mirarla desde abajo, este
-          // desplazamiento es lo que la hace leerse como un techo que respira.
-          p.y += sin(p.x * 0.12 + uTime * 1.1) * 0.28 + sin(p.z * 0.1 - uTime * 0.9) * 0.24;
-          p.y += uAgitate * 1.4 * sin(length(p.xz) * 0.16 - uTime * 3.2);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+          vec2 p = position.xz;
+          vWXZ = p;
+          vec3 nrm;
+          float chop = uChop * (0.35 + uAgitate);
+          vec3 disp = gerstnerSum(p, uTime, chop, nrm);
+          vec3 pos = position + disp;
+          vCrest = disp.y;
+          // Normal fina del rizado combinada con la de Gerstner.
+          vec3 rn = rippleNormal(p, uTime, 0.6 + uAgitate);
+          vWNrm = normalize(nrm + vec3(rn.x, 0.0, rn.z));
+          // Dirección de vista (fragmento → cámara). cameraPosition SOLO está
+          // disponible en el vertex de un ShaderMaterial, así que se calcula acá
+          // y se pasa interpolada al fragment.
+          vec3 world = (modelMatrix * vec4(pos, 1.0)).xyz;
+          vView = cameraPosition - world;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
         }`,
       fragmentShader: `
         #define N ${RIPPLES}
         precision mediump float;
-        uniform float uTime, uAgitate, uLight; uniform vec4 uRipples[N];
-        varying vec2 vXZ;
+        uniform float uTime, uAgitate, uLight, uSnell, uFoamT, uFoamI;
+        uniform vec4 uRipples[N];
+        uniform vec3 uSkyTint, uDeep, uCausticTint;
+        uniform vec2 uPortillo;
+        varying vec2 vWXZ; varying vec3 vView; varying vec3 vWNrm; varying float vCrest;
+        ${HASH_NOISE_FBM}
+        ${CAUSTIC_FIELD}
         void main() {
-          // Cáusticas: la red fina de luz que se arrastra por el agua.
-          float c1 = sin(vXZ.x * 0.31 + uTime * 0.9) * sin(vXZ.y * 0.27 - uTime * 0.75);
-          float c2 = sin(vXZ.x * 0.17 - vXZ.y * 0.21 + uTime * 0.5);
-          float caustic = pow(max(0.0, c1 * 0.7 + c2 * 0.5), 3.0);
-          // Ondas de los bichos que rompen la superficie.
+          vec3 n = normalize(vWNrm);
+          vec3 v = normalize(vView);   // fragmento → cámara (mira hacia arriba)
+          float cosI = clamp(abs(dot(n, v)), 0.0, 1.0);
+          // Ángulo crítico del agua (n=1.333): cos = sqrt(1 - (1/1.333)^2) ≈ 0.661.
+          float crit = 0.661;
+          // Dentro del cono (mirando casi recto arriba) → ventana de Snell (cielo);
+          // fuera → reflexión total interna (espeja el fondo, más oscuro).
+          float win = smoothstep(crit - 0.15 / uSnell, crit + 0.15, cosI);
+          // Dispersión cromática en el borde: corre el umbral por canal.
+          float winR = smoothstep(crit - 0.15 / uSnell - 0.03, crit + 0.15, cosI);
+          float winB = smoothstep(crit - 0.15 / uSnell + 0.03, crit + 0.15, cosI);
+          vec3 sky = uSkyTint * (0.7 + 0.3 * n.y);
+          vec3 tir = uDeep * (0.8 + 0.4 * cosI);
+          vec3 col = vec3(mix(tir.r, sky.r, winR), mix(tir.g, sky.g, win), mix(tir.b, sky.b, winB));
+          // Cáusticas en la cara inferior.
+          float cau = caustics(vWXZ * 0.09, uTime * 0.6);
+          col += uCausticTint * cau * uLight * 0.5;
+          // Ondas de estela (bichos que rozan la superficie).
           float wake = 0.0;
           for (int i = 0; i < N; i++) {
             vec4 r = uRipples[i];
             if (r.w <= 0.001) continue;
-            float d = distance(vXZ, r.xy);
+            float d = distance(vWXZ, r.xy);
             float ring = sin((d - r.z) * 1.9) * exp(-abs(d - r.z) * 0.42);
             wake += max(0.0, ring) * smoothstep(9.0, 0.0, abs(d - r.z)) * r.w;
           }
-          vec3 deep = vec3(0.02, 0.10, 0.16);
-          vec3 lit = vec3(0.35, 0.72, 0.85);
-          vec3 col = deep + (lit - deep) * caustic * uLight
-                   + wake * vec3(0.30, 0.58, 0.92)
-                   + uAgitate * vec3(0.10, 0.24, 0.38);
-          float a = clamp(0.42 + caustic * 0.5 * uLight + wake * 0.4 + uAgitate * 0.2, 0.0, 0.95);
+          col += wake * vec3(0.30, 0.58, 0.92);
+          // Espuma: en crestas altas y en el anillo del portillo donde rompe.
+          float portDist = length(normalize(vWXZ + 1e-4) - uPortillo);
+          float breakZone = smoothstep(1.2, 0.2, portDist);
+          float foam = smoothstep(uFoamT, uFoamT + 0.25, vCrest) + breakZone * uAgitate;
+          foam *= (0.4 + 0.6 * fbm(vWXZ * 0.5 + uTime, 2)) * uFoamI;
+          col += vec3(foam);
+          col *= uLight * 0.85 + 0.15;   // de noche baja todo (sin cielo)
+          float a = clamp(0.42 + win * 0.35 + cau * 0.35 * uLight + wake * 0.4 + foam * 0.5 + uAgitate * 0.2, 0.0, 0.96);
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -647,7 +702,6 @@ export function createTidepool(container, cfg, agentNames = []) {
     const step = dt || 0.016
     clock += step
     pointUniforms.uT.value = clock
-    waterUniforms.uTime.value = clock
     if (eco) {
       // Turbidez: el sedimento en suspensión come visibilidad.
       scene.fog.density = 0.018 + eco.fog * 0.03
@@ -657,7 +711,6 @@ export function createTidepool(container, cfg, agentNames = []) {
       surfaceY = P.surfaceMin + (P.surfaceMax - P.surfaceMin) * tide
       if (waterMesh) waterMesh.position.y = surfaceY
       // De noche no hay cáusticas: sin sol arriba, la red de luz no existe.
-      waterUniforms.uLight.value = Math.min(1, eco.gain * 0.85)
       waterShared.uTime.value = clock
       waterShared.uSurfaceY.value = surfaceY
       waterShared.uLight.value = Math.min(1, eco.gain * 0.85)
