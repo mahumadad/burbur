@@ -811,33 +811,9 @@ export function createTidepool(container, cfg, agentNames = []) {
     bubbleCloud.commit()
   }
 
-  // RAYOS DE SOL: cuñas de luz que bajan de la superficie entre las piedras.
-  // Puntos aditivos en línea, que es como el proyecto dibuja la luz.
-  const rays = []
-  const rayCloud = createPointCloud(P.rays * 16, draw.pointMaterial)
-  for (let i = 0; i < P.rays; i++) {
-    const a = q() * 6.2832, r = q() * P.bowlRadius * 0.7
-    rays.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, tilt: (q() - 0.5) * 0.5, phase: q() * 6.2832 })
-    for (let k = 0; k < 16; k++) rayCloud.size[i * 16 + k] = 1.4 - (k / 16) * 0.8
-  }
-  scene.add(rayCloud.mesh)
-  function updateRays(light) {
-    for (let i = 0; i < rays.length; i++) {
-      const R = rays[i]
-      const sway = Math.sin(clock * 0.5 + R.phase) * 1.2
-      for (let k = 0; k < 16; k++) {
-        const f = k / 15
-        const j = (i * 16 + k) * 3
-        rayCloud.pos[j] = R.x + sway * f + R.tilt * f * 8
-        rayCloud.pos[j + 1] = surfaceY - f * (surfaceY - P.bedY) * 0.85
-        rayCloud.pos[j + 2] = R.z + sway * f * 0.5
-        // Se apagan con la profundidad y con la luz del día.
-        const v = light * (1 - f) * 0.5
-        rayCloud.col[j] = v * 0.5; rayCloud.col[j + 1] = v * 0.85; rayCloud.col[j + 2] = v
-      }
-    }
-    rayCloud.commit()
-  }
+  // RAYOS DE SOL: los god-rays volumétricos los hace la PASADA SUBMARINA del
+  // composer (marcha de luz hacia la ventana de Snell proyectada). El viejo
+  // sistema de puntos en línea vertical se sacó: se leía como columnas de bolas.
 
   // ─── PÁJARO: un pilpilén/gaviota que cruza el cielo POR ENCIMA de la superficie.
   // Visto desde abajo es una silueta oscura que pasa contra el techo brillante —
@@ -924,7 +900,6 @@ export function createTidepool(container, cfg, agentNames = []) {
     const bloom = eco ? 1 - Math.abs(((eco.seasonT + 0.5) % 1) - 0.25) * 2 : 0.5
     updatePlankton(step, Math.max(0, bloom), night, agitation)
     updateBubbles(step, agitation)
-    updateRays(light)
     updateBird(step, clock)
     // La corriente también arrastra al cardumen: con marejada el banco se corre
     // hacia adentro de la taza en vez de nadar como si el agua estuviera quieta.
