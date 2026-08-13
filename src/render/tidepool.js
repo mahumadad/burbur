@@ -92,20 +92,109 @@ export function createTidepool(container, cfg, agentNames = []) {
 
   stage.setResizeHook((m) => { pointUniforms.uProj.value = m.proj })
 
+  // ─── TECHO DE AGUA: la superficie vista DESDE ABAJO ───────────────────────
+  // Calca el shader de agua de la laguna (render/pond.js) pero leído por su cara
+  // inferior: lo que allá era brillo del sol acá es la ventana de Snell — el
+  // disco claro justo encima — y el resto de la superficie devuelve la luz del
+  // fondo por reflexión total. Las cáusticas son la misma malla senoidal.
+  const RIPPLES = 18
+  const waterUniforms = {
+    uTime: { value: 0 },
+    uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uAgitate: { value: 0 },
+    uLight: { value: 1 },     // cuánta luz entra (0 de noche → cáusticas apagadas)
+  }
+  let waterMesh = null
+  {
+    const geo = new THREE.PlaneGeometry(P.bowlRadius * 3.2, P.bowlRadius * 3.2, 120, 120)
+    geo.rotateX(-Math.PI / 2)
+    const mat = new THREE.ShaderMaterial({
+      uniforms: waterUniforms,
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      vertexShader: `
+        uniform float uTime; uniform float uAgitate;
+        varying vec2 vXZ;
+        void main() {
+          vXZ = position.xz;
+          vec3 p = position;
+          // La superficie ondula de verdad: al mirarla desde abajo, este
+          // desplazamiento es lo que la hace leerse como un techo que respira.
+          p.y += sin(p.x * 0.12 + uTime * 1.1) * 0.28 + sin(p.z * 0.1 - uTime * 0.9) * 0.24;
+          p.y += uAgitate * 1.4 * sin(length(p.xz) * 0.16 - uTime * 3.2);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }`,
+      fragmentShader: `
+        #define N ${RIPPLES}
+        precision mediump float;
+        uniform float uTime, uAgitate, uLight; uniform vec4 uRipples[N];
+        varying vec2 vXZ;
+        void main() {
+          // Cáusticas: la red fina de luz que se arrastra por el agua.
+          float c1 = sin(vXZ.x * 0.31 + uTime * 0.9) * sin(vXZ.y * 0.27 - uTime * 0.75);
+          float c2 = sin(vXZ.x * 0.17 - vXZ.y * 0.21 + uTime * 0.5);
+          float caustic = pow(max(0.0, c1 * 0.7 + c2 * 0.5), 3.0);
+          // Ondas de los bichos que rompen la superficie.
+          float wake = 0.0;
+          for (int i = 0; i < N; i++) {
+            vec4 r = uRipples[i];
+            if (r.w <= 0.001) continue;
+            float d = distance(vXZ, r.xy);
+            float ring = sin((d - r.z) * 1.9) * exp(-abs(d - r.z) * 0.42);
+            wake += max(0.0, ring) * smoothstep(9.0, 0.0, abs(d - r.z)) * r.w;
+          }
+          vec3 deep = vec3(0.02, 0.10, 0.16);
+          vec3 lit = vec3(0.35, 0.72, 0.85);
+          vec3 col = deep + (lit - deep) * caustic * uLight
+                   + wake * vec3(0.30, 0.58, 0.92)
+                   + uAgitate * vec3(0.10, 0.24, 0.38);
+          float a = clamp(0.42 + caustic * 0.5 * uLight + wake * 0.4 + uAgitate * 0.2, 0.0, 0.95);
+          gl_FragColor = vec4(col, a);
+        }`,
+    })
+    waterMesh = new THREE.Mesh(geo, mat)
+    waterMesh.renderOrder = 1
+    scene.add(waterMesh)
+  }
+
+  // Ondas en la superficie: pool FIFO, igual que la laguna.
+  let rippleHead = 0
+  function spawnRipple(x, z, str) {
+    waterUniforms.uRipples.value[rippleHead].set(x, z, 0.5, str)
+    rippleHead = (rippleHead + 1) % RIPPLES
+  }
+  function updateRipples(step) {
+    for (const r of waterUniforms.uRipples.value) {
+      if (r.w <= 0.001) continue
+      r.z += 8 * step
+      r.w = Math.max(0, r.w - 0.34 * step)
+    }
+  }
+
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
   let tide = 0
+  let surfaceY = P.surfaceMax
   function update(swarm, dt, eco) {
     const step = dt || 0.016
     clock += step
     pointUniforms.uT.value = clock
+    waterUniforms.uTime.value = clock
     if (eco) {
       // Turbidez: el sedimento en suspensión come visibilidad.
       scene.fog.density = 0.018 + eco.fog * 0.03
       tide = tideLevel(eco.phaseIndex, eco.phaseT)
+      // El techo sube y baja con la marea: en bajamar se acerca a la cámara y la
+      // poza se vuelve un charco chico; en pleamar se aleja y hay columna de agua.
+      surfaceY = P.surfaceMin + (P.surfaceMax - P.surfaceMin) * tide
+      if (waterMesh) waterMesh.position.y = surfaceY
+      // De noche no hay cáusticas: sin sol arriba, la red de luz no existe.
+      waterUniforms.uLight.value = Math.min(1, eco.gain * 0.85)
+      // Agitación del oleaje (el `rain` del estado de OLEAJE).
+      waterUniforms.uAgitate.value = eco.rain * 0.8
       // La estación de este mundo es la SURGENCIA; el HUD lee esta etiqueta.
       eco.seasonLabel = surgeLabel(eco.seasonT)
     }
+    updateRipples(step)
     stage.render(step)
     return []
   }
