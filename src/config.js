@@ -374,8 +374,8 @@ export const CONFIG = {
       maxSpeed: 0.06, sep: 0.9, align: 0.5, cohesion: 0.4,
       sepRadius: 0.05, neighborRadius: 0.14, wander: 0.5, turn: 2.0,
     },
-    plankton: 2600,        // puntos a la deriva en la columna
-    bubbles: 90,           // burbujas: pocas y finas, en columnas (no una cortina)
+    plankton: 700,         // motas a la deriva (pocas y tenues, no una nube verde)
+    bubbles: 32,           // burbujas: MUY pocas y finas, dispersas (no columnas)
     rays: 14,              // rayos de sol entre las piedras
     mussels: { patches: 7, perPatch: 26 },  // bancos de choritos (presa)
     limpets: 40,

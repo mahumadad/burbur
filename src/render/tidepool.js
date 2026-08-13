@@ -121,14 +121,14 @@ export function createTidepool(container, cfg, agentNames = []) {
   const stage = createStage(container, {
     ...cfg,
     stage: {
-      camera: { orbR: 30, theta: 0.9, phi: 2.0, target: [0, -10, 0] },
-      // La cámara vive en una columna de agua HONDA y mira HACIA ARRIBA, hacia el
-      // techo (ventana de Snell). La banda polar la mantiene siempre bajo la
-      // superficie de bajamar (minPolar) y sobre el lecho (maxPolar+maxDist), con
-      // el azimut libre para orbitar la poza. Con target en y=-10 (entre la cámara
-      // y la superficie) la vista sube al techo sin perder el bentos del fondo.
-      orbit: { minDist: 10, maxDist: 32, minPolar: Math.PI * 0.52, maxPolar: Math.PI * 0.70 },
-      breathe: { baseY: -10, ampY: 1.0 },
+      camera: { orbR: 28, theta: 0.9, phi: 1.62, target: [0, -20, 0] },
+      // La cámara mira casi NIVELADA al BENTOS (target en y=-20, sobre el fondo),
+      // que llena el cuadro como en la referencia, con la superficie brillante
+      // como techo arriba. Como el target es hondo, la banda polar puede ser ancha
+      // sin que la cámara salga del agua (minPolar) ni cruce el lecho (maxPolar).
+      // Azimut libre para orbitar la poza.
+      orbit: { minDist: 10, maxDist: 32, minPolar: Math.PI * 0.42, maxPolar: Math.PI * 0.60 },
+      breathe: { baseY: -20, ampY: 1.5 },
       fog: { color: 0x0a2733, density: 0.026 },
       background: 0x061a24,
       addPass: (composer) => composer.insertPass(seaPass, 1),
@@ -137,6 +137,13 @@ export function createTidepool(container, cfg, agentNames = []) {
   const { scene } = stage
   const draw = createDraw(rc)
   const { pushPoint, pushLine, uniforms: pointUniforms } = draw
+  // El DOF del shader de puntos viene calibrado para los mundos AÉREOS (foco a
+  // ~95 de distancia). Bajo el agua todo está cerca (10–40), así que ese foco
+  // lejano inflaba cada punto en un disco enorme y borroso (plancton, burbujas,
+  // bolones parecían pelotas gigantes). Acercamos el foco y bajamos la apertura
+  // → puntos nítidos y del tamaño real.
+  pointUniforms.uFocus.value = 22
+  pointUniforms.uAperture.value = 0.05
 
   // ─── LA TAZA: pared anular de roca + lecho ────────────────────────────────
   // Roca mojada de la costa: gris-carbón frío, no arena.
@@ -737,53 +744,55 @@ export function createTidepool(container, cfg, agentNames = []) {
         p.x = -CURRENT_X * P.bowlRadius * 0.95 + (q() - 0.5) * 6
         p.z = -CURRENT_Z * P.bowlRadius * 0.95 + (q() - 0.5) * 6
       }
-      // Noctiluca: de noche el plancton agitado suelta un destello azul.
-      if (night && p.flash <= 0 && q() < 0.0015) p.flash = 1
+      // Noctiluca: de noche el plancton agitado suelta un destello azul, RARO.
+      if (night && p.flash <= 0 && q() < 0.0006) p.flash = 1
       if (p.flash > 0) p.flash = Math.max(0, p.flash - step * 1.6)
       const j = i * 3
       planktonCloud.pos[j] = p.x
       planktonCloud.pos[j + 1] = p.y
       planktonCloud.pos[j + 2] = p.z
-      // Verde de floración con surgencia; azul eléctrico al destellar.
-      planktonCloud.col[j] = 0.22 + p.flash * 0.3
-      planktonCloud.col[j + 1] = 0.34 + bloom * 0.4 + p.flash * 0.7
-      planktonCloud.col[j + 2] = 0.4 + p.flash * 1.0
+      // Motas TENUES azul-grisáceas (leve tinte verde con surgencia); al destellar,
+      // pop azul-blanco de noctiluca. Base baja para que no sean una nube verde.
+      planktonCloud.col[j] = 0.09 + p.flash * 0.45
+      planktonCloud.col[j + 1] = 0.15 + bloom * 0.20 + p.flash * 0.7
+      planktonCloud.col[j + 2] = 0.22 + p.flash * 1.0
     }
     planktonCloud.commit()
   }
 
-  // BURBUJAS: pocas y finas, subiendo en unas pocas COLUMNAS (vents) desde el
-  // portillo y grietas del lecho. Suben en ristra con bamboleo, se van al llegar
-  // a la superficie; nunca forman una cortina que tape la escena.
-  const bubbleVents = [
-    { x: Math.cos(P.portillo.ang) * P.bowlRadius * 0.8, z: Math.sin(P.portillo.ang) * P.bowlRadius * 0.8 },
-  ]
-  for (let v = 0; v < 3; v++) {
-    const a = q() * 6.2832, r = (0.2 + q() * 0.6) * P.bowlRadius
-    bubbleVents.push({ x: Math.cos(a) * r, z: Math.sin(a) * r })
-  }
+  // BURBUJAS: MUY pocas y finas, DISPERSAS por el fondo (no columnas fijas). Suben
+  // con bamboleo y se van al llegar a la superficie. Casi solo aparecen con oleaje
+  // (el mar entrando por el portillo); en calma son un goteo mínimo.
   const bubbles = []
   const bubbleCloud = createPointCloud(P.bubbles, draw.pointMaterial)
   for (let i = 0; i < P.bubbles; i++) {
     bubbles.push({ x: 0, z: 0, y: -9999, vy: 0, wob: q() * 6.2832 })
     // Azul pálido tenue (no blanco brillante): acompañan sin tapar.
     bubbleCloud.col[i * 3] = 0.42; bubbleCloud.col[i * 3 + 1] = 0.58; bubbleCloud.col[i * 3 + 2] = 0.66
-    bubbleCloud.size[i] = 0.05 + q() * 0.09
+    bubbleCloud.size[i] = 0.04 + q() * 0.06
   }
   scene.add(bubbleCloud.mesh)
   let bubbleHead = 0
   function updateBubbles(step, agitation) {
-    // Un hilito constante de las grietas + más del portillo con oleaje.
-    const rate = 1.5 + agitation * 6
+    // Casi todo el ritmo lo pone el oleaje; un mínimo goteo de base.
+    const rate = 0.4 + agitation * 5
     if (q() < rate * step) {
       const b = bubbles[bubbleHead]
       bubbleHead = (bubbleHead + 1) % bubbles.length
-      // El portillo (vent 0) tira más con oleaje; las grietas, un goteo parejo.
-      const vent = bubbleVents[q() < 0.4 + agitation * 0.4 ? 0 : 1 + (q() * 3 | 0)]
-      b.x = vent.x + (q() - 0.5) * 1.6
-      b.z = vent.z + (q() - 0.5) * 1.6
-      b.y = P.bedY + q() * 2
-      b.vy = 2.2 + q() * 2.5
+      // Punto de origen DISPERSO: sesgo hacia el portillo con oleaje, si no en
+      // cualquier grieta del fondo. Nunca una columna fija.
+      let vx, vz
+      if (q() < 0.35 + agitation * 0.4) {
+        vx = Math.cos(P.portillo.ang) * P.bowlRadius * 0.8
+        vz = Math.sin(P.portillo.ang) * P.bowlRadius * 0.8
+      } else {
+        const a = q() * 6.2832, r = Math.sqrt(q()) * P.bowlRadius * 0.9
+        vx = Math.cos(a) * r; vz = Math.sin(a) * r
+      }
+      b.x = vx + (q() - 0.5) * 2.5
+      b.z = vz + (q() - 0.5) * 2.5
+      b.y = P.bedY + q() * 3
+      b.vy = 3.0 + q() * 3.0
       b.wob = q() * 6.2832
     }
     for (let i = 0; i < bubbles.length; i++) {
