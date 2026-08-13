@@ -246,6 +246,8 @@ export function createTidepool(container, cfg, agentNames = []) {
   // Suben desde el lecho por la pared hacia la superficie. Al estar en la periferia
   // (radio ≥ el de la cámara) nunca quedan entre la cámara y el centro: dan roca
   // visible sin tapar el medio (el error de los islotes sueltos anteriores).
+  // Se GUARDAN en `rockMasses` para poder encostrarlas de fauna del intermareal.
+  const rockMasses = []
   {
     const N = 7
     for (let i = 0; i < N; i++) {
@@ -254,6 +256,7 @@ export function createTidepool(container, cfg, agentNames = []) {
       const cx = Math.cos(a) * r, cz = Math.sin(a) * r
       const rx = 8 + q() * 8, rz = 6 + q() * 6
       const ry = 14 + q() * 14                     // altas: trepan la pared
+      rockMasses.push({ cx, cy: P.bedY + ry * 0.5, cz, rx, ry, rz, rot: a })
       const geo = new THREE.IcosahedronGeometry(1, 4)
       const gp = geo.attributes.position
       const seed = q() * 100
@@ -444,14 +447,15 @@ export function createTidepool(container, cfg, agentNames = []) {
   }
 
   // ─── LA ROCA VIVA ─────────────────────────────────────────────────────────
-  // Un punto en la pared de la taza, a la altura pedida (0 = fondo, 1 = borde).
-  function wallPoint(h) {
-    const a = q() * 6.2832
+  // Un punto de la PARED anular a la altura (0 = fondo, 1 = borde) y azimut dados.
+  function wallAt(h, a) {
     const y = P.bedY + (P.wallTop - P.bedY) * h
     const t = (y - P.bedY) / (P.wallTop - P.bedY)
     const r = P.bowlRadius * (0.55 + 0.95 * t) - 1.2
     return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, ang: a }
   }
+  // Un punto en la pared, a la altura pedida y azimut al azar.
+  function wallPoint(h) { return wallAt(h, q() * 6.2832) }
   // Un punto en el LECHO CENTRAL (disco completo), a la altura del fondo con su
   // relieve. Es para POBLAR el centro de la poza —donde mira la cámara— y que no
   // quede pelado: wallPoint solo cubre las paredes (r≥~20), así que sin esto el
@@ -462,22 +466,67 @@ export function createTidepool(container, cfg, agentNames = []) {
     const y = P.bedY + (fbm(x * 0.035 + 2, z * 0.035 - 4, 2) - 0.5) * 8.0 + 0.5
     return { x, y, z, ang: a }
   }
+  // Un punto sobre la CARA de un peñasco `m` a fracción de altura h (0 = pie,
+  // 1 = cima) y azimut theta. Se apoya en el elipsoide suave de la masa y se
+  // empuja un pelo hacia afuera para que la criatura se lea PEGADA a la piedra,
+  // no flotando frente a ella. La banda vive en los flancos altos (no el ápice).
+  function massFace(m, h, theta) {
+    const ly = (h * 1.55 - 0.7) * m.ry                       // flancos, sesgo arriba
+    const horiz = Math.max(0.34, Math.sqrt(Math.max(0, 1 - (ly / m.ry) ** 2)))
+    const push = 1.04
+    const lx = Math.cos(theta) * m.rx * horiz * push
+    const lz = Math.sin(theta) * m.rz * horiz * push
+    const c = Math.cos(m.rot), s = Math.sin(m.rot)           // deshace rotation.y
+    let x = m.cx + lx * c + lz * s
+    let z = m.cz - lx * s + lz * c
+    // La cara EXTERIOR del peñasco queda oculta tras su propia masa (mesh opaco):
+    // si el punto cayó afuera, lo reflejamos a la cara INTERIOR —la que mira la
+    // cámara— por el centro de la masa. Sigue en la superficie, a la misma altura.
+    if (Math.hypot(x, z) > Math.hypot(m.cx, m.cz)) { x = 2 * m.cx - x; z = 2 * m.cz - z }
+    return { x, y: m.cy + ly, z, ang: theta + m.rot }
+  }
+  // Reparte encostre en CÚMULOS sobre la roca viva: se queda un rato en una misma
+  // mancha (pared anular o peñasco) soltando vecinos, y luego salta a otra —así se
+  // ven MANOJOS a distintas alturas, no un espolvoreo parejo. Denso cerca de la
+  // línea de agua (donde de verdad viven), ralo hacia el fondo. `wallBias` = cuánto
+  // va a la pared vs. las masas; [hLo,hHi] acota la banda de altura de la especie.
+  function makeCruster(wallBias, hLo, hHi) {
+    let left = 0, seed = null, onWall = false
+    const band = () => hLo + (hHi - hLo) * Math.sqrt(q())    // sqrt → sesgo arriba
+    return function next() {
+      if (left <= 0 || (onWall && rockMasses.length === 0)) {
+        onWall = q() < wallBias || rockMasses.length === 0
+        seed = onWall
+          ? { a: q() * 6.2832, h: band() }
+          : { m: rockMasses[(q() * rockMasses.length) | 0], theta: q() * 6.2832, h: band() }
+        left = 2 + (q() * 5 | 0)                             // 2–6 por mancha
+      }
+      left--
+      const h = Math.min(0.99, Math.max(0.02, seed.h + (q() - 0.5) * 0.16))
+      return onWall
+        ? wallAt(h, seed.a + (q() - 0.5) * 0.3)
+        : massFace(seed.m, h, seed.theta + (q() - 0.5) * 0.5)
+    }
+  }
 
   // ANÉMONAS: corona de tentáculos que se abre y cierra con la marea.
   const anemones = []
   const anemoneCloud = createPointCloud(P.anemones * 9, draw.pointMaterial)
+  const anemoneCrust = makeCruster(0.45, 0.28, 0.78)   // banda baja: gustan de sombra
   for (let i = 0; i < P.anemones; i++) {
-    // La mitad en el lecho central (pops de rojo donde mira la cámara), la otra
-    // mitad trepando la pared/repisas.
-    const p = q() < 0.5 ? bedSpot() : wallPoint(0.15 + q() * 0.55)
+    // ENCOSTRAN la roca —pared anular y peñascos— en manojos: la ortiga de mar
+    // que abre y cierra con la marea (nada en el lecho central: van pegadas a las
+    // piedras, que es donde de verdad viven).
+    const p = anemoneCrust()
     anemones.push({ ...p, phase: q() * 6.2832 })
     for (let k = 0; k < 9; k++) {
       const j = (i * 9 + k) * 3
-      // Rojo ladrillo de la ortiga de mar, con el disco más oscuro.
+      // Rojo ladrillo de la ortiga de mar, con el disco más oscuro. Disco basal
+      // ANCHO para que se lea como anémona (no un punto pelado) aun recogida.
       anemoneCloud.col[j] = k === 0 ? 0.42 : 0.86
       anemoneCloud.col[j + 1] = k === 0 ? 0.10 : 0.22
       anemoneCloud.col[j + 2] = k === 0 ? 0.12 : 0.26
-      anemoneCloud.size[i * 9 + k] = k === 0 ? 0.55 : 0.3
+      anemoneCloud.size[i * 9 + k] = k === 0 ? 0.8 : 0.34
     }
   }
   scene.add(anemoneCloud.mesh)
@@ -490,10 +539,12 @@ export function createTidepool(container, cfg, agentNames = []) {
       anemoneCloud.pos[b * 3] = an.x
       anemoneCloud.pos[b * 3 + 1] = an.y
       anemoneCloud.pos[b * 3 + 2] = an.z
-      // Tentáculos: se despliegan en corona al abrirse; recogidos son una perla.
+      // Tentáculos: se despliegan en corona al abrirse. Recogidos NO colapsan al
+      // disco —guardan una corona mínima— para que la forma de anémona se lea
+      // siempre, no un punto rojo suelto.
       for (let k = 1; k < 9; k++) {
         const a = (k / 8) * 6.2832 + an.phase
-        const spread = 0.25 + open * 1.15
+        const spread = 0.6 + open * 0.95
         const p = (b + k) * 3
         anemoneCloud.pos[p] = an.x + Math.cos(a) * spread
         anemoneCloud.pos[p + 1] = an.y + 0.2 + open * 0.5
@@ -506,11 +557,14 @@ export function createTidepool(container, cfg, agentNames = []) {
   // LAPAS: pastorean con el agua y vuelven a su cicatriz antes de quedar secas.
   const limpets = []
   const limpetCloud = createPointCloud(P.limpets, draw.pointMaterial)
+  const limpetCrust = makeCruster(0.5, 0.42, 0.92)
   for (let i = 0; i < P.limpets; i++) {
-    const p = wallPoint(0.3 + q() * 0.55)
+    const p = limpetCrust()
     limpets.push({ l: createLimpet(p.x, p.z), y: p.y })
-    limpetCloud.col[i * 3] = 0.62; limpetCloud.col[i * 3 + 1] = 0.58; limpetCloud.col[i * 3 + 2] = 0.48
-    limpetCloud.size[i] = 0.34
+    // Cono grisáceo de la Fissurella; leve variación para que no se lean clónicas.
+    const g = 0.5 + q() * 0.12
+    limpetCloud.col[i * 3] = g + 0.04; limpetCloud.col[i * 3 + 1] = g; limpetCloud.col[i * 3 + 2] = g - 0.03
+    limpetCloud.size[i] = 0.32 + q() * 0.1
   }
   scene.add(limpetCloud.mesh)
   function updateLimpets(step) {
@@ -527,8 +581,9 @@ export function createTidepool(container, cfg, agentNames = []) {
   // PICOROCOS: al sumergirse sacan los cirros y BARREN el agua, rítmicos.
   const barnacles = []
   const barnacleCloud = createPointCloud(P.barnacles * 4, draw.pointMaterial)
+  const barnacleCrust = makeCruster(0.5, 0.55, 0.98)   // alto: viven en la franja seca
   for (let i = 0; i < P.barnacles; i++) {
-    const p = wallPoint(0.25 + q() * 0.6)
+    const p = barnacleCrust()
     barnacles.push({ ...p, phase: q() * 6.2832, rate: 2.2 + q() * 1.4 })
     for (let k = 0; k < 4; k++) {
       const j = (i * 4 + k) * 3
@@ -559,14 +614,35 @@ export function createTidepool(container, cfg, agentNames = []) {
     barnacleCloud.commit()
   }
 
-  // BANCOS DE CHORITOS: la despensa de la estrella de sol (Task 14).
+  // BANCOS DE CHORITOS: manojos azul-negros APRETADOS pegados a la roca (pared y
+  // peñascos), no una nube suelta. También son la despensa de la estrella de sol.
   const musselPatches = []
+  const musselCrust = makeCruster(0.45, 0.4, 0.9)
   for (let i = 0; i < P.mussels.patches; i++) {
-    const p = wallPoint(0.2 + q() * 0.4)
+    const p = musselCrust()
     musselPatches.push({ x: p.x, z: p.z, count: P.mussels.perPatch })
     for (let k = 0; k < P.mussels.perPatch; k++) {
-      pushPoint(p.x + (q() - 0.5) * 3.4, p.y + (q() - 0.5) * 2.6, p.z + (q() - 0.5) * 3.4,
-        [0.10, 0.09, 0.16], 0.2 + q() * 0.16, 0)
+      // Racimo apretado; el azul-negro varía un punto entre valvas.
+      const b = 0.14 + q() * 0.06
+      pushPoint(p.x + (q() - 0.5) * 1.8, p.y + (q() - 0.5) * 1.6, p.z + (q() - 0.5) * 1.8,
+        [b * 0.6, b * 0.5, b], 0.18 + q() * 0.16, 0)
+    }
+  }
+  // CHITONES y CARACOLES: costra estática que remata la roca viva. Chitón =
+  // óvalo gris-pardo achatado; caracol (Tegula/caracol negro) = perla oscura.
+  // Baratos (un punto cada uno), en cúmulos sobre pared y peñascos.
+  {
+    const crust = makeCruster(0.5, 0.35, 0.9)
+    for (let i = 0; i < P.chitons; i++) {
+      const p = crust()
+      if (q() < 0.6) {
+        // Chitón: placa gris-parda, ancha y baja.
+        const s = 0.24 + q() * 0.1
+        pushPoint(p.x, p.y, p.z, [0.30 + s, 0.26 + s * 0.8, 0.22 + s * 0.6], 0.34 + q() * 0.14, 0)
+      } else {
+        // Caracol: concha oscura, chica y redonda.
+        pushPoint(p.x, p.y, p.z, [0.18, 0.15, 0.17], 0.2 + q() * 0.12, 0)
+      }
     }
   }
 

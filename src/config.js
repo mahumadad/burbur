@@ -377,10 +377,11 @@ export const CONFIG = {
     plankton: 700,         // motas a la deriva (pocas y tenues, no una nube verde)
     bubbles: 32,           // burbujas: MUY pocas y finas, dispersas (no columnas)
     rays: 14,              // rayos de sol entre las piedras
-    mussels: { patches: 7, perPatch: 26 },  // bancos de choritos (presa)
-    limpets: 40,
-    anemones: 26,
-    barnacles: 34,
+    mussels: { patches: 11, perPatch: 26 },  // bancos de choritos (presa)
+    limpets: 68,
+    anemones: 34,
+    barnacles: 72,
+    chitons: 150,          // chitones + caracoles: costra que encostra la roca
     algae: 45,             // algas sueltas (parches), no un bosque que tape
     // Cameo del chungungo: raro y solo con la poza bien llena.
     otter: { minTide: 0.75, chancePerSec: 0.012, diveDur: 5.5 },
