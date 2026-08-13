@@ -121,15 +121,15 @@ export function createTidepool(container, cfg, agentNames = []) {
   const stage = createStage(container, {
     ...cfg,
     stage: {
-      camera: { orbR: 28, theta: 0.9, phi: 1.62, target: [0, -20, 0] },
-      // La cámara mira casi NIVELADA al BENTOS (target en y=-20, sobre el fondo),
-      // que llena el cuadro como en la referencia, con la superficie brillante
-      // como techo arriba. Como el target es hondo, la banda polar puede ser ancha
-      // sin que la cámara salga del agua (minPolar) ni cruce el lecho (maxPolar).
-      // Azimut libre para orbitar la poza.
-      orbit: { minDist: 10, maxDist: 32, minPolar: Math.PI * 0.42, maxPolar: Math.PI * 0.60 },
+      camera: { orbR: 18, theta: 0.9, phi: 1.72, target: [0, -20, 0] },
+      // La cámara mira al BENTOS (target y=-20) tirando un poco HACIA ARRIBA, para
+      // que la superficie brillante quede de techo. maxDist acotado: alejarse más
+      // metía todo en la niebla. Banda polar ancha (target hondo → sumergida con
+      // margen). Azimut libre.
+      orbit: { minDist: 8, maxDist: 24, minPolar: Math.PI * 0.42, maxPolar: Math.PI * 0.60 },
       breathe: { baseY: -20, ampY: 1.5 },
-      fog: { color: 0x0a2733, density: 0.026 },
+      // Niebla MUCHO más suave: con 0.026 la escena se disolvía al alejarse.
+      fog: { color: 0x0a2733, density: 0.010 },
       background: 0x061a24,
       addPass: (composer) => composer.insertPass(seaPass, 1),
     },
