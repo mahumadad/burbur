@@ -97,7 +97,10 @@ async function start() {
     hud.setWorld(def.hud)
     // El bed de "mundo" (clima de exterior) se apaga en mundos interiores; si no,
     // arrastraba el fondo de lluvia/viento de los demás mundos (célula, neurona).
-    audio.setWeatherBed((def.audio && def.audio.rain) !== false)
+    // El bed de "mundo" se apaga en interiores (célula, neurona). La poza NO lo
+    // apaga: es lo que `setWind` modula, y bajo el agua eso es la corriente.
+    const ax0 = def.audio || {}
+    audio.setWeatherBed(ax0.rain !== false || ax0.surf === true)
     return { def, swarm, pop, scene, events }
   }
   function switchWorld(id) {
@@ -222,6 +225,15 @@ async function start() {
     // sin lluvia (célula) se silencia aunque el "clima" del perfil tenga agua.
     audio.setRain(ax.rain === false ? 0 : eco.rain)
     if (ax.rain !== false && eco.rain > 0.02 && Math.random() < eco.rain * 26 * dt) audio.drip()
+    // Poza: bajo el agua no llueve. El "clima" es oleaje — marejada de fondo,
+    // burbujas al romper y el cascabeleo de las piedras con la resaca.
+    if (ax.surf === true) {
+      audio.surge(eco.rain)
+      if (eco.rain > 0.05 && Math.random() < eco.rain * 14 * dt) audio.bubble()
+      if (Math.random() < eco.rain * 2.5 * dt) audio.stoneKnock()
+    } else {
+      audio.surge(0)
+    }
     // Los grillos son de clima cálido: enmudecen con el frío y fuera del bosque/laguna.
     if (ax.insects !== false && env.cricket && eco.temperature > 4 && Math.random() < eco.activity) audio.cricket()
     if (ax.owl !== false && env.owl) audio.owl()

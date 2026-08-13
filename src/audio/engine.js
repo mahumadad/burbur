@@ -318,6 +318,45 @@ export async function createAudio(cfg) {
     try { dripEnv.triggerAttackRelease(0.01) } catch (_) {}
   }
 
+  // ─── POZA DE MAREA: el clima acá es el OLEAJE, no la lluvia ───────────────
+  // Marejada: ruido filtrado grave que sube y baja como un set de olas.
+  const surgeNoise = new Tone.Noise('brown').start()
+  const surgeFilter = new Tone.Filter({ type: 'lowpass', frequency: 220, Q: 0.8 })
+  const surgeGain = new Tone.Gain(0).connect(busWeather)
+  surgeNoise.connect(surgeFilter)
+  surgeFilter.connect(surgeGain)
+  function surge(intensity) {
+    const i = Math.max(0, Math.min(1, intensity))
+    surgeGain.gain.rampTo(i * 0.5, 0.4)
+    surgeFilter.frequency.rampTo(180 + i * 520, 0.6)
+  }
+
+  // Burbuja: un "blup" corto que sube de tono (el aire escapando hacia arriba).
+  function bubble() {
+    const t = Tone.now()
+    const o = new Tone.Oscillator({ frequency: 180 + Math.random() * 160, type: 'sine' })
+    const g = new Tone.Gain(0).connect(busWeather)
+    o.connect(g)
+    o.start(t); o.stop(t + 0.13)
+    o.frequency.exponentialRampTo(520 + Math.random() * 300, 0.12, t)
+    g.gain.setValueAtTime(0.16, t)
+    g.gain.exponentialRampTo(0.001, 0.12, t)
+    setTimeout(() => { o.dispose(); g.dispose() }, 400)
+  }
+
+  // Piedra contra piedra: el cascabeleo del canto rodado con la resaca.
+  function stoneKnock() {
+    const t = Tone.now()
+    const n = new Tone.NoiseSynth({
+      noise: { type: 'pink' },
+      envelope: { attack: 0.001, decay: 0.05, sustain: 0 },
+    })
+    const f = new Tone.Filter({ type: 'bandpass', frequency: 420 + Math.random() * 500, Q: 4 }).connect(busWeather)
+    n.connect(f)
+    n.triggerAttackRelease(0.05, t)
+    setTimeout(() => { n.dispose(); f.dispose() }, 500)
+  }
+
   // Traqueteo del "shake": tren de clicks triangulares (800–2500 Hz) que decae
   // en ~800 ms. Igual espíritu que el click-track del shake de murmur.
   const rattleOut = new Tone.Gain(0.5).connect(busActivity)
@@ -356,5 +395,6 @@ export async function createAudio(cfg) {
     triggerFlash, setWind, cricket, owl, accent, fauna, insect, thunder,
     setRain, drip, setDroneVol, setWeatherVol, setActivityVol, setMood, rattle,
     spike, setThrob, setWeatherBed,
+    surge, bubble, stoneKnock,
   }
 }
