@@ -128,9 +128,9 @@ export function createTidepool(container, cfg, agentNames = []) {
       // margen). Azimut libre.
       orbit: { minDist: 8, maxDist: 30, minPolar: Math.PI * 0.42, maxPolar: Math.PI * 0.60 },
       breathe: { baseY: -18, ampY: 1.5 },
-      // Agua TURQUESA CLARA (como las fotos), no azul-negra: niebla turquesa y
-      // poco densa (agua limpia, se ve lejos), fondo turquesa profundo.
-      fog: { color: 0x1f8f88, density: 0.0075 },
+      // Agua TURQUESA CLARA: niebla turquesa MUY tenue (si sube, tiñe de turquesa
+      // las rocas lejanas y se ven "del color del agua"), fondo turquesa profundo.
+      fog: { color: 0x1f8f88, density: 0.004 },
       background: 0x0e5f63,
       addPass: (composer) => composer.insertPass(seaPass, 1),
     },
@@ -307,9 +307,11 @@ export function createTidepool(container, cfg, agentNames = []) {
           vec3 disp = gerstnerSum(p, uTime, chop, nrm);
           vec3 pos = position + disp;
           vCrest = disp.y;
-          // Normal fina del rizado combinada con la de Gerstner.
-          vec3 rn = rippleNormal(p, uTime, 0.6 + uAgitate);
-          vWNrm = normalize(nrm + vec3(rn.x, 0.0, rn.z));
+          // Normal fina del rizado (mini-oleaje) combinada con la de Gerstner.
+          // Dos escalas: una media y una MÁS FINA, para que se lea el rizado chico.
+          vec3 rn = rippleNormal(p, uTime, 1.3 + uAgitate);
+          vec3 rn2 = rippleNormal(p * 2.7 + 5.0, uTime * 1.4, 1.0);
+          vWNrm = normalize(nrm + vec3(rn.x + rn2.x * 0.6, 0.0, rn.z + rn2.z * 0.6));
           // Dirección de vista (fragmento → cámara). cameraPosition SOLO está
           // disponible en el vertex de un ShaderMaterial, así que se calcula acá
           // y se pasa interpolada al fragment.
@@ -350,6 +352,10 @@ export function createTidepool(container, cfg, agentNames = []) {
           vec3 tir = sheen * (0.80 + 0.35 * cosI);
           vec3 col = vec3(mix(tir.r, sky.r, winR), mix(tir.g, sky.g, win), mix(tir.b, sky.b, winB));
           col += uCausticTint * cau * uLight * 0.35;
+          // MINI-OLEAJE: rizado fino y rápido de la superficie (líneas de luz
+          // chiquitas que corren), más marcado cerca de la ventana de Snell.
+          float mini = caustics(vWXZ * 0.34 + 7.0, uTime * 1.2);
+          col += vec3(0.16, 0.40, 0.46) * mini * (0.35 + win * 0.65) * uLight;
           // Ondas de estela (bichos que rozan la superficie).
           float wake = 0.0;
           for (int i = 0; i < N; i++) {

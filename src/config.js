@@ -363,7 +363,7 @@ export const CONFIG = {
     // Geometría de la taza. La cámara vive DENTRO de la cavidad, a media agua.
     bowlRadius: 52,        // radio interior: poza ANCHA y abierta (más agua)
     bedY: -34,             // fondo de la poza (columna honda: deja mirar arriba)
-    wallTop: 5,            // pared de roca MEDIA que rodea la poza (como las fotos)
+    wallTop: 14,           // pared de roca ALTA que rodea la poza (como las fotos)
     surfaceMin: -8,        // techo de agua en bajamar (SIEMPRE sobre la cámara)
     surfaceMax: 0,         // techo de agua en pleamar
     camY: -22,             // altura de la cámara (bien bajo el surfaceMin)
