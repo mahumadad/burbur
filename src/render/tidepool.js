@@ -39,7 +39,7 @@ export function createTidepool(container, cfg, agentNames = []) {
   // Inyecta la cáustica procedural en un MeshBasicMaterial de geometría (lecho o
   // roca): agrega el varying de posición-mundo y suma la red de luz, atenuada por
   // la profundidad y apagada de noche.
-  function injectCaustics(mat) {
+  function injectCaustics(mat, strength = 0.5) {
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = waterShared.uTime
       shader.uniforms.uLight = waterShared.uLight
@@ -58,9 +58,9 @@ export function createTidepool(container, cfg, agentNames = []) {
           `#include <dithering_fragment>
            float depthAtten = clamp(1.0 - (uSurfaceY - vWorldPosC.y) / 30.0, 0.15, 1.0);
            float cau = caustics(vWorldPosC.xz * uCausticScale, uTime * uCausticSpeed);
-           gl_FragColor.rgb += uCausticTint * cau * depthAtten * uLight * 0.5;`)
+           gl_FragColor.rgb += uCausticTint * cau * depthAtten * uLight * ${strength.toFixed(3)};`)
     }
-    mat.customProgramCacheKey = () => 'tidepool-caustic'
+    mat.customProgramCacheKey = () => 'tidepool-caustic-' + strength
     return mat
   }
 
@@ -136,6 +136,11 @@ export function createTidepool(container, cfg, agentNames = []) {
     },
   })
   const { scene } = stage
+  // Cielo/agua que cambian con el DÍA: de día, turquesa brillante y soleado; de
+  // noche, oscuro. El fondo y la niebla se interpolan por el brillo del ecosistema
+  // (eco.gain) para que se VEA amanecer y anochecer.
+  const DAY_BG = new THREE.Color(0x3fb8c2), NIGHT_BG = new THREE.Color(0x05141c)
+  const DAY_FOG = new THREE.Color(0x2aa89a), NIGHT_FOG = new THREE.Color(0x08222a)
   const draw = createDraw(rc)
   const { pushPoint, pushLine, uniforms: pointUniforms } = draw
   // El DOF del shader de puntos viene calibrado para los mundos AÉREOS (foco a
@@ -176,9 +181,11 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
     geo.translate(0, (P.wallTop + P.bedY) / 2, 0)
+    // Pared: cáusticas MUY débiles (0.12) para que la roca quede OSCURA (no lavada
+    // de turquesa). El fondo pálido sí las lleva fuertes.
     scene.add(new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide, fog: true,
-    }))))
+    }), 0.12)))
   }
   // Lecho de la poza.
   {
@@ -200,9 +207,10 @@ export function createTidepool(container, cfg, agentNames = []) {
       cols[i * 3 + 2] = 0.33 + s * 0.24
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+    // Fondo pálido: cáusticas FUERTES (la red de luz sobre la arena).
     scene.add(new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide, fog: true,
-    }))))
+    }), 0.6)))
   }
   // Bolones sueltos por el fondo.
   for (let i = 0; i < 120; i++) {
@@ -243,7 +251,7 @@ export function createTidepool(container, cfg, agentNames = []) {
       geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
       const mesh = new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
         vertexColors: true, side: THREE.DoubleSide, fog: true,
-      })))
+      }), 0.12))   // roca oscura: cáusticas muy débiles
       mesh.position.set(cx, P.bedY + ry * 0.5, cz)
       mesh.rotation.y = a
       scene.add(mesh)
@@ -890,8 +898,13 @@ export function createTidepool(container, cfg, agentNames = []) {
     clock += step
     pointUniforms.uT.value = clock
     if (eco) {
-      // Turbidez: el sedimento en suspensión come visibilidad.
-      scene.fog.density = 0.018 + eco.fog * 0.03
+      // Agua CLARA de base; la turbidez del oleaje la enturbia un poco. (Antes
+      // 0.018+ pisaba la niebla del config y teñía de turquesa la roca lejana.)
+      scene.fog.density = 0.004 + eco.fog * 0.012
+      // DÍA/NOCHE visible: cielo y agua se aclaran con el sol y oscurecen de noche.
+      const dayF = Math.max(0, Math.min(1, (eco.gain - 0.6) / 0.7))
+      scene.background.lerpColors(NIGHT_BG, DAY_BG, dayF)
+      scene.fog.color.lerpColors(NIGHT_FOG, DAY_FOG, dayF)
       tide = tideLevel(eco.phaseIndex, eco.phaseT)
       // El techo sube y baja con la marea: en bajamar se acerca a la cámara y la
       // poza se vuelve un charco chico; en pleamar se aleja y hay columna de agua.
