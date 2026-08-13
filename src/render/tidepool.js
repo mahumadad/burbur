@@ -10,6 +10,7 @@ import { createTrails } from './engine/trails.js'
 import { createSchools, updateSchools, scatterFish } from '../sim/fish.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies } from './pond/species.js'
+import { createSeastar, updateSeastar, SEASTAR_CFG } from '../sim/seastar.js'
 
 // Mundo POZA DE MAREA: una poza rocosa de la costa chilena vista DESDE ABAJO
 // DEL AGUA — la primera cámara volteada del proyecto. Una taza de roca con un
@@ -366,6 +367,66 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
   }
 
+  // ─── DEPREDACIÓN ──────────────────────────────────────────────────────────
+  // Dos tempos: la estrella de sol repta sin parar (lenta, siempre) y el
+  // chungungo cae de golpe (rápido, raro, solo con la poza llena).
+  const stars = []
+  for (let i = 0; i < 2; i++) {
+    const a = q() * 6.2832, r = q() * P.bowlRadius * 0.5
+    stars.push(createSeastar(Math.cos(a) * r, Math.sin(a) * r))
+  }
+  function huntSeastars(step, predations) {
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i]
+      const ate = updateSeastar(s, musselPatches, step, SEASTAR_CFG)
+      // El slot i (0–1) es un cazador: la estrella MANDA su posición.
+      worldPos[i * 3] = s.x
+      worldPos[i * 3 + 2] = s.z
+      if (ate >= 0) {
+        const dx = s.x, dz = s.z
+        const dir = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 'right' : 'left') : (dz > 0 ? 'ahead' : 'behind')
+        predations.push({ hunterIdx: i, dir })
+        spawnRipple(s.x, s.z, 0.4)
+      }
+    }
+  }
+
+  // El chungungo: cae desde la superficie, agarra algo y sube. No ocupa slot del
+  // censo (nunca se le asigna nombre); es un visitante, y por eso impresiona.
+  const otter = { active: 0, x: 0, z: 0, took: false, group: null }
+  {
+    const { group } = buildSpecies('burst', kit)
+    group.scale.setScalar(2.2)
+    group.visible = false
+    scene.add(group)
+    otter.group = group
+  }
+  function updateOtter(step, predations) {
+    if (otter.active > 0) {
+      otter.active -= step
+      const k = 1 - otter.active / P.otter.diveDur      // 0 → 1
+      // Zambullida: baja, toca el fondo a mitad de camino y vuelve a subir.
+      const depth = Math.sin(Math.min(1, k) * Math.PI)
+      otter.group.position.set(otter.x, surfaceY - depth * (surfaceY - P.bedY - 2), otter.z)
+      if (!otter.took && k > 0.45) {
+        otter.took = true
+        predations.push({ hunterIdx: null, dir: 'above' })
+        spawnRipple(otter.x, otter.z, 1.2)
+      }
+      if (otter.active <= 0) { otter.group.visible = false }
+      return
+    }
+    // Solo aparece con la poza bien llena, y rara vez.
+    if (tide < P.otter.minTide) return
+    if (q() > P.otter.chancePerSec * step) return
+    const a = q() * 6.2832, r = q() * P.bowlRadius * 0.6
+    otter.x = Math.cos(a) * r; otter.z = Math.sin(a) * r
+    otter.active = P.otter.diveDur
+    otter.took = false
+    otter.group.visible = true
+    spawnRipple(otter.x, otter.z, 1.4)
+  }
+
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
   let tide = 0
@@ -395,7 +456,11 @@ export function createTidepool(container, cfg, agentNames = []) {
     updateAnemones(agitation)
     updateLimpets(step)
     updateBarnacles()
+    const predations = []
     moveFauna(step)
+    // La estrella pisa la posición de sus slots antes de que se dibujen.
+    huntSeastars(step, predations)
+    updateOtter(step, predations)
     for (let i = 0; i < n; i++) {
       const a = agents[i]
       a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
@@ -410,7 +475,7 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
     trails.update(worldPos)
     stage.render(step)
-    return []
+    return predations
   }
   // Frío = surgencia = comida. La etiqueta invierte el sentido del año del bosque.
   function surgeLabel(seasonT) {
