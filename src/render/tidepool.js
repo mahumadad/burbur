@@ -208,9 +208,43 @@ export function createTidepool(container, cfg, agentNames = []) {
     const x = Math.cos(a) * r, z = Math.sin(a) * r
     pushPoint(x, P.bedY + 0.4 + q() * 0.9, z, [0.18, 0.2, 0.22], 0.4 + q() * 1.1, 0)
   }
-  // (Sin peñascos sueltos en el centro: la roca es la PARED que rodea la poza
-  // —continua, media, rugosa, como las fotos— más el lecho pálido. Los islotes
-  // icoesfera anteriores tapaban la vista y se leían como piedras sueltas.)
+  // ─── PARED DE ROCA: unas pocas masas GRANDES pegadas al borde de la taza (NO en
+  // el centro), que se leen como la pared rocosa que rodea la poza —como las fotos—.
+  // Suben desde el lecho por la pared hacia la superficie. Al estar en la periferia
+  // (radio ≥ el de la cámara) nunca quedan entre la cámara y el centro: dan roca
+  // visible sin tapar el medio (el error de los islotes sueltos anteriores).
+  {
+    const N = 7
+    for (let i = 0; i < N; i++) {
+      const a = (i / N) * 6.2832 + q() * 0.5
+      const r = (0.74 + q() * 0.2) * P.bowlRadius
+      const cx = Math.cos(a) * r, cz = Math.sin(a) * r
+      const rx = 8 + q() * 8, rz = 6 + q() * 6
+      const ry = 14 + q() * 14                     // altas: trepan la pared
+      const geo = new THREE.IcosahedronGeometry(1, 3)
+      const gp = geo.attributes.position
+      const seed = q() * 100
+      const cols = new Float32Array(gp.count * 3)
+      for (let k = 0; k < gp.count; k++) {
+        const px = gp.getX(k), py = gp.getY(k), pz = gp.getZ(k)
+        const d = 1 + (fbm(px * 1.4 + seed, pz * 1.4 - py + seed, 3) - 0.5) * 0.8
+        const wx = px * d * rx, wy = py * d * ry, wz = pz * d * rz
+        gp.setXYZ(k, wx, wy, wz)
+        // Roca húmeda gris-carbón con gradiente vertical (más clara arriba).
+        const t = Math.max(0, Math.min(1, (wy + ry) / (2 * ry)))
+        const g = 0.10 + t * 0.24 + (fbm(px * 3 + seed, pz * 3, 2) - 0.5) * 0.08
+        cols[k * 3] = g * 0.92; cols[k * 3 + 1] = g; cols[k * 3 + 2] = g * 1.1
+      }
+      geo.computeVertexNormals()
+      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+      const mesh = new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
+        vertexColors: true, side: THREE.DoubleSide, fog: true,
+      })))
+      mesh.position.set(cx, P.bedY + ry * 0.5, cz)
+      mesh.rotation.y = a
+      scene.add(mesh)
+    }
+  }
 
   stage.setResizeHook((m) => { pointUniforms.uProj.value = m.proj })
 
