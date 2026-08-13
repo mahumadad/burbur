@@ -178,7 +178,10 @@ export function createTidepool(container, cfg, agentNames = []) {
     const cols = new Float32Array(pos.count * 3)
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), z = pos.getZ(i)
-      pos.setY(i, P.bedY + (fbm(x * 0.08 + 9, z * 0.08 + 5, 2) - 0.5) * 2.2)
+      // Relieve del lecho: dunas suaves de baja frecuencia + rugosidad fina, para
+      // que el fondo tenga geografía y no sea un plato liso.
+      pos.setY(i, P.bedY + (fbm(x * 0.035 + 2, z * 0.035 - 4, 2) - 0.5) * 8.0
+        + (fbm(x * 0.11 + 9, z * 0.11 + 5, 3) - 0.5) * 3.0)
       const s = 0.5 + fbm(x * 0.2, z * 0.2, 2) * 0.5
       cols[i * 3] = ROCK_LO[0] * s * 3.2
       cols[i * 3 + 1] = ROCK_LO[1] * s * 3.4
@@ -190,10 +193,49 @@ export function createTidepool(container, cfg, agentNames = []) {
     }))))
   }
   // Bolones sueltos por el fondo.
-  for (let i = 0; i < 90; i++) {
-    const a = q() * 6.2832, r = Math.sqrt(q()) * P.bowlRadius * 0.95
+  for (let i = 0; i < 120; i++) {
+    const a = q() * 6.2832, r = Math.sqrt(q()) * P.bowlRadius * 0.98
     const x = Math.cos(a) * r, z = Math.sin(a) * r
-    pushPoint(x, P.bedY + 0.4 + q() * 0.6, z, [0.18, 0.2, 0.22], 0.4 + q() * 0.9, 0)
+    pushPoint(x, P.bedY + 0.4 + q() * 0.9, z, [0.18, 0.2, 0.22], 0.4 + q() * 1.1, 0)
+  }
+  // ─── FORMACIONES DE ROCA: peñascos e islotes que suben del lecho, para que la
+  // poza tenga geografía (repisas, stacks altos, bolones grandes) y no una taza
+  // lisa. Icoesferas deformadas por fbm — como los lóbulos del pond — con las
+  // cáusticas inyectadas (la luz del techo también les cae encima).
+  {
+    const ROCKN = 14
+    for (let i = 0; i < ROCKN; i++) {
+      const a = q() * 6.2832
+      // Repartidas por el disco, dejando algo de aire en el centro bajo la cámara.
+      const r = (0.28 + Math.sqrt(q()) * 0.64) * P.bowlRadius
+      const cx = Math.cos(a) * r, cz = Math.sin(a) * r
+      const tall = q() < 0.4
+      const rx = (tall ? 3 : 4) + q() * (tall ? 3 : 6)
+      const rz = rx * (0.7 + q() * 0.6)
+      const ry = tall ? 10 + q() * 16 : 3 + q() * 6      // stacks altos vs bolones
+      const geo = new THREE.IcosahedronGeometry(1, 3)
+      const gp = geo.attributes.position
+      const seed = q() * 100
+      const cols = new Float32Array(gp.count * 3)
+      for (let k = 0; k < gp.count; k++) {
+        const px = gp.getX(k), py = gp.getY(k), pz = gp.getZ(k)
+        const d = 1 + (fbm(px * 1.6 + seed, pz * 1.6 - py + seed, 3) - 0.5) * 0.7
+        const wx = px * d * rx, wy = py * d * ry, wz = pz * d * rz
+        gp.setXYZ(k, wx, wy, wz)
+        // Gris-carbón húmedo con gradiente vertical (más claro arriba, hacia la luz).
+        const t = Math.max(0, Math.min(1, (wy + ry) / (2 * ry)))
+        const g = 0.06 + t * 0.22 + (fbm(px * 3 + seed, pz * 3, 2) - 0.5) * 0.08
+        cols[k * 3] = g * 0.9; cols[k * 3 + 1] = g; cols[k * 3 + 2] = g * 1.12
+      }
+      geo.computeVertexNormals()
+      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+      const mesh = new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
+        vertexColors: true, side: THREE.DoubleSide, fog: true,
+      })))
+      mesh.position.set(cx, P.bedY + ry * 0.55, cz)
+      mesh.rotation.y = q() * 6.2832
+      scene.add(mesh)
+    }
   }
 
   stage.setResizeHook((m) => { pointUniforms.uProj.value = m.proj })
@@ -450,22 +492,34 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
   }
 
-  // ALGAS: cochayuyo y huiro anclados a la roca, meciéndose con el vaivén.
-  // Van como líneas con `phase`, que el shader de puntos ya usa para el balanceo.
+  // ALGAS: pradería DENSA anclada al lecho y las repisas. Cada mata es un abanico
+  // de muchas hojas finas arqueadas (pasto marino/luga); una de cada ~5 es una
+  // correa alta de cochayuyo/huiro que sube hacia la luz. Gradiente verde base→
+  // punta y arqueo por mata, para que se lea frondosa y no como cuatro palitos.
+  const ALGAE_LO = [0.05, 0.13, 0.04], ALGAE_HI = [0.30, 0.54, 0.16]
+  const KELP_LO = [0.10, 0.13, 0.05], KELP_HI = [0.44, 0.40, 0.13]
+  const mixC = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
   for (let i = 0; i < P.algae; i++) {
-    const p = wallPoint(q() * 0.5)
-    const h = 4 + q() * 9
-    const segs = 4
-    const a = q() * 6.2832
-    let px = p.x, py = p.y, pz = p.z
-    for (let s = 0; s < segs; s++) {
-      const f = (s + 1) / segs
-      const nx = p.x + Math.cos(a) * f * 2.4
-      const ny = p.y + h * f
-      const nz = p.z + Math.sin(a) * f * 2.4
-      const lo = [0.10, 0.16, 0.06], hi = [0.26, 0.38, 0.12]
-      pushLine(px, py, pz, nx, ny, nz, lo, hi)
-      px = nx; py = ny; pz = nz
+    const tall = q() < 0.2                          // cochayuyo/huiro alto
+    const base = wallPoint(q() * 0.42)              // ancladas abajo, en roca/lecho
+    const blades = tall ? 2 + (q() * 3 | 0) : 6 + (q() * 10 | 0)
+    const bendDir = q() * 6.2832                    // hacia dónde se recuesta la mata
+    const lo = tall ? KELP_LO : ALGAE_LO, hi = tall ? KELP_HI : ALGAE_HI
+    for (let b = 0; b < blades; b++) {
+      const h = tall ? 16 + q() * 18 : 4 + q() * 9
+      const rr = (tall ? 0.5 : 1.9) * q(), aa = q() * 6.2832
+      const bx = base.x + Math.cos(aa) * rr, bz = base.z + Math.sin(aa) * rr
+      const bend = 0.25 + q() * 0.5, segs = 6
+      let px = bx, py = base.y, pz = bz
+      for (let s = 1; s <= segs; s++) {
+        const f = s / segs
+        const arch = bend * h * f * f               // se recuesta más hacia la punta
+        const nx = bx + Math.cos(bendDir) * arch
+        const ny = base.y + h * f * (1.0 - 0.12 * f)
+        const nz = bz + Math.sin(bendDir) * arch
+        pushLine(px, py, pz, nx, ny, nz, mixC(lo, hi, (s - 1) / segs), mixC(lo, hi, f))
+        px = nx; py = ny; pz = nz
+      }
     }
   }
 
@@ -643,33 +697,48 @@ export function createTidepool(container, cfg, agentNames = []) {
     planktonCloud.commit()
   }
 
-  // BURBUJAS: suben del lecho y del portillo cuando rompe el oleaje.
+  // BURBUJAS: pocas y finas, subiendo en unas pocas COLUMNAS (vents) desde el
+  // portillo y grietas del lecho. Suben en ristra con bamboleo, se van al llegar
+  // a la superficie; nunca forman una cortina que tape la escena.
+  const bubbleVents = [
+    { x: Math.cos(P.portillo.ang) * P.bowlRadius * 0.8, z: Math.sin(P.portillo.ang) * P.bowlRadius * 0.8 },
+  ]
+  for (let v = 0; v < 3; v++) {
+    const a = q() * 6.2832, r = (0.2 + q() * 0.6) * P.bowlRadius
+    bubbleVents.push({ x: Math.cos(a) * r, z: Math.sin(a) * r })
+  }
   const bubbles = []
   const bubbleCloud = createPointCloud(P.bubbles, draw.pointMaterial)
   for (let i = 0; i < P.bubbles; i++) {
-    bubbles.push({ x: 0, z: 0, y: -9999, vy: 0 })
-    bubbleCloud.col[i * 3] = 0.72; bubbleCloud.col[i * 3 + 1] = 0.88; bubbleCloud.col[i * 3 + 2] = 0.95
-    bubbleCloud.size[i] = 0.1 + q() * 0.16
+    bubbles.push({ x: 0, z: 0, y: -9999, vy: 0, wob: q() * 6.2832 })
+    // Azul pálido tenue (no blanco brillante): acompañan sin tapar.
+    bubbleCloud.col[i * 3] = 0.42; bubbleCloud.col[i * 3 + 1] = 0.58; bubbleCloud.col[i * 3 + 2] = 0.66
+    bubbleCloud.size[i] = 0.05 + q() * 0.09
   }
   scene.add(bubbleCloud.mesh)
   let bubbleHead = 0
   function updateBubbles(step, agitation) {
-    // Se siembran donde entra el mar (el portillo) proporcional a la agitación.
-    if (agitation > 0.05 && q() < agitation * 8 * step) {
+    // Un hilito constante de las grietas + más del portillo con oleaje.
+    const rate = 1.5 + agitation * 6
+    if (q() < rate * step) {
       const b = bubbles[bubbleHead]
       bubbleHead = (bubbleHead + 1) % bubbles.length
-      const spread = 6
-      b.x = Math.cos(P.portillo.ang) * P.bowlRadius * 0.8 + (q() - 0.5) * spread
-      b.z = Math.sin(P.portillo.ang) * P.bowlRadius * 0.8 + (q() - 0.5) * spread
-      b.y = P.bedY + q() * 4
-      b.vy = 3 + q() * 4
+      // El portillo (vent 0) tira más con oleaje; las grietas, un goteo parejo.
+      const vent = bubbleVents[q() < 0.4 + agitation * 0.4 ? 0 : 1 + (q() * 3 | 0)]
+      b.x = vent.x + (q() - 0.5) * 1.6
+      b.z = vent.z + (q() - 0.5) * 1.6
+      b.y = P.bedY + q() * 2
+      b.vy = 2.2 + q() * 2.5
+      b.wob = q() * 6.2832
     }
     for (let i = 0; i < bubbles.length; i++) {
       const b = bubbles[i]
       if (b.y > -9000) {
         b.y += b.vy * step
-        b.x += Math.sin(clock * 2 + i) * 0.02
-        if (b.y > surfaceY - 0.3) { b.y = -9999; spawnRipple(b.x, b.z, 0.18) }
+        // Bamboleo fino en espiral al subir (más natural que un empuje lateral).
+        b.x += Math.sin(clock * 3 + b.wob) * 0.03
+        b.z += Math.cos(clock * 2.6 + b.wob) * 0.03
+        if (b.y > surfaceY - 0.3) { b.y = -9999; spawnRipple(b.x, b.z, 0.14) }
       }
       bubbleCloud.pos[i * 3] = b.x
       bubbleCloud.pos[i * 3 + 1] = b.y

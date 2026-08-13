@@ -375,13 +375,13 @@ export const CONFIG = {
       sepRadius: 0.05, neighborRadius: 0.14, wander: 0.5, turn: 2.0,
     },
     plankton: 2600,        // puntos a la deriva en la columna
-    bubbles: 320,          // burbujas que suben del lecho
+    bubbles: 90,           // burbujas: pocas y finas, en columnas (no una cortina)
     rays: 14,              // rayos de sol entre las piedras
     mussels: { patches: 7, perPatch: 26 },  // bancos de choritos (presa)
     limpets: 40,
     anemones: 26,
     barnacles: 34,
-    algae: 48,             // matas de cochayuyo/huiro
+    algae: 85,             // matas de pradería (cada una es un abanico de hojas)
     // Cameo del chungungo: raro y solo con la poza bien llena.
     otter: { minTide: 0.75, chancePerSec: 0.012, diveDur: 5.5 },
     // Agua "grado submarino" procedural (spec 2026-08-13-agua-poza-procedural).
