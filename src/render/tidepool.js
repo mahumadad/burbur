@@ -58,7 +58,7 @@ export function createTidepool(container, cfg, agentNames = []) {
           `#include <dithering_fragment>
            float depthAtten = clamp(1.0 - (uSurfaceY - vWorldPosC.y) / 30.0, 0.15, 1.0);
            float cau = caustics(vWorldPosC.xz * uCausticScale, uTime * uCausticSpeed);
-           gl_FragColor.rgb += uCausticTint * cau * depthAtten * uLight * 0.9;`)
+           gl_FragColor.rgb += uCausticTint * cau * depthAtten * uLight * 0.5;`)
     }
     mat.customProgramCacheKey = () => 'tidepool-caustic'
     return mat
@@ -147,9 +147,9 @@ export function createTidepool(container, cfg, agentNames = []) {
   pointUniforms.uAperture.value = 0.05
 
   // ─── LA TAZA: pared anular de roca + lecho ────────────────────────────────
-  // Roca mojada de la costa: gris-carbón frío, no arena.
-  const ROCK_LO = [0.09, 0.10, 0.11]
-  const ROCK_HI = [0.30, 0.32, 0.35]
+  // Roca mojada de la costa: gris-carbón OSCURO (volcánico), como las fotos.
+  const ROCK_LO = [0.025, 0.030, 0.038]
+  const ROCK_HI = [0.11, 0.12, 0.14]
   {
     const R = P.bowlRadius
     const geo = new THREE.CylinderGeometry(R * 1.5, R * 0.55, P.wallTop - P.bedY, 96, 24, true)
@@ -168,9 +168,11 @@ export function createTidepool(container, cfg, agentNames = []) {
       pos.setX(i, x + (x / rr) * bump)
       pos.setZ(i, z + (z / rr) * bump)
       pos.setY(i, y - gate * gate * P.wallTop * 1.4)
-      // Más oscuro hacia el fondo (menos luz llega abajo).
+      // Más oscuro hacia el fondo (menos luz llega abajo) + TEXTURA: mottling de
+      // fbm (grietas y placas oscuras) para que la roca no se lea lisa.
       const t = Math.max(0, Math.min(1, (y - P.bedY) / (P.wallTop - P.bedY)))
-      for (let k = 0; k < 3; k++) cols[i * 3 + k] = ROCK_LO[k] + (ROCK_HI[k] - ROCK_LO[k]) * t
+      const mott = 0.55 + fbm(x * 0.5 + 11, (y + z) * 0.5, 3) * 0.7
+      for (let k = 0; k < 3; k++) cols[i * 3 + k] = (ROCK_LO[k] + (ROCK_HI[k] - ROCK_LO[k]) * t) * mott
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
     geo.translate(0, (P.wallTop + P.bedY) / 2, 0)
@@ -230,10 +232,12 @@ export function createTidepool(container, cfg, agentNames = []) {
         const d = 1 + (fbm(px * 1.4 + seed, pz * 1.4 - py + seed, 3) - 0.5) * 0.8
         const wx = px * d * rx, wy = py * d * ry, wz = pz * d * rz
         gp.setXYZ(k, wx, wy, wz)
-        // Roca húmeda gris-carbón con gradiente vertical (más clara arriba).
+        // Roca volcánica OSCURA con TEXTURA: gradiente vertical suave + mottling de
+        // fbm (placas y grietas) para que no se lea lisa ni pálida.
         const t = Math.max(0, Math.min(1, (wy + ry) / (2 * ry)))
-        const g = 0.10 + t * 0.24 + (fbm(px * 3 + seed, pz * 3, 2) - 0.5) * 0.08
-        cols[k * 3] = g * 0.92; cols[k * 3 + 1] = g; cols[k * 3 + 2] = g * 1.1
+        const mott = 0.5 + fbm(px * 2.5 + seed, pz * 2.5 - py, 3) * 0.9
+        const g = (0.03 + t * 0.10) * mott
+        cols[k * 3] = g * 0.92; cols[k * 3 + 1] = g; cols[k * 3 + 2] = g * 1.15
       }
       geo.computeVertexNormals()
       geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
