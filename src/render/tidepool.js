@@ -1,8 +1,10 @@
 import * as THREE from 'three'
 import { createStage } from './stage.js'
-import { createDraw } from './engine/points.js'
+import { createDraw, createPointCloud } from './engine/points.js'
 import { fbm } from './noise.js'
 import { tideLevel } from '../sim/tide.js'
+import { anemoneOpen } from '../sim/anemone.js'
+import { createLimpet, updateLimpet, LIMPET_CFG } from '../sim/limpet.js'
 
 // Mundo POZA DE MAREA: una poza rocosa de la costa chilena vista DESDE ABAJO
 // DEL AGUA — la primera cámara volteada del proyecto. Una taza de roca con un
@@ -87,9 +89,6 @@ export function createTidepool(container, cfg, agentNames = []) {
     pushPoint(x, P.bedY + 0.4 + q() * 0.6, z, [0.18, 0.2, 0.22], 0.4 + q() * 0.9, 0)
   }
 
-  draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, fog: true }))
-  draw.finalizePoints(scene)
-
   stage.setResizeHook((m) => { pointUniforms.uProj.value = m.proj })
 
   // ─── TECHO DE AGUA: la superficie vista DESDE ABAJO ───────────────────────
@@ -170,6 +169,143 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
   }
 
+  // ─── LA ROCA VIVA ─────────────────────────────────────────────────────────
+  // Un punto en la pared de la taza, a la altura pedida (0 = fondo, 1 = borde).
+  function wallPoint(h) {
+    const a = q() * 6.2832
+    const y = P.bedY + (P.wallTop - P.bedY) * h
+    const t = (y - P.bedY) / (P.wallTop - P.bedY)
+    const r = P.bowlRadius * (0.55 + 0.95 * t) - 1.2
+    return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, ang: a }
+  }
+
+  // ANÉMONAS: corona de tentáculos que se abre y cierra con la marea.
+  const anemones = []
+  const anemoneCloud = createPointCloud(P.anemones * 9, draw.pointMaterial)
+  for (let i = 0; i < P.anemones; i++) {
+    const p = wallPoint(0.15 + q() * 0.55)
+    anemones.push({ ...p, phase: q() * 6.2832 })
+    for (let k = 0; k < 9; k++) {
+      const j = (i * 9 + k) * 3
+      // Rojo ladrillo de la ortiga de mar, con el disco más oscuro.
+      anemoneCloud.col[j] = k === 0 ? 0.42 : 0.86
+      anemoneCloud.col[j + 1] = k === 0 ? 0.10 : 0.22
+      anemoneCloud.col[j + 2] = k === 0 ? 0.12 : 0.26
+      anemoneCloud.size[i * 9 + k] = k === 0 ? 0.55 : 0.3
+    }
+  }
+  scene.add(anemoneCloud.mesh)
+  function updateAnemones(agitation) {
+    for (let i = 0; i < anemones.length; i++) {
+      const an = anemones[i]
+      const open = anemoneOpen(tide, agitation)
+      const b = i * 9
+      // Disco basal, siempre pegado a la roca.
+      anemoneCloud.pos[b * 3] = an.x
+      anemoneCloud.pos[b * 3 + 1] = an.y
+      anemoneCloud.pos[b * 3 + 2] = an.z
+      // Tentáculos: se despliegan en corona al abrirse; recogidos son una perla.
+      for (let k = 1; k < 9; k++) {
+        const a = (k / 8) * 6.2832 + an.phase
+        const spread = 0.25 + open * 1.15
+        const p = (b + k) * 3
+        anemoneCloud.pos[p] = an.x + Math.cos(a) * spread
+        anemoneCloud.pos[p + 1] = an.y + 0.2 + open * 0.5
+        anemoneCloud.pos[p + 2] = an.z + Math.sin(a) * spread
+      }
+    }
+    anemoneCloud.commit()
+  }
+
+  // LAPAS: pastorean con el agua y vuelven a su cicatriz antes de quedar secas.
+  const limpets = []
+  const limpetCloud = createPointCloud(P.limpets, draw.pointMaterial)
+  for (let i = 0; i < P.limpets; i++) {
+    const p = wallPoint(0.3 + q() * 0.55)
+    limpets.push({ l: createLimpet(p.x, p.z), y: p.y })
+    limpetCloud.col[i * 3] = 0.62; limpetCloud.col[i * 3 + 1] = 0.58; limpetCloud.col[i * 3 + 2] = 0.48
+    limpetCloud.size[i] = 0.34
+  }
+  scene.add(limpetCloud.mesh)
+  function updateLimpets(step) {
+    for (let i = 0; i < limpets.length; i++) {
+      const L = limpets[i]
+      updateLimpet(L.l, tide, step, LIMPET_CFG, q)
+      limpetCloud.pos[i * 3] = L.l.x
+      limpetCloud.pos[i * 3 + 1] = L.y
+      limpetCloud.pos[i * 3 + 2] = L.l.z
+    }
+    limpetCloud.commit()
+  }
+
+  // PICOROCOS: al sumergirse sacan los cirros y BARREN el agua, rítmicos.
+  const barnacles = []
+  const barnacleCloud = createPointCloud(P.barnacles * 4, draw.pointMaterial)
+  for (let i = 0; i < P.barnacles; i++) {
+    const p = wallPoint(0.25 + q() * 0.6)
+    barnacles.push({ ...p, phase: q() * 6.2832, rate: 2.2 + q() * 1.4 })
+    for (let k = 0; k < 4; k++) {
+      const j = (i * 4 + k) * 3
+      barnacleCloud.col[j] = k === 0 ? 0.72 : 0.9
+      barnacleCloud.col[j + 1] = k === 0 ? 0.70 : 0.86
+      barnacleCloud.col[j + 2] = k === 0 ? 0.64 : 0.8
+      barnacleCloud.size[i * 4 + k] = k === 0 ? 0.5 : 0.16
+    }
+  }
+  scene.add(barnacleCloud.mesh)
+  function updateBarnacles() {
+    for (let i = 0; i < barnacles.length; i++) {
+      const b = barnacles[i]
+      const base = i * 4
+      barnacleCloud.pos[base * 3] = b.x
+      barnacleCloud.pos[base * 3 + 1] = b.y
+      barnacleCloud.pos[base * 3 + 2] = b.z
+      // El barrido solo existe bajo el agua: emergido, el cono se cierra.
+      const sweep = tide < 0.3 ? 0 : (0.5 + 0.5 * Math.sin(clock * b.rate + b.phase)) * tide
+      for (let k = 1; k < 4; k++) {
+        const p = (base + k) * 3
+        const reach = sweep * (0.35 + k * 0.22)
+        barnacleCloud.pos[p] = b.x + Math.cos(b.ang + k) * reach
+        barnacleCloud.pos[p + 1] = b.y + 0.3 + reach * 0.6
+        barnacleCloud.pos[p + 2] = b.z + Math.sin(b.ang + k) * reach
+      }
+    }
+    barnacleCloud.commit()
+  }
+
+  // BANCOS DE CHORITOS: la despensa de la estrella de sol (Task 14).
+  const musselPatches = []
+  for (let i = 0; i < P.mussels.patches; i++) {
+    const p = wallPoint(0.2 + q() * 0.4)
+    musselPatches.push({ x: p.x, z: p.z, count: P.mussels.perPatch })
+    for (let k = 0; k < P.mussels.perPatch; k++) {
+      pushPoint(p.x + (q() - 0.5) * 3.4, p.y + (q() - 0.5) * 2.6, p.z + (q() - 0.5) * 3.4,
+        [0.10, 0.09, 0.16], 0.2 + q() * 0.16, 0)
+    }
+  }
+
+  // ALGAS: cochayuyo y huiro anclados a la roca, meciéndose con el vaivén.
+  // Van como líneas con `phase`, que el shader de puntos ya usa para el balanceo.
+  for (let i = 0; i < P.algae; i++) {
+    const p = wallPoint(q() * 0.5)
+    const h = 4 + q() * 9
+    const segs = 4
+    const a = q() * 6.2832
+    let px = p.x, py = p.y, pz = p.z
+    for (let s = 0; s < segs; s++) {
+      const f = (s + 1) / segs
+      const nx = p.x + Math.cos(a) * f * 2.4
+      const ny = p.y + h * f
+      const nz = p.z + Math.sin(a) * f * 2.4
+      const lo = [0.10, 0.16, 0.06], hi = [0.26, 0.38, 0.12]
+      pushLine(px, py, pz, nx, ny, nz, lo, hi)
+      px = nx; py = ny; pz = nz
+    }
+  }
+
+  draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, fog: true }))
+  draw.finalizePoints(scene)
+
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
   let tide = 0
@@ -195,6 +331,10 @@ export function createTidepool(container, cfg, agentNames = []) {
       eco.seasonLabel = surgeLabel(eco.seasonT)
     }
     updateRipples(step)
+    const agitation = eco ? eco.rain : 0
+    updateAnemones(agitation)
+    updateLimpets(step)
+    updateBarnacles()
     stage.render(step)
     return []
   }
