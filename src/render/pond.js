@@ -7,6 +7,7 @@ import { createTrails } from './engine/trails.js'
 import { lichenRosette, mossClump, LICHEN_ORANGE, LICHEN_PALE } from './engine/crust.js'
 import { createRain, createSnow } from './engine/weather.js'
 import { buildFallenLog } from './engine/deadwood.js'
+import { createWaterSim, buildIslandMask } from './engine/waterSim.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies, POND_POOL } from './pond/species.js'
 import { createFishRender } from './pond/fish.js'
@@ -32,6 +33,8 @@ export function createPond(container, cfg, agentNames = []) {
   const bedY = ht - gt                  // -14.4
 
   const stage = createStage(container, cfg)
+  const SIM_SIZE = 256               // resolución de la simulación de altura
+  const SIM_HALF = P.lagoonRadius * 1.35  // medio-lado del mundo que cubre la sim
   const { scene } = stage
   const draw = createDraw(rc)
   const { pushPoint, pushLine, uniforms: pointUniforms } = draw
@@ -186,11 +189,13 @@ export function createPond(container, cfg, agentNames = []) {
   // ─── AGUA (zt): plano con glow azul + shimmer animado + WAKE ──────────────
   // Base fiel a murmur (vertex-color del campo Y/Mt/Nt) + mejoras: brillos que
   // se deslizan (movimiento) y anillos de estela donde cruzan agentes/peces.
-  const RIPPLES = 22
   const waterUniforms = {
     uTime: { value: 0 },
-    // x, z, radio, fuerza — sembrados en la superficie por los elementos que pasan.
-    uRipples: { value: Array.from({ length: RIPPLES }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    // Simulación de altura (heightfield): textura R=altura → ondas reales que se
+    // propagan/interfieren/rebotan. Se setea al crear el sim, más abajo.
+    uHeight: { value: null },
+    uSimHalf: { value: SIM_HALF },
+    uHTexel: { value: 1 / SIM_SIZE },
     // AGITAR: 0 en reposo; sube al sacudir y decae → oleaje global de toda la laguna.
     uAgitate: { value: 0 },
   }
@@ -214,16 +219,22 @@ export function createPond(container, cfg, agentNames = []) {
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
     const waterMat = new THREE.ShaderMaterial({
       uniforms: waterUniforms,
-      transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      // FrontSide: solo la cara de arriba. En DoubleSide, desde un ángulo bajo se
+      // veía el glow por debajo de las islas como un blob azul flotando.
+      transparent: true, depthWrite: false, side: THREE.FrontSide, fog: false,
       vertexShader: `
         attribute vec3 color;
         uniform float uTime; uniform float uAgitate;
-        varying vec2 vXZ; varying vec3 vCol; varying float vAg;
+        uniform sampler2D uHeight; uniform float uSimHalf;
+        varying vec2 vXZ; varying vec3 vCol; varying float vAg; varying vec2 vSuv;
         void main() {
           vXZ = position.xz; vCol = color;
           vec3 p = position;
-          // AGITAR: onda radial que sale del centro y recorre la laguna + chapoteo,
-          // desplaza el agua de verdad (decae con uAgitate).
+          // UV de la simulación de altura (solo válido dentro de la laguna).
+          vSuv = p.xz / (2.0 * uSimHalf) + 0.5;
+          float simH = texture2D(uHeight, clamp(vSuv, 0.0, 1.0)).r;
+          p.y += simH * 0.9;   // desplazamiento real de la superficie por la onda
+          // AGITAR: onda radial que sale del centro y recorre la laguna + chapoteo.
           float rr = length(p.xz);
           float swell = sin(rr * 0.14 - uTime * 4.0) * exp(-rr * 0.004);
           p.y += uAgitate * (1.8 * swell + 0.7 * sin(p.x * 0.08 + uTime * 3.0) * sin(p.z * 0.07 - uTime * 2.6));
@@ -231,39 +242,33 @@ export function createPond(container, cfg, agentNames = []) {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
         }`,
       fragmentShader: `
-        #define N ${RIPPLES}
-        uniform float uTime; uniform vec4 uRipples[N];
-        varying vec2 vXZ; varying vec3 vCol; varying float vAg;
+        uniform float uTime; uniform sampler2D uHeight; uniform float uHTexel;
+        varying vec2 vXZ; varying vec3 vCol; varying float vAg; varying vec2 vSuv;
         void main() {
-          // Shimmer: reflejos que se deslizan sobre la superficie.
-          // Oleaje multi-octava (olas grandes + rizado fino), como la ref de agua.
+          // Shimmer base: reflejos que se deslizan sobre la superficie.
           float w = sin(vXZ.x * 0.09 + uTime * 0.7) * sin(vXZ.y * 0.075 - uTime * 0.55)
                   + 0.5 * sin(vXZ.x * 0.03 - vXZ.y * 0.04 + uTime * 0.35)
                   + 0.28 * sin(vXZ.x * 0.24 - vXZ.y * 0.19 + uTime * 1.35)
                   + 0.16 * sin(vXZ.x * 0.51 + vXZ.y * 0.44 - uTime * 2.1);
-          // AGITAR: gran cresta radial que barre la laguna.
           w += vAg * 1.4 * sin(length(vXZ) * 0.12 - uTime * 3.5);
           float glint = smoothstep(0.75, 1.4, w);
           // Cáusticas: red fina que se arrastra sobre el agua.
           float c1 = sin(vXZ.x * 0.33 + uTime * 0.9) * sin(vXZ.y * 0.29 - uTime * 0.75);
           float caustic = pow(max(0.0, c1), 3.0) * 0.5;
-          // Wake: anillos que se expanden donde pasa un elemento.
-          float wake = 0.0;
-          for (int i = 0; i < N; i++) {
-            vec4 r = uRipples[i];
-            if (r.w <= 0.001) continue;
-            float d = distance(vXZ, r.xy);
-            // Tren de ondas: varias crestas que se alejan del impacto y se
-            // amortiguan con la distancia (como una gota real en el agua).
-            float ring = sin((d - r.z) * 1.9) * exp(-abs(d - r.z) * 0.42);
-            float env = smoothstep(9.0, 0.0, abs(d - r.z));
-            wake += max(0.0, ring) * env * r.w;
-          }
-          wake = min(wake, 1.5);
-          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72) + wake * vec3(0.32, 0.60, 0.98)
+          // ── ONDAS REALES (heightfield): pendiente de la altura simulada.
+          vec2 e = vec2(uHTexel, 0.0);
+          bool inSim = vSuv.x > 0.0 && vSuv.x < 1.0 && vSuv.y > 0.0 && vSuv.y < 1.0;
+          float hC = texture2D(uHeight, vSuv).r;
+          float hx = texture2D(uHeight, vSuv + e.xy).r - texture2D(uHeight, vSuv - e.xy).r;
+          float hz = texture2D(uHeight, vSuv + e.yx).r - texture2D(uHeight, vSuv - e.yx).r;
+          float slope = length(vec2(hx, hz));
+          float rip = inSim ? min(slope * 3.0, 0.9) : 0.0;   // líneas de cresta (bordes de onda)
+          float lift = inSim ? hC * 0.5 : 0.0;               // crestas claras / valles oscuros
+          vec3 col = vCol + glint * vec3(0.22, 0.46, 0.75) + caustic * vec3(0.16, 0.38, 0.72)
+                   + rip * vec3(0.34, 0.62, 0.98) + lift * vec3(0.08, 0.16, 0.28)
                    + vAg * vec3(0.24, 0.5, 0.92) * (0.5 + 0.7 * glint);
           float lum = dot(vCol, vec3(0.5, 0.6, 0.7));
-          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + caustic * 0.1 + wake * 0.55 + vAg * 0.3, 0.0, 0.96);
+          float a = clamp(0.22 + lum * 2.2 + glint * 0.14 + caustic * 0.1 + rip * 0.32 + max(lift, 0.0) * 0.15 + vAg * 0.3, 0.0, 0.94);
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -272,6 +277,15 @@ export function createPond(container, cfg, agentNames = []) {
     scene.add(water)
     waterMesh = water
   }
+
+  // Simulación de altura del agua (heightfield): gotas de lluvia, koi/agentes y
+  // AGITAR inyectan ondas que se propagan, se interfieren y REBOTAN en las islas
+  // (máscara = huella de los lóbulos). El shader del agua muestrea su textura.
+  // Pared = solo donde la isla ASOMA sobre la línea de agua (no toda la base
+  // sumergida): las ondas pasan sobre la roca sumergida y rebotan en la orilla.
+  const islandMask = buildIslandMask(SIM_SIZE, SIM_HALF, (wx, wz) => lobeTop(wx, wz) > ht - 0.4)
+  const waterSim = createWaterSim(stage.renderer, { size: SIM_SIZE, halfExtent: SIM_HALF, mask: islandMask })
+  waterUniforms.uHeight.value = waterSim.texture
 
   // ─── ISLAS (It): elipsoide de icosfera deformada + arena + espuma + ramas ──
   for (const L of lobes) {
@@ -1023,18 +1037,13 @@ export function createPond(container, cfg, agentNames = []) {
 
   // Wake: pool de ondas que se expanden y desvanecen; se siembran donde un
   // elemento cruza/roza la superficie (agentes cerca del nivel, peces al tope).
-  let rippleHead = 0, rippleTimer = 0, dropTimer = 0
-  function spawnRipple(x, z, str) {
-    // FIFO: recicla rápido → las ondas viven poco y quedan CHICAS y naturales.
-    waterUniforms.uRipples.value[rippleHead].set(x, z, 0.5, str)
-    rippleHead = (rippleHead + 1) % RIPPLES
+  let rippleTimer = 0, dropTimer = 0
+  function spawnRipple(x, z, str, radius) {
+    // Inyecta una gota en la simulación de altura → onda real que se propaga.
+    waterSim.drop(x, z, str * 0.14, radius)
   }
-  function updateRipples(step) {
-    for (const r of waterUniforms.uRipples.value) {
-      if (r.w <= 0.001) continue
-      r.z += 8 * step                       // expandir el radio
-      r.w = Math.max(0, r.w - 0.34 * step)  // desvanecer lento → más visible
-    }
+  // Siembra las ondas AMBIENTE (la sim propaga; acá solo se decide dónde/cuándo).
+  function seedRipples(step) {
     rippleTimer -= step
     if (rippleTimer <= 0) {
       // Varios focos por tick: agentes cerca de la superficie + peces al tope.
@@ -1187,7 +1196,9 @@ export function createPond(container, cfg, agentNames = []) {
       }
     }
 
-    updateRipples(step)
+    seedRipples(step)            // siembra gotas (agentes/extras/peces cerca del tope)
+    waterSim.update()            // paso de la simulación de altura (propaga/rebota)
+    waterUniforms.uHeight.value = waterSim.texture // el ping-pong cambia la textura
     trails.update(worldPos)
     stage.render(step)
     return predations
