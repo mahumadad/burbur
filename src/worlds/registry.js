@@ -4,9 +4,10 @@ import { createPond } from '../render/pond.js'
 import { createCellScene } from './cell.js'
 import { createFungusScene } from './fungus.js'
 import { createNeuronScene } from './neuron.js'
-import { FOREST_CENSUS, CITY_CENSUS, POND_CENSUS, CELL_CENSUS, FUNGUS_CENSUS, NEURON_CENSUS } from '../sim/agents.js'
-import { CELL_LEXICON, FUNGUS_LEXICON, NEURON_LEXICON } from '../sim/narrator.js'
-import { FOREST_PROFILE, CELL_PROFILE, FUNGUS_PROFILE, NEURON_PROFILE } from '../sim/ecosystem.js'
+import { createTidepool } from '../render/tidepool.js'
+import { FOREST_CENSUS, CITY_CENSUS, POND_CENSUS, CELL_CENSUS, FUNGUS_CENSUS, NEURON_CENSUS, TIDEPOOL_CENSUS } from '../sim/agents.js'
+import { CELL_LEXICON, FUNGUS_LEXICON, NEURON_LEXICON, TIDEPOOL_LEXICON } from '../sim/narrator.js'
+import { FOREST_PROFILE, CELL_PROFILE, FUNGUS_PROFILE, NEURON_PROFILE, TIDEPOOL_PROFILE } from '../sim/ecosystem.js'
 
 // Registro de mundos. Cada mundo es un builder que construye su escena en el
 // container y devuelve la API común { update, resize, flash, dispose }. El host
@@ -106,6 +107,22 @@ export const WORLDS = [
     // piramidal a una interneurona (§9.4b).
     slotClass: (i) => (i < 10 ? 'neuron' : i < 12 ? 'interneuron' : 'glia'),
     build: (container, cfg, names) => createNeuronScene(container, cfg, names),
+  },
+  // Poza de marea: la costa rocosa chilena vista DESDE ABAJO DEL AGUA. Es la
+  // primera cámara volteada del proyecto (las otras seis miran desde arriba).
+  // El acento aqua-verde es diseño nuestro. Ver spec del mundo.
+  {
+    id: 'tidepool', label: 'Tidepool ecosystem', name: 'Poza', accent: '#5bd6c4', ready: true,
+    census: TIDEPOOL_CENSUS, lexicon: TIDEPOOL_LEXICON, ecosystem: TIDEPOOL_PROFILE,
+    // El "día" es la marea (dos vueltas por día solar); el "clima", el oleaje;
+    // la "estación", la surgencia de Humboldt.
+    hud: { time: 'MAREA', weather: 'OLEAJE', season: 'SURGENCIA' },
+    // Bajo el agua no llueve ni cantan grillos: el clima es oleaje (`surf`).
+    audio: { rain: false, insects: false, owl: false, surf: true },
+    // La clase de cada slot: 0–1 cazadores lentos, 2–13 el cardumen, 14–17 el
+    // bentos que camina. Así el censo no le pone "estrella de sol" a un pez.
+    slotClass: (i) => (i < 2 ? 'predator' : i < 14 ? 'fish' : 'benthos'),
+    build: (container, cfg, names) => createTidepool(container, cfg, names),
   },
 ]
 
