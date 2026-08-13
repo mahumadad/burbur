@@ -75,7 +75,10 @@ export function createTidepool(container, cfg, agentNames = []) {
     ...cfg,
     stage: {
       camera: { orbR: 26, theta: 0.9, phi: 2.05, target: [0, P.surfaceMax, 0] },
-      orbit: { minDist: 8, maxDist: 34, minPolar: Math.PI * 0.18, maxPolar: Math.PI * 0.92 },
+      // Límites que MANTIENEN la cámara en la columna de agua sumergida: minPolar
+      // la deja siempre bajo la superficie de bajamar; maxPolar y maxDist evitan
+      // que cruce el lecho. El azimut queda libre (se orbita alrededor de la poza).
+      orbit: { minDist: 8, maxDist: 26, minPolar: Math.PI * 0.55, maxPolar: Math.PI * 0.64 },
       breathe: { baseY: P.camY + 6, ampY: 0.7 },
       fog: { color: 0x0a2733, density: 0.026 },
       background: 0x061a24,

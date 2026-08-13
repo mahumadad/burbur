@@ -27,12 +27,12 @@ const overlay = document.getElementById('overlay')
 const app = document.getElementById('app')
 let running = false
 
-// La semilla de la puerta late en los colores de los 6 mundos que hay adentro
+// La semilla de la puerta late en los colores de los 7 mundos que hay adentro
 // (acentos del registry), pasando suave de uno al otro — un guiño a lo que espera.
 const seedEl = document.querySelector('.seed')
 let seedTimer = null
 if (seedEl) {
-  const accents = ['#b6d184', '#aacdff', '#fab75e', '#c9a6ff', '#f2a0c8', '#9cc47a']
+  const accents = ['#b6d184', '#aacdff', '#fab75e', '#c9a6ff', '#f2a0c8', '#9cc47a', '#5bd6c4']
   let ci = 0
   seedEl.style.color = accents[0]
   seedTimer = setInterval(() => { seedEl.style.color = accents[ci = (ci + 1) % accents.length] }, 3200)
