@@ -223,6 +223,53 @@ export const POND_KOI_NAMES = new Set(
   POND_CENSUS.filter((a) => a.type === 'aquatic_fauna').map((a) => a.name),
 )
 
+/**
+ * Censo de la POZA DE MAREA (costa rocosa chilena, vista bajo el agua). Los
+ * móviles llevan jaula, etiqueta y estela (sin artículo, como la fauna del
+ * bosque); el bentos sésil, las algas y la roca son PAISAJE: suenan y se narran
+ * pero no deambulan (con artículo; son las claves del léxico por nombre).
+ * OJO: sin `night`/`dawn` — `timeWeight` solo entiende las fases en inglés del
+ * bosque, y las de la poza van en español. Ver spec §3.3.
+ */
+export const TIDEPOOL_CENSUS = [
+  // fish — el cardumen de la columna de agua
+  { name: 'baunco', type: 'fish' },
+  { name: 'pejesapo', type: 'fish' },
+  { name: 'chalaco', type: 'fish' },
+  { name: 'tomoyo', type: 'fish' },
+  { name: 'pejerrey', type: 'fish' },
+  // benthos — caminan y raspan el fondo
+  { name: 'jaiba', type: 'benthos' },
+  { name: 'pancora', type: 'benthos' },
+  { name: 'erizo', type: 'benthos' },
+  { name: 'caracol negro', type: 'benthos' },
+  // predator — los cazadores lentos
+  { name: 'estrella de sol', type: 'predator' },
+  { name: 'loco', type: 'predator' },
+  // otter — visitante raro de pleamar: nunca ocupa slot (slotClass no lo pide),
+  // pero sigue en el censo para sonar y narrarse.
+  { name: 'chungungo', type: 'otter' },
+  // sessile — la roca viva
+  { name: 'la lapa', type: 'sessile', static: true },
+  { name: 'el picoroco', type: 'sessile', static: true },
+  { name: 'la anémona ortiga de mar', type: 'sessile', static: true },
+  { name: 'el chitón', type: 'sessile', static: true },
+  { name: 'el chorito', type: 'sessile', static: true },   // presa de la estrella
+  // alga — el vaivén
+  { name: 'el cochayuyo', type: 'alga', static: true },
+  { name: 'el huiro', type: 'alga', static: true },
+  { name: 'la luga', type: 'alga', static: true },
+  { name: 'la lechuga de mar', type: 'alga', static: true },
+  // substrate — el lugar
+  { name: 'la roca', type: 'substrate', static: true },
+  { name: 'el bolón', type: 'substrate', static: true },
+  { name: 'la poza', type: 'substrate', static: true },
+  // human (raros)
+  { name: 'el mariscador', type: 'human' },
+  { name: 'la buceadora', type: 'human' },
+  { name: 'el niño de la poza', type: 'human' },
+]
+
 /** Censo de la ciudad: fauna urbana chilena + actores humanos, en español
  * (coherente con el bosque y el estanque). Móviles sin artículo; estáticos
  * con artículo. */

@@ -443,6 +443,93 @@ export const FUNGUS_LEXICON = {
   },
 }
 
+// Poza de marea: vocabulario del intermareal rocoso. Además de las acciones por
+// TIPO, hay acciones por NOMBRE para el bentos icónico — una lapa y un picoroco
+// hacen cosas demasiado distintas para compartir un balde genérico.
+const TIDEPOOL_ACTIONS = {
+  fish: [
+    { l: 'se escurre entre dos rocas', s: 'se escurre' },
+    { l: 'pega un coletazo y cambia de rumbo', s: 'coletea' },
+    { l: 'pica algo en la arena', s: 'pica' },
+    { l: 'se suspende agitando las aletas', s: 'se suspende' },
+    { l: 'se mete bajo el alero de roca', s: 'se esconde' },
+  ],
+  benthos: [
+    { l: 'escarba en la arena', s: 'escarba' },
+    { l: 'raspa la roca buscando algas', s: 'raspa' },
+    { l: 'se mete de lado bajo una piedra', s: 'se refugia' },
+    { l: 'levanta una pinza y la vuelve a bajar', s: 'amenaza' },
+  ],
+  predator: [
+    { l: 'avanza un brazo sobre la roca', s: 'avanza' },
+    { l: 'sigue un rastro invisible', s: 'rastrea' },
+    { l: 'se pliega sobre un chorito', s: 'se pliega' },
+  ],
+  otter: [
+    { l: 'se zambulle y desaparece', s: 'se zambulle' },
+    { l: 'sube con algo entre las patas', s: 'sube con presa' },
+  ],
+  sessile: [
+    { l: 'se aferra a la roca y aguanta', s: 'aguanta' },
+    { l: 'se cierra cuando pasa la ola', s: 'se cierra' },
+  ],
+  alga: [
+    { l: 'se mece con el vaivén', s: 'se mece' },
+    { l: 'se azota contra la roca', s: 'se azota' },
+  ],
+  substrate: [
+    { l: 'chorrea al bajar la marea', s: 'chorrea' },
+    { l: 'queda al descubierto', s: 'se descubre' },
+  ],
+  human: [
+    { l: 'da vuelta una piedra para mirar', s: 'da vuelta una piedra' },
+    { l: 'recoge algo y lo guarda', s: 'recoge algo' },
+  ],
+  // ── Vocabulario por nombre: la roca viva, una por una ──
+  'la anémona ortiga de mar': [
+    { l: 'abre la corona de tentáculos', s: 'se abre' },
+    { l: 'se cierra en una perla', s: 'se cierra' },
+  ],
+  'el picoroco': [
+    { l: 'barre el agua con sus cirros', s: 'barre el agua' },
+  ],
+  'la lapa': [
+    { l: 'se aprieta contra su cicatriz', s: 'se aprieta' },
+  ],
+  'el chorito': [
+    { l: 'cierra las valvas de golpe', s: 'cierra las valvas' },
+  ],
+}
+
+const TIDEPOOL_AMBIENT = [
+  { l: 'Una ola rompe sobre el borde y el agua se enturbia', s: 'rompe una ola' },
+  { l: 'Sube una hilera de burbujas desde la arena', s: 'burbujas' },
+  { l: 'El huiro cruje con la corriente', s: 'cruje el huiro' },
+  { l: 'Algo se suelta de la roca y cae al fondo', s: 'algo se suelta' },
+  { l: 'La luz se quiebra en la superficie', s: 'se quiebra la luz' },
+  { l: 'Un cascabeleo de conchas rueda con la resaca', s: 'ruedan las conchas' },
+]
+
+export const TIDEPOOL_LEXICON = {
+  actions: TIDEPOOL_ACTIONS,
+  ambient: TIDEPOOL_AMBIENT,
+  fallbackType: 'substrate',
+  place: 'la poza',
+  moment: (ctx) => ({
+    log: `La poza contiene el aliento mientras ${weatherES(ctx.weather)} peina la superficie.`,
+    short: 'respira la poza',
+  }),
+  overview: (ctx) => ({
+    log: `${cap(weatherES(ctx.weather))} entra a la poza mientras ${phaseES(ctx.phase)} avanza.`,
+    short: 'panorama',
+  }),
+  shift: (ctx) => ({ log: `La marea gira hacia ${phaseES(ctx.phase)}.`, short: `marea · ${phaseES(ctx.phase)}` }),
+  conflict: (ctx, ev, rand) => {
+    const a = pick(TIDEPOOL_ACTIONS[ev.agentType] || TIDEPOOL_ACTIONS.substrate, rand)
+    return { log: `Un rastro de alarma cruza la poza; ${ev.agent} ${a.l}.`, short: `${ev.agent} ${a.s}` }
+  },
+}
+
 // Acciones por NOMBRE primero (si el léxico las trae), después por tipo.
 function action(type, rand, lex, name) {
   const list = (name && lex.actions[name]) || lex.actions[type] || lex.actions[lex.fallbackType]
