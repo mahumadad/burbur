@@ -396,12 +396,24 @@ export function createTidepool(container, cfg, agentNames = []) {
     const r = P.bowlRadius * (0.55 + 0.95 * t) - 1.2
     return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, ang: a }
   }
+  // Un punto en el LECHO CENTRAL (disco completo), a la altura del fondo con su
+  // relieve. Es para POBLAR el centro de la poza —donde mira la cámara— y que no
+  // quede pelado: wallPoint solo cubre las paredes (r≥~20), así que sin esto el
+  // medio quedaba vacío.
+  function bedSpot() {
+    const a = q() * 6.2832, r = Math.sqrt(q()) * P.bowlRadius * 0.95
+    const x = Math.cos(a) * r, z = Math.sin(a) * r
+    const y = P.bedY + (fbm(x * 0.035 + 2, z * 0.035 - 4, 2) - 0.5) * 8.0 + 0.5
+    return { x, y, z, ang: a }
+  }
 
   // ANÉMONAS: corona de tentáculos que se abre y cierra con la marea.
   const anemones = []
   const anemoneCloud = createPointCloud(P.anemones * 9, draw.pointMaterial)
   for (let i = 0; i < P.anemones; i++) {
-    const p = wallPoint(0.15 + q() * 0.55)
+    // La mitad en el lecho central (pops de rojo donde mira la cámara), la otra
+    // mitad trepando la pared/repisas.
+    const p = q() < 0.5 ? bedSpot() : wallPoint(0.15 + q() * 0.55)
     anemones.push({ ...p, phase: q() * 6.2832 })
     for (let k = 0; k < 9; k++) {
       const j = (i * 9 + k) * 3
@@ -536,7 +548,9 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
     for (let i = 0; i < P.algae; i++) {
       const tall = q() < 0.2
-      const base = wallPoint(q() * 0.42)
+      // La mayoría de las matas van en el LECHO central (pradería que llena el
+      // cuadro); el resto trepa las paredes/repisas.
+      const base = q() < 0.72 ? bedSpot() : wallPoint(q() * 0.42)
       const blades = tall ? 2 + (q() * 3 | 0) : 7 + (q() * 12 | 0)
       const bendDir = q() * 6.2832
       const leanX = Math.cos(bendDir), leanZ = Math.sin(bendDir)

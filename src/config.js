@@ -381,7 +381,7 @@ export const CONFIG = {
     limpets: 40,
     anemones: 26,
     barnacles: 34,
-    algae: 85,             // matas de pradería (cada una es un abanico de hojas)
+    algae: 120,            // matas de pradería (cada una es un abanico de hojas)
     // Cameo del chungungo: raro y solo con la poza bien llena.
     otter: { minTide: 0.75, chancePerSec: 0.012, diveDur: 5.5 },
     // Agua "grado submarino" procedural (spec 2026-08-13-agua-poza-procedural).
