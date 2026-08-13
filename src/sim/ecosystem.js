@@ -194,6 +194,57 @@ export const FUNGUS_PROFILE = {
   weathers: FUNGUS_MOISTURE, weatherData: FUNGUS_MEDIUM,
 }
 
+// ── POZA DE MAREA ────────────────────────────────────────────────────────────
+// El "día" son 12 fases que llevan DOS cosas a la vez: la luz del sol (un ciclo)
+// y la marea (DOS ciclos — semidiurna, como en la costa chilena). El nivel de
+// agua no se interpola acá: lo deriva `sim/tide.js` de la fase. `temp` es un
+// DELTA sobre la base fría de Humboldt: en bajamar el charco aislado se entibia
+// al sol, y cuando vuelve el mar se enfría de golpe. Ver spec §2.1.
+export const TIDEPOOL_PHASES = [
+  'bajamar nocturna', 'llenante del alba', 'llenante del amanecer', 'pleamar de la mañana',
+  'vaciante matinal', 'poza que se aísla', 'poza al mediodía', 'llenante de la tarde',
+  'llenante dorada', 'pleamar del anochecer', 'vaciante nocturna', 'madrugada',
+]
+
+const TIDEPOOL_PHASE = [
+  { act: 0.30, temp: -2, light: [0.20, 0.34, 0.52], gain: 0.55 }, // bajamar nocturna
+  { act: 0.50, temp: -1, light: [0.42, 0.52, 0.72], gain: 0.72 }, // llenante del alba
+  { act: 0.72, temp: 0, light: [0.72, 0.82, 0.92], gain: 0.95 }, // llenante del amanecer
+  { act: 0.88, temp: 0, light: [0.86, 0.92, 0.96], gain: 1.20 }, // pleamar de la mañana (pico)
+  { act: 0.70, temp: 1, light: [0.92, 0.96, 0.98], gain: 1.28 }, // vaciante matinal
+  { act: 0.55, temp: 3, light: [0.98, 0.97, 0.94], gain: 1.32 }, // poza que se aísla
+  { act: 0.45, temp: 4, light: [1.00, 0.98, 0.94], gain: 1.34 }, // poza al mediodía (lo más tibio)
+  { act: 0.72, temp: 2, light: [0.96, 0.94, 0.92], gain: 1.30 }, // llenante de la tarde
+  { act: 0.78, temp: 1, light: [0.92, 0.78, 0.56], gain: 1.05 }, // llenante dorada
+  { act: 0.88, temp: -1, light: [0.40, 0.46, 0.64], gain: 0.82 }, // pleamar del anochecer (pico)
+  { act: 0.55, temp: -1, light: [0.26, 0.36, 0.56], gain: 0.62 }, // vaciante nocturna
+  { act: 0.38, temp: -2, light: [0.22, 0.32, 0.52], gain: 0.58 }, // madrugada
+]
+
+// El "clima" es el OLEAJE. Campos genéricos reinterpretados: `rain` = agitación
+// (burbujas, spray, ondas), `fog` = turbidez del agua (sedimento en suspensión).
+export const TIDEPOOL_SWELL = [
+  'mar en calma', 'marejadilla', 'marejada', 'resaca', 'temporal',
+]
+
+const TIDEPOOL_SEA = {
+  'mar en calma': { act: 1.00, tension: 0.05, temp: 1, rain: 0.00, fog: 0.08 },
+  'marejadilla': { act: 1.10, tension: 0.12, temp: 0, rain: 0.10, fog: 0.15 }, // la mejor mesa
+  'marejada': { act: 0.95, tension: 0.30, temp: -2, rain: 0.40, fog: 0.40 },
+  'resaca': { act: 0.70, tension: 0.45, temp: -1, rain: 0.25, fog: 0.55 },
+  'temporal': { act: 0.50, tension: 0.60, temp: -3, rain: 1.00, fog: 0.70 },
+}
+
+// La "estación" es la SURGENCIA de Humboldt. Base térmica de agua costera: mucho
+// más fría y con MENOS oscilación anual que el aire del bosque. Ojo con el signo
+// biológico: acá el frío trae nutrientes, así que frío = más vida (el mundo lee
+// `seasonT` para la densidad de plancton).
+export const TIDEPOOL_PROFILE = {
+  phases: TIDEPOOL_PHASES, phaseData: TIDEPOOL_PHASE,
+  weathers: TIDEPOOL_SWELL, weatherData: TIDEPOOL_SEA,
+  seasonTemp: { mid: 13.5, amp: 2.5, peak: 0.35 },
+}
+
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
 const lerp = (a, b, t) => a + (b - a) * t
 
