@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
+import { resolveStageOptions, breatheTargetY } from './stageOptions.js'
 
 // ESCENARIO COMPARTIDO entre mundos (bosque, ciudad, agua, …).
 // Contiene todo lo que NO depende del bioma: escena+niebla, cámara aérea 3/4,
@@ -16,21 +17,26 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 export function createStage(container, cfg) {
   const rc = cfg.render
 
+  // Opciones del escenario. Sin `cfg.stage`, los defaults reproducen el encuadre
+  // aéreo 3/4 de siempre — los seis mundos que ya existen no se enteran.
+  const so = resolveStageOptions(cfg.stage)
+
   const scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x000000)
-  // Niebla negra: la distancia se funde en la oscuridad. La densidad la fija el clima.
-  scene.fog = new THREE.FogExp2(0x000000, 0.004)
+  scene.background = new THREE.Color(so.background)
+  // La distancia se funde en el fondo. La densidad la ajusta el clima del mundo.
+  scene.fog = new THREE.FogExp2(so.fog.color, so.fog.density)
 
   const fov = 50 + rc.fisheye * 72 // 93°
   const camera = new THREE.PerspectiveCamera(fov, 1, 0.5, 900)
-  // Órbita esférica inicial (r=118, theta=0.62, phi=0.92) — vista aérea 3/4.
-  const orbR = 118, th = 0.62, ph = 0.92
+  // Órbita esférica inicial. Por defecto, la vista aérea 3/4 de murmur; la poza
+  // la mueve DENTRO del agua y sube el objetivo hacia la superficie.
+  const { orbR, theta: th, phi: ph, target } = so.camera
   camera.position.set(
     orbR * Math.sin(ph) * Math.cos(th),
     orbR * Math.cos(ph),
     orbR * Math.sin(ph) * Math.sin(th),
   )
-  camera.lookAt(0, 0, 0)
+  camera.lookAt(target[0], target[1], target[2])
 
   const renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setClearColor(0x000000, 1)
@@ -53,12 +59,13 @@ export function createStage(container, cfg) {
   let flashV = 0
 
   const controls = new OrbitControls(camera, renderer.domElement)
-  controls.target.set(0, 0, 0)
+  controls.target.set(target[0], target[1], target[2])
   controls.enableDamping = true
   controls.dampingFactor = 0.06
-  controls.minDistance = 40
-  controls.maxDistance = 260
-  controls.maxPolarAngle = Math.PI * 0.49 // no bajar del horizonte
+  controls.minDistance = so.orbit.minDist
+  controls.maxDistance = so.orbit.maxDist
+  controls.minPolarAngle = so.orbit.minPolar
+  controls.maxPolarAngle = so.orbit.maxPolar
   controls.autoRotate = true
   controls.autoRotateSpeed = 0.3
   // La vista nunca queda estática: la auto-rotación se reanuda tras inactividad.
@@ -106,6 +113,9 @@ export function createStage(container, cfg) {
   })
   composer.addPass(lensPass)
 
+  // El mundo puede colgar su propia pasada (la poza: el filtro submarino).
+  if (so.addPass) so.addPass(composer, { scene, camera, renderer })
+
   // El mundo registra aquí lo suyo que depende de la resolución (uProj de los
   // shaders de puntos, `resolution` de las líneas gruesas, …).
   let resizeHook = null
@@ -152,7 +162,7 @@ export function createStage(container, cfg) {
     if (flashV > 0.001) { flashV = Math.max(0, flashV - step * 4.5); flashEl.style.opacity = flashV }
     // Respiración: velocidad de giro que pulsa + leve vaivén del mundo.
     controls.autoRotateSpeed = 0.3 + Math.sin(clock * 0.18) * 0.16
-    controls.target.y = Math.sin(clock * 0.13) * 1.7
+    controls.target.y = breatheTargetY(clock, so.breathe)
     controls.update()
     composer.render()
   }
