@@ -5,6 +5,11 @@ import { fbm } from './noise.js'
 import { tideLevel } from '../sim/tide.js'
 import { anemoneOpen } from '../sim/anemone.js'
 import { createLimpet, updateLimpet, LIMPET_CFG } from '../sim/limpet.js'
+import { createAgentKit } from './engine/agents3d.js'
+import { createTrails } from './engine/trails.js'
+import { createSchools, updateSchools, scatterFish } from '../sim/fish.js'
+import { createRoamers, updateRoamers } from '../sim/wander.js'
+import { buildSpecies } from './pond/species.js'
 
 // Mundo POZA DE MAREA: una poza rocosa de la costa chilena vista DESDE ABAJO
 // DEL AGUA — la primera cámara volteada del proyecto. Una taza de roca con un
@@ -306,6 +311,61 @@ export function createTidepool(container, cfg, agentNames = []) {
   draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, fog: true }))
   draw.finalizePoints(scene)
 
+  // ─── FAUNA MÓVIL ──────────────────────────────────────────────────────────
+  const kit = createAgentKit(rc)
+  const n = cfg.fireflies.count
+  const LR = P.bowlRadius * 0.92
+  const agents = []
+  const trailColors = []
+  // Los slots vienen tipados por `slotClass` del registry: 0–1 cazadores lentos,
+  // 2–13 el cardumen, 14–17 el bentos que camina. La clase decide cómo se mueve.
+  for (let i = 0; i < n; i++) {
+    const role = i < 2 ? 'predator' : i < 14 ? 'fish' : 'benthos'
+    const kind = role === 'fish' ? 'strider' : role === 'predator' ? 'orb' : 'pins'
+    const { group, params } = buildSpecies(kind, kit)
+    const baseScale = role === 'predator' ? 1.5 + q() * 0.4 : 0.85 + q() * 0.4
+    group.scale.setScalar(baseScale)
+    scene.add(group)
+    agents.push({
+      group, role, baseScale, idx: i,
+      cage: params.rollMul > 0 ? group.children[0] : null,
+      spinY: params.spinY, homeY: q(), phase: q() * 6.2832,
+    })
+    trailColors.push(role === 'predator' ? 0xff8a3a : role === 'fish' ? 0x9fe8ff : 0x8fd07a)
+  }
+  const trails = createTrails(scene, n, trailColors, rc, draw.pointMaterial, 0.2)
+  const worldPos = new Float32Array(n * 3)
+
+  // El cardumen: boids en la columna de agua (mismo motor que la laguna).
+  const school = createSchools(P.fish, q)
+  // El bentos camina el fondo: roamers normalizados escalados al radio de la taza.
+  const benthos = createRoamers(cfg.wander, n, q)
+  let simTime = 0
+
+  function moveFauna(step) {
+    simTime += step
+    updateSchools(school, P.fish, step, q)
+    updateRoamers(benthos, cfg.wander, step, q, simTime, null, null, null)
+    let fishSlot = 0
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      if (a.role === 'fish') {
+        // Cada slot de pez sigue a un individuo del cardumen.
+        const f = school.fish[fishSlot % school.fish.length]
+        fishSlot++
+        worldPos[i * 3] = f.x * LR
+        worldPos[i * 3 + 1] = Math.min(f.y, surfaceY - 1.2)
+        worldPos[i * 3 + 2] = f.z * LR
+      } else {
+        // Bentos y cazadores: pegados al fondo, con un cabeceo mínimo.
+        const r = benthos[i]
+        worldPos[i * 3] = r.x * LR
+        worldPos[i * 3 + 1] = P.bedY + 0.8 + Math.sin(clock * 0.6 + a.phase) * 0.2
+        worldPos[i * 3 + 2] = r.z * LR
+      }
+    }
+  }
+
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
   let tide = 0
@@ -335,6 +395,20 @@ export function createTidepool(container, cfg, agentNames = []) {
     updateAnemones(agitation)
     updateLimpets(step)
     updateBarnacles()
+    moveFauna(step)
+    for (let i = 0; i < n; i++) {
+      const a = agents[i]
+      a.group.position.set(worldPos[i * 3], worldPos[i * 3 + 1], worldPos[i * 3 + 2])
+      if (a.spinY) a.group.rotation.y += a.spinY * step
+      const pulse = 1 + (swarm ? swarm.flash[i] : 0) * 0.35
+      if (a.cage) a.cage.scale.setScalar(pulse)
+      else a.group.scale.setScalar(a.baseScale * pulse)
+      // Los peces que rozan la superficie la pican.
+      if (a.role === 'fish' && worldPos[i * 3 + 1] > surfaceY - 2.4 && q() < 0.02) {
+        spawnRipple(worldPos[i * 3], worldPos[i * 3 + 2], 0.5)
+      }
+    }
+    trails.update(worldPos)
     stage.render(step)
     return []
   }
@@ -348,7 +422,19 @@ export function createTidepool(container, cfg, agentNames = []) {
   }
 
   function setPointer() {}
-  function scare() {}
+  function scare(strength = 1) {
+    scatterFish(school, strength * 1.5, q)
+    for (const r of benthos) {
+      const m = Math.hypot(r.x, r.z) || 1e-3
+      const k = (0.6 + Math.random() * 0.9) * strength
+      r.vx += (r.x / m) * k; r.vz += (r.z / m) * k
+    }
+    waterUniforms.uAgitate.value = Math.min(1.6, 0.9 + strength * 0.6)
+    for (let i = 0; i < 6; i++) {
+      const a = q() * 6.2832, rr = Math.sqrt(q()) * P.bowlRadius * 0.8
+      spawnRipple(Math.cos(a) * rr, Math.sin(a) * rr, 0.8 + strength * 0.4)
+    }
+  }
 
   return {
     update, scare, setPointer,
