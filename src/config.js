@@ -362,15 +362,15 @@ export const CONFIG = {
   tidepool: {
     // Geometría de la taza. La cámara vive DENTRO de la cavidad, a media agua.
     bowlRadius: 38,        // radio interior de la cavidad de agua
-    bedY: -22,             // fondo de la poza
-    wallTop: 6,            // altura del borde de roca sobre el nivel de pleamar
+    bedY: -34,             // fondo de la poza (columna honda: deja mirar arriba)
+    wallTop: 8,            // altura del borde de roca sobre el nivel de pleamar
     surfaceMin: -8,        // techo de agua en bajamar (SIEMPRE sobre la cámara)
     surfaceMax: 0,         // techo de agua en pleamar
-    camY: -14,             // altura de la cámara (bien bajo el surfaceMin)
+    camY: -22,             // altura de la cámara (bien bajo el surfaceMin)
     portillo: { ang: 2.1, width: 0.9 },  // sector de borde bajo: por ahí entra el mar
     // Cardumen de peces de poza: menos y más apretado que la laguna.
     fish: {
-      schools: 2, perSchool: 24, spread: 0.78, yMin: -20, yMax: -10,
+      schools: 2, perSchool: 24, spread: 0.78, yMin: -30, yMax: -13,
       maxSpeed: 0.06, sep: 0.9, align: 0.5, cohesion: 0.4,
       sepRadius: 0.05, neighborRadius: 0.14, wander: 0.5, turn: 2.0,
     },

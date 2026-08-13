@@ -56,7 +56,7 @@ export function createTidepool(container, cfg, agentNames = []) {
           '#include <common>\n varying vec3 vWorldPosC;\n uniform float uTime, uLight, uSurfaceY, uCausticScale, uCausticSpeed;\n uniform vec3 uCausticTint;\n' + HASH_NOISE_FBM + CAUSTIC_FIELD)
         .replace('#include <dithering_fragment>',
           `#include <dithering_fragment>
-           float depthAtten = clamp(1.0 - (uSurfaceY - vWorldPosC.y) / 22.0, 0.15, 1.0);
+           float depthAtten = clamp(1.0 - (uSurfaceY - vWorldPosC.y) / 30.0, 0.15, 1.0);
            float cau = caustics(vWorldPosC.xz * uCausticScale, uTime * uCausticSpeed);
            gl_FragColor.rgb += uCausticTint * cau * depthAtten * uLight * 0.9;`)
     }
@@ -121,12 +121,14 @@ export function createTidepool(container, cfg, agentNames = []) {
   const stage = createStage(container, {
     ...cfg,
     stage: {
-      camera: { orbR: 26, theta: 0.9, phi: 2.05, target: [0, P.surfaceMax, 0] },
-      // Límites que MANTIENEN la cámara en la columna de agua sumergida: minPolar
-      // la deja siempre bajo la superficie de bajamar; maxPolar y maxDist evitan
-      // que cruce el lecho. El azimut queda libre (se orbita alrededor de la poza).
-      orbit: { minDist: 8, maxDist: 26, minPolar: Math.PI * 0.55, maxPolar: Math.PI * 0.64 },
-      breathe: { baseY: P.camY + 6, ampY: 0.7 },
+      camera: { orbR: 30, theta: 0.9, phi: 2.0, target: [0, -10, 0] },
+      // La cámara vive en una columna de agua HONDA y mira HACIA ARRIBA, hacia el
+      // techo (ventana de Snell). La banda polar la mantiene siempre bajo la
+      // superficie de bajamar (minPolar) y sobre el lecho (maxPolar+maxDist), con
+      // el azimut libre para orbitar la poza. Con target en y=-10 (entre la cámara
+      // y la superficie) la vista sube al techo sin perder el bentos del fondo.
+      orbit: { minDist: 10, maxDist: 32, minPolar: Math.PI * 0.52, maxPolar: Math.PI * 0.70 },
+      breathe: { baseY: -10, ampY: 1.0 },
       fog: { color: 0x0a2733, density: 0.026 },
       background: 0x061a24,
       addPass: (composer) => composer.insertPass(seaPass, 1),
@@ -275,20 +277,22 @@ export function createTidepool(container, cfg, agentNames = []) {
           vec3 n = normalize(vWNrm);
           vec3 v = normalize(vView);   // fragmento → cámara (mira hacia arriba)
           float cosI = clamp(abs(dot(n, v)), 0.0, 1.0);
-          // Ángulo crítico del agua (n=1.333): cos = sqrt(1 - (1/1.333)^2) ≈ 0.661.
-          float crit = 0.661;
-          // Dentro del cono (mirando casi recto arriba) → ventana de Snell (cielo);
-          // fuera → reflexión total interna (espeja el fondo, más oscuro).
-          float win = smoothstep(crit - 0.15 / uSnell, crit + 0.15, cosI);
+          // Ventana de Snell ANCHA y suave: mirando casi vertical se ve el cielo.
+          // El resto de la superficie NO es oscura vista desde abajo — es un ESPEJO
+          // rizado y brillante del fondo iluminado, para que el techo SIEMPRE se
+          // lea aunque no lo mires de frente. uSnell mueve el ancho del disco.
+          float lo = 0.30 + 0.12 / uSnell;
+          float win  = smoothstep(lo,        0.82, cosI);
           // Dispersión cromática en el borde: corre el umbral por canal.
-          float winR = smoothstep(crit - 0.15 / uSnell - 0.03, crit + 0.15, cosI);
-          float winB = smoothstep(crit - 0.15 / uSnell + 0.03, crit + 0.15, cosI);
-          vec3 sky = uSkyTint * (0.7 + 0.3 * n.y);
-          vec3 tir = uDeep * (0.8 + 0.4 * cosI);
-          vec3 col = vec3(mix(tir.r, sky.r, winR), mix(tir.g, sky.g, win), mix(tir.b, sky.b, winB));
-          // Cáusticas en la cara inferior.
+          float winR = smoothstep(lo - 0.05, 0.82, cosI);
+          float winB = smoothstep(lo + 0.05, 0.82, cosI);
+          // Cáusticas en la cara inferior (tiñen también el espejo del techo).
           float cau = caustics(vWXZ * 0.09, uTime * 0.6);
-          col += uCausticTint * cau * uLight * 0.5;
+          vec3 sky = uSkyTint * (0.85 + 0.25 * n.y);
+          vec3 sheen = mix(vec3(0.12, 0.30, 0.36), vec3(0.55, 0.82, 0.92), clamp(cau * 0.8 + 0.15, 0.0, 1.0));
+          vec3 tir = sheen * (0.55 + 0.55 * cosI);
+          vec3 col = vec3(mix(tir.r, sky.r, winR), mix(tir.g, sky.g, win), mix(tir.b, sky.b, winB));
+          col += uCausticTint * cau * uLight * 0.35;
           // Ondas de estela (bichos que rozan la superficie).
           float wake = 0.0;
           for (int i = 0; i < N; i++) {
@@ -305,8 +309,10 @@ export function createTidepool(container, cfg, agentNames = []) {
           float foam = smoothstep(uFoamT, uFoamT + 0.25, vCrest) + breakZone * uAgitate;
           foam *= (0.4 + 0.6 * fbm(vWXZ * 0.5 + uTime, 2)) * uFoamI;
           col += vec3(foam);
-          col *= uLight * 0.85 + 0.15;   // de noche baja todo (sin cielo)
-          float a = clamp(0.42 + win * 0.35 + cau * 0.35 * uLight + wake * 0.4 + foam * 0.5 + uAgitate * 0.2, 0.0, 0.96);
+          col *= uLight * 0.8 + 0.2;    // de noche baja, pero el techo no a negro
+          // Alpha ALTA de base: el techo se lee como una lámina sólida y rizada,
+          // no como un vidrio casi invisible.
+          float a = clamp(0.6 + win * 0.28 + cau * 0.22 * uLight + wake * 0.4 + foam * 0.5, 0.0, 0.97);
           gl_FragColor = vec4(col, a);
         }`,
     })
