@@ -1,23 +1,23 @@
 # burbur
 
 **Living aerial-view worlds, entirely procedural, in the browser.**
-Six little worlds that breathe — a forest, a lagoon, a city, a cell, a fungal
-colony and a cortical network — each with its own day, weather, fauna, events
-and synthesized soundscape. Nothing is a pre-made model or texture: every blade
-of grass, every ripple, every call and every drone is generated from math at
-runtime.
+Seven little worlds that breathe — a forest, a lagoon, a city, a cell, a fungal
+colony, a cortical network and a tide pool — each with its own day, weather,
+fauna, events and synthesized soundscape. Nothing is a pre-made model or
+texture: every blade of grass, every ripple, every call and every drone is
+generated from math at runtime.
 
 ▶ **Live:** https://burbur.cl · Tap the breathing seed to enter.
 
 > **A homage, not a copy.** burbur is an independent, open-source tribute to the
 > feeling of [murmur.living](https://murmur.living). It is **not affiliated with
 > murmur** and contains **none of its code or assets** — everything here was
-> written from scratch. The name, the six worlds, the Chilean fauna, the cell /
+> written from scratch. The name, the seven worlds, the Chilean fauna, the cell /
 > fungus / neuron worlds and all the sound are original to this project.
 
 ---
 
-## The six worlds
+## The seven worlds
 
 | | World | What lives there |
 |---|---|---|
@@ -27,6 +27,7 @@ runtime.
 | ⬡ | **Célula** (cell) | A macrophage crawling on a substrate: organelles on rails, mitosis, phagocytosis |
 | 🍄 | **Micelio** (mycelium) | A *Pleurotus* colony foraging a decaying log, trapping nematodes, fruiting |
 | ⚛️ | **Neurona** (neuron) | A cortical microcircuit: pyramidal cells, interneurons, spikes and slow waves |
+| 🌊 | **Poza** (tidepool) | A Chilean rocky-shore tide pool seen from *underwater*: sea stars stalking mussels, anemones opening with the tide, a diving otter |
 
 Each world runs the **same clock** but reads it differently: in the forest the
 clock is the hour of the day; in the cell it is the cell cycle; in the neuron it
@@ -85,7 +86,7 @@ Tone) so it can be unit-tested. The interesting ones:
 
 ### 3. World adapters (`src/worlds/registry.js`)
 
-The registry is where a generic engine becomes six specific worlds. Each entry
+The registry is where a generic engine becomes seven specific worlds. Each entry
 is an **adapter**: it declares the world's `build()` function, its **census**
 (who lives there, `src/sim/agents.js`), its **ecosystem profile** (how the
 shared clock and weather are re-interpreted — `src/sim/ecosystem.js`), its audio

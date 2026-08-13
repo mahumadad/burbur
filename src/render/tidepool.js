@@ -659,6 +659,7 @@ export function createTidepool(container, cfg, agentNames = []) {
       }
     }
     trails.update(worldPos)
+    updateLabel()
     stage.render(step)
     return predations
   }
@@ -671,7 +672,45 @@ export function createTidepool(container, cfg, agentNames = []) {
     return 'aguas pobres'
   }
 
-  function setPointer() {}
+  const _proj = new THREE.Vector3()
+  let ptrX = null, ptrY = null, _lx = 0, _ly = 0
+  // El lente fisheye mueve la posición VISUAL del agente respecto de su NDC
+  // lógico; sin deshacer esa distorsión, la etiqueta no cae donde se ve el bicho.
+  const _fk = Math.min(rc.fisheye, 0.62)
+  function lensNDC(px, py) {
+    let sx = px, sy = py
+    for (let it = 0; it < 3; it++) {
+      const rn = Math.hypot(sx, sy) / 1.4142
+      const f = (1 - _fk) + _fk * rn * rn
+      sx = px / f; sy = py / f
+    }
+    return [sx, sy]
+  }
+  function setPointer(x, y) { ptrX = x; ptrY = y }
+
+  function updateLabel() {
+    let bestI = -1
+    if (ptrX !== null) {
+      let bestD = 0.14
+      for (let i = 0; i < n; i++) {
+        _proj.set(worldPos[i * 3], worldPos[i * 3 + 1] + 1.5, worldPos[i * 3 + 2]).project(stage.camera)
+        if (_proj.z > 1) continue
+        const [vx, vy] = lensNDC(_proj.x, _proj.y)
+        const d = Math.hypot(vx - ptrX, vy - ptrY)
+        if (d < bestD) { bestD = d; bestI = i; _lx = vx; _ly = vy }
+      }
+    }
+    if (bestI >= 0 && agentNames[bestI]) {
+      const { w, h, ox, oy } = stage.metrics
+      stage.labelEl.style.left = ox + (_lx * 0.5 + 0.5) * w + 'px'
+      stage.labelEl.style.top = oy + (-_ly * 0.5 + 0.5) * h + 'px'
+      stage.labelEl.textContent = agentNames[bestI]
+      stage.labelEl.style.opacity = '1'
+    } else {
+      stage.labelEl.style.opacity = '0'
+    }
+  }
+
   function scare(strength = 1) {
     scatterFish(school, strength * 1.5, q)
     for (const r of benthos) {

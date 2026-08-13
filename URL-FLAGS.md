@@ -5,7 +5,7 @@ escenario concreto sin esperar a que el reloj del mundo dé la vuelta. Los flags
 se combinan entre sí y aceptan alias en inglés y español. Se aplican al recargar
 la página.
 
-> El reloj es el mismo para los seis mundos, pero cada uno lo lee distinto (hora
+> El reloj es el mismo para los siete mundos, pero cada uno lo lee distinto (hora
 > del día / ritmo de la célula / etapa de sueño / ciclo de humedad). Por eso
 > `weather` y `phase` usan un **vocabulario distinto por mundo** (ver más abajo),
 > mientras que los knobs numéricos (`temperatura`, `rain`, `wind`…) valen en todos.
@@ -87,6 +87,16 @@ suyos; un clima que no existe en el mundo activo se ignora.
 | `seco` | 0.00 | 0.50 | +2 | 0.05 |
 | `helada` | 0.00 | 0.45 | −6 | 0.55 |
 
+**Poza** (el "clima" es el oleaje: lo que entra por el portillo)
+
+| `weather=` | lluvia (agitación) | tensión | Δtemp | niebla (turbidez) |
+|---|---|---|---|---|
+| `mar en calma` | 0.00 | 0.05 | +1 | 0.08 |
+| `marejadilla` | 0.10 | 0.12 | 0 | 0.15 |
+| `marejada` | 0.40 | 0.30 | −2 | 0.40 |
+| `resaca` | 0.25 | 0.45 | −1 | 0.55 |
+| `temporal` | 1.00 | 0.60 | −3 | 0.70 |
+
 ---
 
 ## Variables de texto: `phase` (`hora`, `fase`)
@@ -95,20 +105,20 @@ Fuerza el momento del reloj. Controla luz (color), brillo, actividad y un delta
 de temperatura. Acepta **nombre exacto** o **índice 0–11** (el índice funciona en
 cualquier mundo sin saber el nombre).
 
-| # | Bosque / Laguna / Ciudad | Célula | Neurona | Micelio |
-|---|---|---|---|---|
-| 0 | `night` | `resting` | `quiet wake` | `medianoche` |
-| 1 | `pre-dawn` | `surveillance` | `alert wake` | `madrugada` |
-| 2 | `dawn chorus` | `patrolling` | `focused` | `rocío del alba` |
-| 3 | `first light` | `chemotaxis` | `drowsy` | `primera luz` |
-| 4 | `early morning` | `alert` | `N1` | `mañana` |
-| 5 | `mid-morning` | `hunting` | `N2 spindles` | `media mañana` |
-| 6 | `morning` | `engulfing` | `N3 slow wave` | `mediodía seco` |
-| 7 | `midday` | `digesting` | `N3 deep` | `siesta` |
-| 8 | `early afternoon` | `antigen presentation` | `N2 return` | `tarde` |
-| 9 | `afternoon` | `cytokine secretion` | `REM` | `frescor` |
-| 10 | `golden hour` | `efferocytosis` | `REM burst` | `anochecer` |
-| 11 | `dusk` | `recovery` | `waking` | `relente` |
+| # | Bosque / Laguna / Ciudad | Célula | Neurona | Micelio | Poza |
+|---|---|---|---|---|---|
+| 0 | `night` | `resting` | `quiet wake` | `medianoche` | `bajamar nocturna` |
+| 1 | `pre-dawn` | `surveillance` | `alert wake` | `madrugada` | `llenante del alba` |
+| 2 | `dawn chorus` | `patrolling` | `focused` | `rocío del alba` | `llenante del amanecer` |
+| 3 | `first light` | `chemotaxis` | `drowsy` | `primera luz` | `pleamar de la mañana` |
+| 4 | `early morning` | `alert` | `N1` | `mañana` | `vaciante matinal` |
+| 5 | `mid-morning` | `hunting` | `N2 spindles` | `media mañana` | `poza que se aísla` |
+| 6 | `morning` | `engulfing` | `N3 slow wave` | `mediodía seco` | `poza al mediodía` |
+| 7 | `midday` | `digesting` | `N3 deep` | `siesta` | `llenante de la tarde` |
+| 8 | `early afternoon` | `antigen presentation` | `N2 return` | `tarde` | `llenante dorada` |
+| 9 | `afternoon` | `cytokine secretion` | `REM` | `frescor` | `pleamar del anochecer` |
+| 10 | `golden hour` | `efferocytosis` | `REM burst` | `anochecer` | `vaciante nocturna` |
+| 11 | `dusk` | `recovery` | `waking` | `relente` | `madrugada` |
 
 ---
 
