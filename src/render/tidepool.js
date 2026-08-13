@@ -109,10 +109,10 @@ export function createTidepool(container, cfg, agentNames = []) {
         }
         shaft /= float(${W.rayCount});
         col += vec3(0.18, 0.42, 0.5) * shaft * shaft * 0.55 * uLight;
-        // Tinte azul-verdoso que se ahonda con la distancia al centro.
+        // Tinte TURQUESA que se ahonda con la distancia (agua clara, no azul oscuro).
         float d = length(vUv - 0.5) * 1.42;
-        vec3 water = vec3(0.04, 0.34, 0.44);
-        col = mix(col, col * water * 2.2, clamp(d * uTint, 0.0, 0.85));
+        vec3 water = vec3(0.14, 0.52, 0.52);
+        col = mix(col, col * water * 2.2, clamp(d * uTint, 0.0, 0.7));
         gl_FragColor = vec4(col, 1.0);
       }`,
   })
@@ -128,9 +128,10 @@ export function createTidepool(container, cfg, agentNames = []) {
       // margen). Azimut libre.
       orbit: { minDist: 8, maxDist: 24, minPolar: Math.PI * 0.42, maxPolar: Math.PI * 0.60 },
       breathe: { baseY: -20, ampY: 1.5 },
-      // Niebla MUCHO más suave: con 0.026 la escena se disolvía al alejarse.
-      fog: { color: 0x0a2733, density: 0.010 },
-      background: 0x061a24,
+      // Agua TURQUESA CLARA (como las fotos), no azul-negra: niebla turquesa y
+      // poco densa (agua limpia, se ve lejos), fondo turquesa profundo.
+      fog: { color: 0x1f8f88, density: 0.0075 },
+      background: 0x0e5f63,
       addPass: (composer) => composer.insertPass(seaPass, 1),
     },
   })
@@ -147,8 +148,8 @@ export function createTidepool(container, cfg, agentNames = []) {
 
   // ─── LA TAZA: pared anular de roca + lecho ────────────────────────────────
   // Roca mojada de la costa: gris-carbón frío, no arena.
-  const ROCK_LO = [0.05, 0.06, 0.07]
-  const ROCK_HI = [0.26, 0.28, 0.31]
+  const ROCK_LO = [0.09, 0.10, 0.11]
+  const ROCK_HI = [0.30, 0.32, 0.35]
   {
     const R = P.bowlRadius
     const geo = new THREE.CylinderGeometry(R * 1.5, R * 0.55, P.wallTop - P.bedY, 96, 24, true)
@@ -189,10 +190,12 @@ export function createTidepool(container, cfg, agentNames = []) {
       // que el fondo tenga geografía y no sea un plato liso.
       pos.setY(i, P.bedY + (fbm(x * 0.035 + 2, z * 0.035 - 4, 2) - 0.5) * 8.0
         + (fbm(x * 0.11 + 9, z * 0.11 + 5, 3) - 0.5) * 3.0)
+      // Fondo de ROCA PÁLIDA (gris-arena claro), como el lecho visible a través
+      // del agua turquesa de las fotos — no un lecho oscuro.
       const s = 0.5 + fbm(x * 0.2, z * 0.2, 2) * 0.5
-      cols[i * 3] = ROCK_LO[0] * s * 3.2
-      cols[i * 3 + 1] = ROCK_LO[1] * s * 3.4
-      cols[i * 3 + 2] = ROCK_LO[2] * s * 3.6
+      cols[i * 3] = 0.30 + s * 0.24
+      cols[i * 3 + 1] = 0.35 + s * 0.26
+      cols[i * 3 + 2] = 0.33 + s * 0.24
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
     scene.add(new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
@@ -205,45 +208,9 @@ export function createTidepool(container, cfg, agentNames = []) {
     const x = Math.cos(a) * r, z = Math.sin(a) * r
     pushPoint(x, P.bedY + 0.4 + q() * 0.9, z, [0.18, 0.2, 0.22], 0.4 + q() * 1.1, 0)
   }
-  // ─── FORMACIONES DE ROCA: peñascos e islotes que suben del lecho, para que la
-  // poza tenga geografía (repisas, stacks altos, bolones grandes) y no una taza
-  // lisa. Icoesferas deformadas por fbm — como los lóbulos del pond — con las
-  // cáusticas inyectadas (la luz del techo también les cae encima).
-  {
-    const ROCKN = 28
-    for (let i = 0; i < ROCKN; i++) {
-      const a = q() * 6.2832
-      // Repartidas por el disco, dejando algo de aire en el centro bajo la cámara.
-      const r = (0.28 + Math.sqrt(q()) * 0.64) * P.bowlRadius
-      const cx = Math.cos(a) * r, cz = Math.sin(a) * r
-      const tall = q() < 0.4
-      const rx = (tall ? 3 : 4) + q() * (tall ? 3 : 6)
-      const rz = rx * (0.7 + q() * 0.6)
-      const ry = tall ? 10 + q() * 16 : 3 + q() * 6      // stacks altos vs bolones
-      const geo = new THREE.IcosahedronGeometry(1, 3)
-      const gp = geo.attributes.position
-      const seed = q() * 100
-      const cols = new Float32Array(gp.count * 3)
-      for (let k = 0; k < gp.count; k++) {
-        const px = gp.getX(k), py = gp.getY(k), pz = gp.getZ(k)
-        const d = 1 + (fbm(px * 1.6 + seed, pz * 1.6 - py + seed, 3) - 0.5) * 0.7
-        const wx = px * d * rx, wy = py * d * ry, wz = pz * d * rz
-        gp.setXYZ(k, wx, wy, wz)
-        // Gris-carbón húmedo con gradiente vertical (más claro arriba, hacia la luz).
-        const t = Math.max(0, Math.min(1, (wy + ry) / (2 * ry)))
-        const g = 0.06 + t * 0.22 + (fbm(px * 3 + seed, pz * 3, 2) - 0.5) * 0.08
-        cols[k * 3] = g * 0.9; cols[k * 3 + 1] = g; cols[k * 3 + 2] = g * 1.12
-      }
-      geo.computeVertexNormals()
-      geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
-      const mesh = new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
-        vertexColors: true, side: THREE.DoubleSide, fog: true,
-      })))
-      mesh.position.set(cx, P.bedY + ry * 0.55, cz)
-      mesh.rotation.y = q() * 6.2832
-      scene.add(mesh)
-    }
-  }
+  // (Sin peñascos sueltos en el centro: la roca es la PARED que rodea la poza
+  // —continua, media, rugosa, como las fotos— más el lecho pálido. Los islotes
+  // icoesfera anteriores tapaban la vista y se leían como piedras sueltas.)
 
   stage.setResizeHook((m) => { pointUniforms.uProj.value = m.proj })
 

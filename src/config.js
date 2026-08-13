@@ -363,7 +363,7 @@ export const CONFIG = {
     // Geometría de la taza. La cámara vive DENTRO de la cavidad, a media agua.
     bowlRadius: 38,        // radio interior de la cavidad de agua
     bedY: -34,             // fondo de la poza (columna honda: deja mirar arriba)
-    wallTop: 3,            // borde de roca bajo: no tapa el techo/superficie al mirar arriba
+    wallTop: 5,            // pared de roca MEDIA que rodea la poza (como las fotos)
     surfaceMin: -8,        // techo de agua en bajamar (SIEMPRE sobre la cámara)
     surfaceMax: 0,         // techo de agua en pleamar
     camY: -22,             // altura de la cámara (bien bajo el surfaceMin)
@@ -381,7 +381,7 @@ export const CONFIG = {
     limpets: 40,
     anemones: 26,
     barnacles: 34,
-    algae: 120,            // matas de pradería (cada una es un abanico de hojas)
+    algae: 45,             // algas sueltas (parches), no un bosque que tape
     // Cameo del chungungo: raro y solo con la poza bien llena.
     otter: { minTide: 0.75, chancePerSec: 0.012, diveDur: 5.5 },
     // Agua "grado submarino" procedural (spec 2026-08-13-agua-poza-procedural).
