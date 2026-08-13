@@ -384,6 +384,26 @@ export const CONFIG = {
     algae: 48,             // matas de cochayuyo/huiro
     // Cameo del chungungo: raro y solo con la poza bien llena.
     otter: { minTide: 0.75, chancePerSec: 0.012, diveDur: 5.5 },
+    // Agua "grado submarino" procedural (spec 2026-08-13-agua-poza-procedural).
+    water: {
+      // ~4 olas Gerstner (dir en rad, longitud de onda, amplitud, steepness 0..1).
+      gerstner: [
+        { dir: 0.3, wavelength: 26, amp: 0.5, steepness: 0.6 },
+        { dir: 1.9, wavelength: 17, amp: 0.34, steepness: 0.7 },
+        { dir: 3.4, wavelength: 11, amp: 0.22, steepness: 0.8 },
+        { dir: 5.0, wavelength: 7, amp: 0.14, steepness: 0.9 },
+      ],
+      choppiness: 1.0,          // el OLEAJE (eco.rain) lo escala en runtime
+      causticScale: 0.08,       // escala espacial de la red de cáusticas
+      causticSpeed: 0.6,        // velocidad de deriva
+      causticColor: [0.35, 0.72, 0.85],
+      skyTint: [0.55, 0.78, 0.95],  // color del cielo en la ventana de Snell
+      snellSharpness: 6.0,      // nitidez del borde de la ventana
+      chromatic: 0.06,          // dispersión cromática del pass submarino
+      foamThreshold: 0.6, foamIntensity: 0.8,
+      rayCount: 12,             // pasos de marcha de los god-rays
+      normalOctaves: 3,         // octavas de fBm de la normal fina (dial de perf)
+    },
   },
   render: {
     grassBlades: 112000,  // hojas como líneas de 2 segmentos
