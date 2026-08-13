@@ -427,6 +427,125 @@ export function createTidepool(container, cfg, agentNames = []) {
     spawnRipple(otter.x, otter.z, 1.4)
   }
 
+  // ─── LA COLUMNA DE AGUA ───────────────────────────────────────────────────
+  // PLANCTON: la nieve marina a la deriva. Su densidad la manda la SURGENCIA:
+  // agua fría y rica = floración. De noche destella (noctiluca).
+  const plankton = []
+  const planktonCloud = createPointCloud(P.plankton, draw.pointMaterial)
+  for (let i = 0; i < P.plankton; i++) {
+    const a = q() * 6.2832, r = Math.sqrt(q()) * P.bowlRadius
+    plankton.push({
+      x: Math.cos(a) * r, z: Math.sin(a) * r,
+      y: P.bedY + q() * (P.surfaceMax - P.bedY),
+      vy: 0.04 + q() * 0.09, phase: q() * 6.2832, flash: 0,
+    })
+    planktonCloud.size[i] = 0.07 + q() * 0.1
+  }
+  scene.add(planktonCloud.mesh)
+  // CORRIENTE: el mar entra por el portillo y empuja toda la columna hacia
+  // adentro. Es lo que hace que el agua se lea como agua y no como aire quieto:
+  // con marejada, todo lo que flota se va para el mismo lado.
+  const CURRENT_X = -Math.cos(P.portillo.ang)
+  const CURRENT_Z = -Math.sin(P.portillo.ang)
+  function currentPush(agitation) {
+    return (0.25 + agitation * 2.6)   // unidades/s hacia el interior de la taza
+  }
+
+  function updatePlankton(step, bloom, night, agitation) {
+    const push = currentPush(agitation) * step
+    for (let i = 0; i < plankton.length; i++) {
+      const p = plankton[i]
+      // Deriva: sube muy lento y se mece con la corriente.
+      p.y += p.vy * step
+      if (p.y > surfaceY - 0.5) p.y = P.bedY + 0.5
+      const drift = Math.sin(clock * 0.4 + p.phase) * 0.03
+      p.x += drift; p.z += Math.cos(clock * 0.35 + p.phase) * 0.03
+      // …y la corriente que entra por el portillo lo arrastra a todo parejo.
+      p.x += CURRENT_X * push
+      p.z += CURRENT_Z * push
+      // Al salirse de la taza reaparece del lado del portillo (columna cerrada).
+      if (Math.hypot(p.x, p.z) > P.bowlRadius) {
+        p.x = -CURRENT_X * P.bowlRadius * 0.95 + (q() - 0.5) * 6
+        p.z = -CURRENT_Z * P.bowlRadius * 0.95 + (q() - 0.5) * 6
+      }
+      // Noctiluca: de noche el plancton agitado suelta un destello azul.
+      if (night && p.flash <= 0 && q() < 0.0015) p.flash = 1
+      if (p.flash > 0) p.flash = Math.max(0, p.flash - step * 1.6)
+      const j = i * 3
+      planktonCloud.pos[j] = p.x
+      planktonCloud.pos[j + 1] = p.y
+      planktonCloud.pos[j + 2] = p.z
+      // Verde de floración con surgencia; azul eléctrico al destellar.
+      planktonCloud.col[j] = 0.22 + p.flash * 0.3
+      planktonCloud.col[j + 1] = 0.34 + bloom * 0.4 + p.flash * 0.7
+      planktonCloud.col[j + 2] = 0.4 + p.flash * 1.0
+    }
+    planktonCloud.commit()
+  }
+
+  // BURBUJAS: suben del lecho y del portillo cuando rompe el oleaje.
+  const bubbles = []
+  const bubbleCloud = createPointCloud(P.bubbles, draw.pointMaterial)
+  for (let i = 0; i < P.bubbles; i++) {
+    bubbles.push({ x: 0, z: 0, y: -9999, vy: 0 })
+    bubbleCloud.col[i * 3] = 0.72; bubbleCloud.col[i * 3 + 1] = 0.88; bubbleCloud.col[i * 3 + 2] = 0.95
+    bubbleCloud.size[i] = 0.1 + q() * 0.16
+  }
+  scene.add(bubbleCloud.mesh)
+  let bubbleHead = 0
+  function updateBubbles(step, agitation) {
+    // Se siembran donde entra el mar (el portillo) proporcional a la agitación.
+    if (agitation > 0.05 && q() < agitation * 8 * step) {
+      const b = bubbles[bubbleHead]
+      bubbleHead = (bubbleHead + 1) % bubbles.length
+      const spread = 6
+      b.x = Math.cos(P.portillo.ang) * P.bowlRadius * 0.8 + (q() - 0.5) * spread
+      b.z = Math.sin(P.portillo.ang) * P.bowlRadius * 0.8 + (q() - 0.5) * spread
+      b.y = P.bedY + q() * 4
+      b.vy = 3 + q() * 4
+    }
+    for (let i = 0; i < bubbles.length; i++) {
+      const b = bubbles[i]
+      if (b.y > -9000) {
+        b.y += b.vy * step
+        b.x += Math.sin(clock * 2 + i) * 0.02
+        if (b.y > surfaceY - 0.3) { b.y = -9999; spawnRipple(b.x, b.z, 0.18) }
+      }
+      bubbleCloud.pos[i * 3] = b.x
+      bubbleCloud.pos[i * 3 + 1] = b.y
+      bubbleCloud.pos[i * 3 + 2] = b.z
+    }
+    bubbleCloud.commit()
+  }
+
+  // RAYOS DE SOL: cuñas de luz que bajan de la superficie entre las piedras.
+  // Puntos aditivos en línea, que es como el proyecto dibuja la luz.
+  const rays = []
+  const rayCloud = createPointCloud(P.rays * 16, draw.pointMaterial)
+  for (let i = 0; i < P.rays; i++) {
+    const a = q() * 6.2832, r = q() * P.bowlRadius * 0.7
+    rays.push({ x: Math.cos(a) * r, z: Math.sin(a) * r, tilt: (q() - 0.5) * 0.5, phase: q() * 6.2832 })
+    for (let k = 0; k < 16; k++) rayCloud.size[i * 16 + k] = 1.4 - (k / 16) * 0.8
+  }
+  scene.add(rayCloud.mesh)
+  function updateRays(light) {
+    for (let i = 0; i < rays.length; i++) {
+      const R = rays[i]
+      const sway = Math.sin(clock * 0.5 + R.phase) * 1.2
+      for (let k = 0; k < 16; k++) {
+        const f = k / 15
+        const j = (i * 16 + k) * 3
+        rayCloud.pos[j] = R.x + sway * f + R.tilt * f * 8
+        rayCloud.pos[j + 1] = surfaceY - f * (surfaceY - P.bedY) * 0.85
+        rayCloud.pos[j + 2] = R.z + sway * f * 0.5
+        // Se apagan con la profundidad y con la luz del día.
+        const v = light * (1 - f) * 0.5
+        rayCloud.col[j] = v * 0.5; rayCloud.col[j + 1] = v * 0.85; rayCloud.col[j + 2] = v
+      }
+    }
+    rayCloud.commit()
+  }
+
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
   let tide = 0
@@ -456,6 +575,19 @@ export function createTidepool(container, cfg, agentNames = []) {
     updateAnemones(agitation)
     updateLimpets(step)
     updateBarnacles()
+    const light = eco ? Math.min(1, eco.gain * 0.85) : 1
+    const night = light < 0.35
+    // Surgencia: agua fría y rica = floración de plancton (frío = más vida).
+    const bloom = eco ? 1 - Math.abs(((eco.seasonT + 0.5) % 1) - 0.25) * 2 : 0.5
+    updatePlankton(step, Math.max(0, bloom), night, agitation)
+    updateBubbles(step, agitation)
+    updateRays(light)
+    // La corriente también arrastra al cardumen: con marejada el banco se corre
+    // hacia adentro de la taza en vez de nadar como si el agua estuviera quieta.
+    if (agitation > 0.05) {
+      const drag = currentPush(agitation) * step * 0.012
+      for (const f of school.fish) { f.vx += CURRENT_X * drag; f.vz += CURRENT_Z * drag }
+    }
     const predations = []
     moveFauna(step)
     // La estrella pisa la posición de sus slots antes de que se dibujen.
