@@ -410,7 +410,7 @@ export function createTidepool(container, cfg, agentNames = []) {
       otter.group.position.set(otter.x, surfaceY - depth * (surfaceY - P.bedY - 2), otter.z)
       if (!otter.took && k > 0.45) {
         otter.took = true
-        predations.push({ hunterIdx: null, dir: 'above' })
+        predations.push({ hunterIdx: null, dir: 'above', agent: 'chungungo', agentType: 'otter' })
         spawnRipple(otter.x, otter.z, 1.2)
       }
       if (otter.active <= 0) { otter.group.visible = false }
