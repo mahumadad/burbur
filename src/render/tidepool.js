@@ -203,7 +203,7 @@ export function createTidepool(container, cfg, agentNames = []) {
   // lisa. Icoesferas deformadas por fbm — como los lóbulos del pond — con las
   // cáusticas inyectadas (la luz del techo también les cae encima).
   {
-    const ROCKN = 14
+    const ROCKN = 28
     for (let i = 0; i < ROCKN; i++) {
       const a = q() * 6.2832
       // Repartidas por el disco, dejando algo de aire en el centro bajo la cámara.
@@ -330,9 +330,12 @@ export function createTidepool(container, cfg, agentNames = []) {
           float winB = smoothstep(lo + 0.05, 0.82, cosI);
           // Cáusticas en la cara inferior (tiñen también el espejo del techo).
           float cau = caustics(vWXZ * 0.09, uTime * 0.6);
-          vec3 sky = uSkyTint * (0.85 + 0.25 * n.y);
-          vec3 sheen = mix(vec3(0.12, 0.30, 0.36), vec3(0.55, 0.82, 0.92), clamp(cau * 0.8 + 0.15, 0.0, 1.0));
-          vec3 tir = sheen * (0.55 + 0.55 * cosI);
+          // Techo LUMINOSO: el espejo plateado tiene que ser claramente MÁS claro
+          // que la niebla azul de fondo, si no se funde y desaparece. Ventana de
+          // Snell casi blanca-cielo; el resto, plata-teal brillante siempre.
+          vec3 sky = uSkyTint * (1.05 + 0.30 * n.y);
+          vec3 sheen = mix(vec3(0.28, 0.52, 0.60), vec3(0.72, 0.94, 1.0), clamp(cau * 0.85 + 0.25, 0.0, 1.0));
+          vec3 tir = sheen * (0.80 + 0.35 * cosI);
           vec3 col = vec3(mix(tir.r, sky.r, winR), mix(tir.g, sky.g, win), mix(tir.b, sky.b, winB));
           col += uCausticTint * cau * uLight * 0.35;
           // Ondas de estela (bichos que rozan la superficie).
@@ -492,35 +495,87 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
   }
 
-  // ALGAS: pradería DENSA anclada al lecho y las repisas. Cada mata es un abanico
-  // de muchas hojas finas arqueadas (pasto marino/luga); una de cada ~5 es una
-  // correa alta de cochayuyo/huiro que sube hacia la luz. Gradiente verde base→
-  // punta y arqueo por mata, para que se lea frondosa y no como cuatro palitos.
-  const ALGAE_LO = [0.05, 0.13, 0.04], ALGAE_HI = [0.30, 0.54, 0.16]
-  const KELP_LO = [0.10, 0.13, 0.05], KELP_HI = [0.44, 0.40, 0.13]
+  // ALGAS: pradería DENSA de hojas ANCHAS (cintas, no hairlines) que se MECEN con
+  // la corriente. Cada mata es un abanico de blades; una de cada ~5 es una correa
+  // alta de cochayuyo/huiro que sube hacia la luz. Cada blade es una tira de
+  // triángulos que se afina hacia la punta, con gradiente verde base→punta. El
+  // vaivén lo hace el vertex shader (offset por altura + fase de la mata).
+  const ALGAE_LO = [0.05, 0.14, 0.04], ALGAE_HI = [0.34, 0.60, 0.18]
+  const KELP_LO = [0.09, 0.12, 0.05], KELP_HI = [0.46, 0.42, 0.14]
   const mixC = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-  for (let i = 0; i < P.algae; i++) {
-    const tall = q() < 0.2                          // cochayuyo/huiro alto
-    const base = wallPoint(q() * 0.42)              // ancladas abajo, en roca/lecho
-    const blades = tall ? 2 + (q() * 3 | 0) : 6 + (q() * 10 | 0)
-    const bendDir = q() * 6.2832                    // hacia dónde se recuesta la mata
-    const lo = tall ? KELP_LO : ALGAE_LO, hi = tall ? KELP_HI : ALGAE_HI
-    for (let b = 0; b < blades; b++) {
-      const h = tall ? 16 + q() * 18 : 4 + q() * 9
-      const rr = (tall ? 0.5 : 1.9) * q(), aa = q() * 6.2832
-      const bx = base.x + Math.cos(aa) * rr, bz = base.z + Math.sin(aa) * rr
-      const bend = 0.25 + q() * 0.5, segs = 6
-      let px = bx, py = base.y, pz = bz
-      for (let s = 1; s <= segs; s++) {
+  {
+    const pos = [], col = [], sway = [], phs = [], idx = []
+    let vb = 0
+    function pushBlade(bx, bz, byy, h, width, leanX, leanZ, lo, hi) {
+      const segs = 6, ph = q() * 6.2832
+      // Perpendicular en XZ a la inclinación, para dar ancho a la cinta.
+      let px = leanX, pz = leanZ
+      const pl = Math.hypot(px, pz) || 1; px = -pz / pl; pz = leanX / pl  // perp normalizada
+      for (let s = 0; s <= segs; s++) {
         const f = s / segs
-        const arch = bend * h * f * f               // se recuesta más hacia la punta
-        const nx = bx + Math.cos(bendDir) * arch
-        const ny = base.y + h * f * (1.0 - 0.12 * f)
-        const nz = bz + Math.sin(bendDir) * arch
-        pushLine(px, py, pz, nx, ny, nz, mixC(lo, hi, (s - 1) / segs), mixC(lo, hi, f))
-        px = nx; py = ny; pz = nz
+        const arch = (0.3 + 0.4) * h * f * f * 0.5   // se recuesta hacia la punta
+        const cx = bx + leanX * arch
+        const cy = byy + h * f * (1.0 - 0.1 * f)
+        const cz = bz + leanZ * arch
+        const w = width * (1.0 - f) * 0.5            // se afina hacia la punta
+        const c = mixC(lo, hi, f)
+        pos.push(cx + px * w, cy, cz + pz * w, cx - px * w, cy, cz - pz * w)
+        col.push(c[0], c[1], c[2], c[0], c[1], c[2])
+        const amt = f * f * Math.min(h * 0.09, 3.2)  // la punta se mece más
+        sway.push(amt, amt); phs.push(ph, ph)
+        if (s < segs) { idx.push(vb, vb + 1, vb + 2, vb + 1, vb + 3, vb + 2) }
+        vb += 2
       }
     }
+    for (let i = 0; i < P.algae; i++) {
+      const tall = q() < 0.2
+      const base = wallPoint(q() * 0.42)
+      const blades = tall ? 2 + (q() * 3 | 0) : 7 + (q() * 12 | 0)
+      const bendDir = q() * 6.2832
+      const leanX = Math.cos(bendDir), leanZ = Math.sin(bendDir)
+      const lo = tall ? KELP_LO : ALGAE_LO, hi = tall ? KELP_HI : ALGAE_HI
+      for (let b = 0; b < blades; b++) {
+        const h = tall ? 16 + q() * 18 : 4 + q() * 9
+        const rr = (tall ? 0.6 : 2.0) * q(), aa = q() * 6.2832
+        const bx = base.x + Math.cos(aa) * rr, bz = base.z + Math.sin(aa) * rr
+        const width = tall ? 1.8 + q() * 1.4 : 0.5 + q() * 0.6
+        pushBlade(bx, bz, base.y, h, width, leanX, leanZ, lo, hi)
+      }
+    }
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
+    geo.setAttribute('sway', new THREE.BufferAttribute(new Float32Array(sway), 1))
+    geo.setAttribute('phase', new THREE.BufferAttribute(new Float32Array(phs), 1))
+    geo.setIndex(idx)
+    const algaeUniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog])
+    algaeUniforms.uTime = waterShared.uTime          // ya se actualiza cada frame
+    const algaeMat = new THREE.ShaderMaterial({
+      uniforms: algaeUniforms, fog: true, side: THREE.DoubleSide,
+      vertexShader: `
+        uniform float uTime;
+        attribute vec3 color; attribute float sway; attribute float phase;
+        varying vec3 vColor;
+        #include <fog_pars_vertex>
+        void main(){
+          vColor = color;
+          vec3 p = position;
+          p.x += sin(uTime * 1.1 + phase) * sway;
+          p.z += cos(uTime * 0.9 + phase * 1.3) * sway * 0.8;
+          vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+          #include <fog_vertex>
+          gl_Position = projectionMatrix * mvPosition;
+        }`,
+      fragmentShader: `
+        precision mediump float;
+        varying vec3 vColor;
+        #include <fog_pars_fragment>
+        void main(){
+          gl_FragColor = vec4(vColor, 1.0);
+          #include <fog_fragment>
+        }`,
+    })
+    scene.add(new THREE.Mesh(geo, algaeMat))
   }
 
   draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, fog: true }))
@@ -775,6 +830,47 @@ export function createTidepool(container, cfg, agentNames = []) {
     rayCloud.commit()
   }
 
+  // ─── PÁJARO: un pilpilén/gaviota que cruza el cielo POR ENCIMA de la superficie.
+  // Visto desde abajo es una silueta oscura que pasa contra el techo brillante —
+  // da escala y vida. Va como 5 puntos (cuerpo + alas) que baten y cruzan, y
+  // aparece de a ratos. renderOrder alto → se dibuja sobre el agua.
+  const birdCloud = createPointCloud(5, draw.pointMaterial)
+  for (let k = 0; k < 5; k++) {
+    birdCloud.col[k * 3] = 0.03; birdCloud.col[k * 3 + 1] = 0.04; birdCloud.col[k * 3 + 2] = 0.06
+    birdCloud.size[k] = k === 0 ? 0.9 : 0.55
+    birdCloud.pos[k * 3 + 1] = -9999
+  }
+  birdCloud.mesh.renderOrder = 3
+  scene.add(birdCloud.mesh)
+  const bird = { active: 0, x: 0, z: 0, dir: 0, cool: 3 + q() * 6 }
+  function updateBird(step, t) {
+    if (bird.active <= 0) {
+      bird.cool -= step
+      if (bird.cool <= 0) {
+        const a = q() * 6.2832
+        bird.x = Math.cos(a) * P.bowlRadius * 1.15
+        bird.z = Math.sin(a) * P.bowlRadius * 1.15
+        bird.dir = a + Math.PI + (q() - 0.5)     // cruza hacia el lado opuesto
+        bird.active = 6 + q() * 4
+      } else { birdCloud.commit(); return }
+    }
+    bird.active -= step
+    bird.x += Math.cos(bird.dir) * 9 * step
+    bird.z += Math.sin(bird.dir) * 9 * step
+    const by = P.surfaceMax + 3.5
+    const flap = Math.sin(t * 9.0) * 1.4
+    const fx = Math.cos(bird.dir), fz = Math.sin(bird.dir)
+    const wx = -fz, wz = fx                      // eje de las alas (perpendicular)
+    const P0 = birdCloud.pos
+    P0[0] = bird.x; P0[1] = by; P0[2] = bird.z                                   // cuerpo
+    P0[3] = bird.x + wx * 1.2; P0[4] = by + flap * 0.4; P0[5] = bird.z + wz * 1.2 // ala int
+    P0[6] = bird.x - wx * 1.2; P0[7] = by + flap * 0.4; P0[8] = bird.z - wz * 1.2
+    P0[9] = bird.x + wx * 2.4; P0[10] = by + flap; P0[11] = bird.z + wz * 2.4     // puntas
+    P0[12] = bird.x - wx * 2.4; P0[13] = by + flap; P0[14] = bird.z - wz * 2.4
+    if (bird.active <= 0) { bird.cool = 5 + q() * 10; for (let k = 0; k < 5; k++) P0[k * 3 + 1] = -9999 }
+    birdCloud.commit()
+  }
+
   // ─── API del builder ──────────────────────────────────────────────────────
   let clock = 0
   let tide = 0
@@ -820,6 +916,7 @@ export function createTidepool(container, cfg, agentNames = []) {
     updatePlankton(step, Math.max(0, bloom), night, agitation)
     updateBubbles(step, agitation)
     updateRays(light)
+    updateBird(step, clock)
     // La corriente también arrastra al cardumen: con marejada el banco se corre
     // hacia adentro de la taza en vez de nadar como si el agua estuviera quieta.
     if (agitation > 0.05) {
