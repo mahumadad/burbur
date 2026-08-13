@@ -222,12 +222,12 @@ export function createTidepool(container, cfg, agentNames = []) {
       // que el fondo tenga geografía y no sea un plato liso.
       pos.setY(i, P.bedY + (fbm(x * 0.035 + 2, z * 0.035 - 4, 2) - 0.5) * 8.0
         + (fbm(x * 0.11 + 9, z * 0.11 + 5, 3) - 0.5) * 3.0)
-      // Fondo de ROCA PÁLIDA (gris-arena claro), como el lecho visible a través
-      // del agua turquesa de las fotos — no un lecho oscuro.
+      // ARENA VOLCÁNICA OSCURA, a juego con la roca (costa de basalto): gris
+      // profundo con mottling. Las cáusticas fuertes (0.6) resaltan encima.
       const s = 0.5 + fbm(x * 0.2, z * 0.2, 2) * 0.5
-      cols[i * 3] = 0.30 + s * 0.24
-      cols[i * 3 + 1] = 0.35 + s * 0.26
-      cols[i * 3 + 2] = 0.33 + s * 0.24
+      cols[i * 3] = 0.055 + s * 0.085
+      cols[i * 3 + 1] = 0.065 + s * 0.095
+      cols[i * 3 + 2] = 0.07 + s * 0.105
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
     // Fondo pálido: cáusticas FUERTES (la red de luz sobre la arena).
