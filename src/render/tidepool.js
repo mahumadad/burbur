@@ -12,6 +12,7 @@ import { createSchools, updateSchools, scatterFish } from '../sim/fish.js'
 import { createRoamers, updateRoamers } from '../sim/wander.js'
 import { buildSpecies } from './pond/species.js'
 import { createSeastar, updateSeastar, SEASTAR_CFG } from '../sim/seastar.js'
+import { HASH_NOISE_FBM, CAUSTIC_FIELD } from './engine/waterChunks.js'
 
 // Mundo POZA DE MAREA: una poza rocosa de la costa chilena vista DESDE ABAJO
 // DEL AGUA — la primera cámara volteada del proyecto. Una taza de roca con un
@@ -22,6 +23,46 @@ export function createTidepool(container, cfg, agentNames = []) {
   const rc = cfg.render
   const P = cfg.tidepool
   const q = Math.random
+
+  const W = P.water
+  // Uniforms compartidos por TODOS los materiales de agua (techo, lecho, roca):
+  // un solo objeto `{value}` por uniform, referenciado desde cada shader, para
+  // que actualizarlo una vez por frame alcance a todos. Ver spec §3.
+  const waterShared = {
+    uTime: { value: 0 },
+    uLight: { value: 1 },
+    uSurfaceY: { value: P.surfaceMax },
+    uCausticTint: { value: new THREE.Vector3(...W.causticColor) },
+    uCausticScale: { value: W.causticScale },
+    uCausticSpeed: { value: W.causticSpeed },
+  }
+  // Inyecta la cáustica procedural en un MeshBasicMaterial de geometría (lecho o
+  // roca): agrega el varying de posición-mundo y suma la red de luz, atenuada por
+  // la profundidad y apagada de noche.
+  function injectCaustics(mat) {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = waterShared.uTime
+      shader.uniforms.uLight = waterShared.uLight
+      shader.uniforms.uSurfaceY = waterShared.uSurfaceY
+      shader.uniforms.uCausticTint = waterShared.uCausticTint
+      shader.uniforms.uCausticScale = waterShared.uCausticScale
+      shader.uniforms.uCausticSpeed = waterShared.uCausticSpeed
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\n varying vec3 vWorldPosC;')
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\n vWorldPosC = (modelMatrix * vec4(transformed, 1.0)).xyz;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>',
+          '#include <common>\n varying vec3 vWorldPosC;\n uniform float uTime, uLight, uSurfaceY, uCausticScale, uCausticSpeed;\n uniform vec3 uCausticTint;\n' + HASH_NOISE_FBM + CAUSTIC_FIELD)
+        .replace('#include <dithering_fragment>',
+          `#include <dithering_fragment>
+           float depthAtten = clamp(1.0 - (uSurfaceY - vWorldPosC.y) / 22.0, 0.15, 1.0);
+           float cau = caustics(vWorldPosC.xz * uCausticScale, uTime * uCausticSpeed);
+           gl_FragColor.rgb += uCausticTint * cau * depthAtten * uLight * 0.9;`)
+    }
+    mat.customProgramCacheKey = () => 'tidepool-caustic'
+    return mat
+  }
 
   // ─── EL FILTRO SUBMARINO ──────────────────────────────────────────────────
   // Lo que el ojo hace bajo el agua: el azul se come el rojo con la distancia,
@@ -117,9 +158,9 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
     geo.translate(0, (P.wallTop + P.bedY) / 2, 0)
-    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    scene.add(new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide, fog: true,
-    })))
+    }))))
   }
   // Lecho de la poza.
   {
@@ -136,9 +177,9 @@ export function createTidepool(container, cfg, agentNames = []) {
       cols[i * 3 + 2] = ROCK_LO[2] * s * 3.6
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
-    scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    scene.add(new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
       vertexColors: true, side: THREE.DoubleSide, fog: true,
-    })))
+    }))))
   }
   // Bolones sueltos por el fondo.
   for (let i = 0; i < 90; i++) {
@@ -617,6 +658,9 @@ export function createTidepool(container, cfg, agentNames = []) {
       if (waterMesh) waterMesh.position.y = surfaceY
       // De noche no hay cáusticas: sin sol arriba, la red de luz no existe.
       waterUniforms.uLight.value = Math.min(1, eco.gain * 0.85)
+      waterShared.uTime.value = clock
+      waterShared.uSurfaceY.value = surfaceY
+      waterShared.uLight.value = Math.min(1, eco.gain * 0.85)
       // Agitación del oleaje (el `rain` del estado de OLEAJE).
       waterUniforms.uAgitate.value = eco.rain * 0.8
       // La estación de este mundo es la SURGENCIA; el HUD lee esta etiqueta.
