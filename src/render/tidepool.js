@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js'
 import { createStage } from './stage.js'
 import { createDraw, createPointCloud } from './engine/points.js'
 import { fbm } from './noise.js'
@@ -22,6 +23,53 @@ export function createTidepool(container, cfg, agentNames = []) {
   const P = cfg.tidepool
   const q = Math.random
 
+  // ─── EL FILTRO SUBMARINO ──────────────────────────────────────────────────
+  // Lo que el ojo hace bajo el agua: el azul se come el rojo con la distancia,
+  // la luz de la superficie se abre en abanico, y todo tiembla un poco.
+  const seaUniforms = {
+    tDiffuse: { value: null },
+    uTime: { value: 0 },
+    uTint: { value: 0.55 },     // fuerza del grado de color
+    uWobble: { value: 0.0016 }, // refracción
+    uLight: { value: 1 },       // cuánta luz hay arriba (apaga los rayos de noche)
+  }
+  const seaPass = new ShaderPass({
+    uniforms: seaUniforms,
+    vertexShader: `
+      varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+    fragmentShader: `
+      precision mediump float;
+      varying vec2 vUv;
+      uniform sampler2D tDiffuse;
+      uniform float uTime, uTint, uWobble, uLight;
+      void main(){
+        // Refracción: la imagen tiembla como vista a través del agua.
+        vec2 uv = vUv;
+        uv.x += sin(uv.y * 22.0 + uTime * 1.3) * uWobble;
+        uv.y += cos(uv.x * 18.0 - uTime * 1.1) * uWobble;
+        vec3 col = texture2D(tDiffuse, clamp(uv, 0.0, 1.0)).rgb;
+
+        // God-rays: la luz baja del centro alto del cuadro y se abre en abanico.
+        vec2 sun = vec2(0.5, 0.86);
+        vec2 dir = (uv - sun) * 0.055;
+        vec2 p = uv;
+        float shaft = 0.0;
+        for (int i = 0; i < 10; i++) {
+          p -= dir;
+          shaft += texture2D(tDiffuse, clamp(p, 0.0, 1.0)).g;
+        }
+        shaft = shaft / 10.0;
+        col += vec3(0.18, 0.42, 0.5) * shaft * shaft * 0.5 * uLight;
+
+        // El agua se come el rojo: cuanto más lejos del centro, más azul-verde.
+        float d = length(vUv - 0.5) * 1.42;
+        vec3 water = vec3(0.04, 0.34, 0.44);
+        col = mix(col, col * water * 2.2, clamp(d * uTint, 0.0, 0.85));
+        gl_FragColor = vec4(col, 1.0);
+      }`,
+  })
+
   // La cámara arranca dentro de la taza, algo descentrada, mirando hacia arriba.
   const stage = createStage(container, {
     ...cfg,
@@ -31,6 +79,7 @@ export function createTidepool(container, cfg, agentNames = []) {
       breathe: { baseY: P.camY + 6, ampY: 0.7 },
       fog: { color: 0x0a2733, density: 0.026 },
       background: 0x061a24,
+      addPass: (composer) => composer.insertPass(seaPass, 1),
     },
   })
   const { scene } = stage
@@ -576,6 +625,10 @@ export function createTidepool(container, cfg, agentNames = []) {
     updateLimpets(step)
     updateBarnacles()
     const light = eco ? Math.min(1, eco.gain * 0.85) : 1
+    seaUniforms.uTime.value = clock
+    seaUniforms.uLight.value = light
+    // Con turbidez alta el azul se cierra más rápido: se ve menos lejos.
+    if (eco) seaUniforms.uTint.value = 0.42 + eco.fog * 0.5
     const night = light < 0.35
     // Surgencia: agua fría y rica = floración de plancton (frío = más vida).
     const bloom = eco ? 1 - Math.abs(((eco.seasonT + 0.5) % 1) - 0.25) * 2 : 0.5
