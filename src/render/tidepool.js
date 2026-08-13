@@ -108,7 +108,7 @@ export function createTidepool(container, cfg, agentNames = []) {
           shaft += texture2D(tDiffuse, clamp(p, 0.0, 1.0)).g;
         }
         shaft /= float(${W.rayCount});
-        col += vec3(0.18, 0.42, 0.5) * shaft * shaft * 0.55 * uLight;
+        col += vec3(0.20, 0.46, 0.52) * shaft * shaft * 0.85 * uLight;
         // Tinte TURQUESA que se ahonda con la distancia (agua clara, no azul oscuro).
         float d = length(vUv - 0.5) * 1.42;
         vec3 water = vec3(0.14, 0.52, 0.52);
@@ -121,7 +121,10 @@ export function createTidepool(container, cfg, agentNames = []) {
   const stage = createStage(container, {
     ...cfg,
     stage: {
-      camera: { orbR: 22, theta: 0.9, phi: 1.78, target: [0, -18, 0] },
+      // orbR cerca del muro: con la cámara pegada a un borde, la roca de ese lado
+      // llena el marco (nítida, oscura) y la del frente queda como silueta en el
+      // glow turquesa — la composición de "estoy adentro de la poza".
+      camera: { orbR: 27, theta: 0.9, phi: 1.78, target: [0, -18, 0] },
       // La cámara mira al BENTOS (target y=-20) tirando un poco HACIA ARRIBA, para
       // que la superficie brillante quede de techo. maxDist acotado: alejarse más
       // metía todo en la niebla. Banda polar ancha (target hondo → sumergida con
@@ -159,11 +162,11 @@ export function createTidepool(container, cfg, agentNames = []) {
     const R = P.bowlRadius
     const geo = new THREE.CylinderGeometry(R * 1.5, R * 0.55, P.wallTop - P.bedY, 96, 24, true)
     const pos = geo.attributes.position
-    const cols = new Float32Array(pos.count * 3)
+    // 1) Desplazamiento: relieve grande + dentado fino (la silueta no puede ser lisa).
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i)
-      // Relieve: la roca no es un cono liso.
       const bump = (fbm(x * 0.09 + 4, z * 0.09 - 2, 3) - 0.5) * 5.5
+        + (fbm(x * 0.35 + 21, (z + y) * 0.35, 2) - 0.5) * 2.2
       const ang = Math.atan2(z, x)
       // El PORTILLO: un sector del borde queda más bajo, y por ahí entra el mar.
       let dAng = Math.abs(ang - P.portillo.ang)
@@ -173,14 +176,34 @@ export function createTidepool(container, cfg, agentNames = []) {
       pos.setX(i, x + (x / rr) * bump)
       pos.setZ(i, z + (z / rr) * bump)
       pos.setY(i, y - gate * gate * P.wallTop * 1.4)
-      // Más oscuro hacia el fondo (menos luz llega abajo) + TEXTURA: mottling de
-      // fbm (grietas y placas oscuras) para que la roca no se lea lisa.
+    }
+    geo.translate(0, (P.wallTop + P.bedY) / 2, 0)
+    // 2) Sombreado por NORMALES horneado en el vertex-color: las facetas que miran
+    // a la luz (arriba) se aclaran, las grietas se hunden en sombra. Esto es lo
+    // que hace que la pared se LEA como roca y no como bruma sin forma.
+    geo.computeVertexNormals()
+    const nrmA = geo.attributes.normal
+    const cols = new Float32Array(pos.count * 3)
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i)
+      const lit = Math.max(0, nrmA.getX(i) * 0.25 + nrmA.getY(i) * 0.9 + nrmA.getZ(i) * 0.22)
       const t = Math.max(0, Math.min(1, (y - P.bedY) / (P.wallTop - P.bedY)))
-      const mott = 0.55 + fbm(x * 0.5 + 11, (y + z) * 0.5, 3) * 0.7
-      for (let k = 0; k < 3; k++) cols[i * 3 + k] = (ROCK_LO[k] + (ROCK_HI[k] - ROCK_LO[k]) * t) * mott
+      const mott = 0.45 + fbm(x * 0.5 + 11, (y + z) * 0.5, 3) * 0.9
+      const shade = (0.35 + 0.95 * lit) * mott
+      let r = (ROCK_LO[0] + (ROCK_HI[0] - ROCK_LO[0]) * t) * shade
+      let g = (ROCK_LO[1] + (ROCK_HI[1] - ROCK_LO[1]) * t) * shade
+      let b = (ROCK_LO[2] + (ROCK_HI[2] - ROCK_LO[2]) * t) * shade
+      // Parches ROJIZOS de algas incrustantes en la mitad alta (como la foto).
+      const alg = fbm(x * 0.33 + 40, z * 0.33 - y * 0.2, 3)
+      if (alg > 0.60 && t > 0.3) {
+        const m = Math.min(1, (alg - 0.60) * 5)
+        r = r + (0.34 * shade - r) * m
+        g = g + (0.09 * shade - g) * m
+        b = b + (0.07 * shade - b) * m
+      }
+      cols[i * 3] = r; cols[i * 3 + 1] = g; cols[i * 3 + 2] = b
     }
     geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
-    geo.translate(0, (P.wallTop + P.bedY) / 2, 0)
     // Pared: cáusticas MUY débiles (0.12) para que la roca quede OSCURA (no lavada
     // de turquesa). El fondo pálido sí las lleva fuertes.
     scene.add(new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
@@ -231,23 +254,37 @@ export function createTidepool(container, cfg, agentNames = []) {
       const cx = Math.cos(a) * r, cz = Math.sin(a) * r
       const rx = 8 + q() * 8, rz = 6 + q() * 6
       const ry = 14 + q() * 14                     // altas: trepan la pared
-      const geo = new THREE.IcosahedronGeometry(1, 3)
+      const geo = new THREE.IcosahedronGeometry(1, 4)
       const gp = geo.attributes.position
       const seed = q() * 100
-      const cols = new Float32Array(gp.count * 3)
+      // 1) Desplazar: masa grande + dentado fino (silueta rugosa, no huevo liso).
       for (let k = 0; k < gp.count; k++) {
         const px = gp.getX(k), py = gp.getY(k), pz = gp.getZ(k)
         const d = 1 + (fbm(px * 1.4 + seed, pz * 1.4 - py + seed, 3) - 0.5) * 0.8
-        const wx = px * d * rx, wy = py * d * ry, wz = pz * d * rz
-        gp.setXYZ(k, wx, wy, wz)
-        // Roca volcánica OSCURA con TEXTURA: gradiente vertical suave + mottling de
-        // fbm (placas y grietas) para que no se lea lisa ni pálida.
-        const t = Math.max(0, Math.min(1, (wy + ry) / (2 * ry)))
-        const mott = 0.5 + fbm(px * 2.5 + seed, pz * 2.5 - py, 3) * 0.9
-        const g = (0.03 + t * 0.10) * mott
-        cols[k * 3] = g * 0.92; cols[k * 3 + 1] = g; cols[k * 3 + 2] = g * 1.15
+          + (fbm(px * 4.5 + seed, (pz - py) * 4.5, 2) - 0.5) * 0.28
+        gp.setXYZ(k, px * d * rx, py * d * ry, pz * d * rz)
       }
+      // 2) Sombreado por normales horneado en color (facetas a la luz claras,
+      // grietas en sombra) + parches rojizos de algas incrustantes arriba.
       geo.computeVertexNormals()
+      const bn = geo.attributes.normal
+      const cols = new Float32Array(gp.count * 3)
+      for (let k = 0; k < gp.count; k++) {
+        const wy = gp.getY(k)
+        const lit = Math.max(0, bn.getX(k) * 0.25 + bn.getY(k) * 0.9 + bn.getZ(k) * 0.22)
+        const t = Math.max(0, Math.min(1, (wy + ry) / (2 * ry)))
+        const mott = 0.45 + fbm(gp.getX(k) * 0.3 + seed, gp.getZ(k) * 0.3 - wy * 0.2, 3) * 0.9
+        const shade = (0.3 + 1.0 * lit) * mott
+        let r = (0.05 + t * 0.13) * shade * 0.95
+        let g2 = (0.05 + t * 0.13) * shade
+        let b = (0.05 + t * 0.13) * shade * 1.12
+        const alg = fbm(gp.getX(k) * 0.4 + seed + 7, gp.getZ(k) * 0.4 + wy * 0.15, 3)
+        if (alg > 0.62 && t > 0.4) {
+          const m = Math.min(1, (alg - 0.62) * 5)
+          r += (0.34 * shade - r) * m; g2 += (0.09 * shade - g2) * m; b += (0.07 * shade - b) * m
+        }
+        cols[k * 3] = r; cols[k * 3 + 1] = g2; cols[k * 3 + 2] = b
+      }
       geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
       const mesh = new THREE.Mesh(geo, injectCaustics(new THREE.MeshBasicMaterial({
         vertexColors: true, side: THREE.DoubleSide, fog: true,
@@ -898,13 +935,14 @@ export function createTidepool(container, cfg, agentNames = []) {
     clock += step
     pointUniforms.uT.value = clock
     if (eco) {
-      // Agua CLARA de base; la turbidez del oleaje la enturbia un poco. (Antes
-      // 0.018+ pisaba la niebla del config y teñía de turquesa la roca lejana.)
-      scene.fog.density = 0.004 + eco.fog * 0.012
       // DÍA/NOCHE visible: cielo y agua se aclaran con el sol y oscurecen de noche.
       const dayF = Math.max(0, Math.min(1, (eco.gain - 0.6) / 0.7))
       scene.background.lerpColors(NIGHT_BG, DAY_BG, dayF)
       scene.fog.color.lerpColors(NIGHT_FOG, DAY_FOG, dayF)
+      // Columna de agua LUMINOSA: de día, lo lejano se funde a turquesa claro
+      // (luz dispersada en el agua — es lo que te mete "adentro"); de noche casi
+      // no hay glow. La roca cercana queda nítida; la lejana, silueta turquesa.
+      scene.fog.density = 0.005 + dayF * 0.007 + eco.fog * 0.010
       tide = tideLevel(eco.phaseIndex, eco.phaseT)
       // El techo sube y baja con la marea: en bajamar se acerca a la cámara y la
       // poza se vuelve un charco chico; en pleamar se aleja y hay columna de agua.
