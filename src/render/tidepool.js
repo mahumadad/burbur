@@ -73,6 +73,8 @@ export function createTidepool(container, cfg, agentNames = []) {
     uTint: { value: 0.55 },     // fuerza del grado de color
     uWobble: { value: 0.0016 }, // refracción
     uLight: { value: 1 },       // cuánta luz hay arriba (apaga los rayos de noche)
+    uChromatic: { value: W.chromatic },
+    uSnellPos: { value: new THREE.Vector2(0.5, 0.86) },  // pos en pantalla de la ventana (se actualiza)
   }
   const seaPass = new ShaderPass({
     uniforms: seaUniforms,
@@ -83,27 +85,31 @@ export function createTidepool(container, cfg, agentNames = []) {
       precision mediump float;
       varying vec2 vUv;
       uniform sampler2D tDiffuse;
-      uniform float uTime, uTint, uWobble, uLight;
+      uniform float uTime, uTint, uWobble, uLight, uChromatic;
+      uniform vec2 uSnellPos;
       void main(){
         // Refracción: la imagen tiembla como vista a través del agua.
         vec2 uv = vUv;
         uv.x += sin(uv.y * 22.0 + uTime * 1.3) * uWobble;
         uv.y += cos(uv.x * 18.0 - uTime * 1.1) * uWobble;
-        vec3 col = texture2D(tDiffuse, clamp(uv, 0.0, 1.0)).rgb;
-
-        // God-rays: la luz baja del centro alto del cuadro y se abre en abanico.
-        vec2 sun = vec2(0.5, 0.86);
-        vec2 dir = (uv - sun) * 0.055;
+        // Dispersión cromática hacia los bordes (el agua separa rojo y azul).
+        vec2 dir = uv - 0.5;
+        float ca = uChromatic * dot(dir, dir);
+        float r = texture2D(tDiffuse, clamp(uv + dir * ca, 0.0, 1.0)).r;
+        float g = texture2D(tDiffuse, clamp(uv, 0.0, 1.0)).g;
+        float b = texture2D(tDiffuse, clamp(uv - dir * ca, 0.0, 1.0)).b;
+        vec3 col = vec3(r, g, b);
+        // God-rays: marcha hacia la ventana de Snell proyectada.
+        vec2 delta = (uv - uSnellPos) * (0.06 / float(${W.rayCount}));
         vec2 p = uv;
         float shaft = 0.0;
-        for (int i = 0; i < 10; i++) {
-          p -= dir;
+        for (int i = 0; i < ${W.rayCount}; i++) {
+          p -= delta;
           shaft += texture2D(tDiffuse, clamp(p, 0.0, 1.0)).g;
         }
-        shaft = shaft / 10.0;
-        col += vec3(0.18, 0.42, 0.5) * shaft * shaft * 0.5 * uLight;
-
-        // El agua se come el rojo: cuanto más lejos del centro, más azul-verde.
+        shaft /= float(${W.rayCount});
+        col += vec3(0.18, 0.42, 0.5) * shaft * shaft * 0.55 * uLight;
+        // Tinte azul-verdoso que se ahonda con la distancia al centro.
         float d = length(vUv - 0.5) * 1.42;
         vec3 water = vec3(0.04, 0.34, 0.44);
         col = mix(col, col * water * 2.2, clamp(d * uTint, 0.0, 0.85));
@@ -729,6 +735,10 @@ export function createTidepool(container, cfg, agentNames = []) {
     seaUniforms.uLight.value = light
     // Con turbidez alta el azul se cierra más rápido: se ve menos lejos.
     if (eco) seaUniforms.uTint.value = 0.42 + eco.fog * 0.5
+    // La ventana de Snell está justo ARRIBA de la cámara: proyectar un punto en
+    // world sobre la superficie, encima del ojo, a coordenadas de pantalla.
+    _snell.set(stage.camera.position.x, surfaceY, stage.camera.position.z).project(stage.camera)
+    seaUniforms.uSnellPos.value.set(_snell.x * 0.5 + 0.5, _snell.y * 0.5 + 0.5)
     const night = light < 0.35
     // Surgencia: agua fría y rica = floración de plancton (frío = más vida).
     const bloom = eco ? 1 - Math.abs(((eco.seasonT + 0.5) % 1) - 0.25) * 2 : 0.5
@@ -773,6 +783,7 @@ export function createTidepool(container, cfg, agentNames = []) {
   }
 
   const _proj = new THREE.Vector3()
+  const _snell = new THREE.Vector3()  // temporal: proyección de la ventana de Snell a pantalla
   let ptrX = null, ptrY = null, _lx = 0, _ly = 0
   // El lente fisheye mueve la posición VISUAL del agente respecto de su NDC
   // lógico; sin deshacer esa distorsión, la etiqueta no cae donde se ve el bicho.
