@@ -382,7 +382,7 @@ export const CONFIG = {
     anemones: 34,
     barnacles: 72,
     chitons: 150,          // chitones + caracoles: costra que encostra la roca
-    algae: 45,             // algas sueltas (parches), no un bosque que tape
+    algae: 12,             // matas de cochayuyo: pocas, para que no tapen la poza
     // Cameo del chungungo: raro y solo con la poza bien llena.
     otter: { minTide: 0.75, chancePerSec: 0.012, diveDur: 5.5 },
     // Agua "grado submarino" procedural (spec 2026-08-13-agua-poza-procedural).

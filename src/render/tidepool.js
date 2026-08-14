@@ -678,89 +678,85 @@ export function createTidepool(container, cfg, agentNames = []) {
     }
   }
 
-  // ALGAS: pradería DENSA de hojas ANCHAS (cintas, no hairlines) que se MECEN con
-  // la corriente. Cada mata es un abanico de blades; una de cada ~5 es una correa
-  // alta de cochayuyo/huiro que sube hacia la luz. Cada blade es una tira de
-  // triángulos que se afina hacia la punta, con gradiente verde base→punta. El
-  // vaivén lo hace el vertex shader (offset por altura + fase de la mata).
-  const ALGAE_LO = [0.05, 0.14, 0.04], ALGAE_HI = [0.34, 0.60, 0.18]
-  const KELP_LO = [0.09, 0.12, 0.05], KELP_HI = [0.46, 0.42, 0.14]
-  const mixC = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
-  {
-    const pos = [], col = [], sway = [], phs = [], idx = []
-    let vb = 0
-    function pushBlade(bx, bz, byy, h, width, leanX, leanZ, lo, hi) {
-      const segs = 6, ph = q() * 6.2832
-      // Perpendicular en XZ a la inclinación, para dar ancho a la cinta.
-      let px = leanX, pz = leanZ
-      const pl = Math.hypot(px, pz) || 1; px = -pz / pl; pz = leanX / pl  // perp normalizada
-      for (let s = 0; s <= segs; s++) {
-        const f = s / segs
-        const arch = (0.3 + 0.4) * h * f * f * 0.5   // se recuesta hacia la punta
-        const cx = bx + leanX * arch
-        const cy = byy + h * f * (1.0 - 0.1 * f)
-        const cz = bz + leanZ * arch
-        const w = width * (1.0 - f) * 0.5            // se afina hacia la punta
-        const c = mixC(lo, hi, f)
-        pos.push(cx + px * w, cy, cz + pz * w, cx - px * w, cy, cz - pz * w)
-        col.push(c[0], c[1], c[2], c[0], c[1], c[2])
-        const amt = f * f * Math.min(h * 0.09, 3.2)  // la punta se mece más
-        sway.push(amt, amt); phs.push(ph, ph)
-        if (s < segs) { idx.push(vb, vb + 1, vb + 2, vb + 1, vb + 3, vb + 2) }
-        vb += 2
+  // ALGAS: COCHAYUYO (Durvillaea antarctica). No son hojas planas anchas: cada
+  // mata es un pequeño DISCO de fijación pegado a la roca/lecho, un ESTIPE grueso
+  // que sube, y de él nace un MANOJO de correas largas, gruesas y redondeadas que
+  // se arquean y ondulan con la corriente. Se dibujan como cadenas densas de
+  // discos (volumen) reescritas cada frame — el mismo patrón que rayos/plancton:
+  // así el balanceo puede crecer hacia la punta (la base queda anclada). El
+  // gradiente va olivo oscuro en la base → dorado en la punta, con una franja
+  // clara por el centro (segunda cadena más fina, el brillo de goma mojada).
+  const STRAPS = 5           // correas por mata
+  const NODES = 10           // discos por correa
+  const ALGAE_PER = 3 + STRAPS * NODES * 2   // holdfast + 2 estipe + (cuerpo+brillo)
+  const algaeCloud = createPointCloud(P.algae * ALGAE_PER, draw.pointMaterial)
+  const algaeNodes = []      // { i, rx, ry, rz, w, ph } — rest + peso de vaivén + fase
+  const ALGAE_CAP = P.surfaceMin - 1.2   // las puntas nunca asoman sobre el agua
+  const HOLD = [0.10, 0.08, 0.05]        // disco de fijación (marrón oscuro)
+  const STIPE_C = [0.11, 0.13, 0.05]     // estipe (olivo muy oscuro)
+  const OLIVE = [0.14, 0.18, 0.05]       // base de la correa
+  const GOLD = [0.46, 0.38, 0.15]        // punta dorada (contenida, no protagonista)
+  const SHEEN = [0.58, 0.54, 0.34]       // realce húmedo del centro, discreto
+  let algaeGI = 0
+  function addAlgaNode(rx, ry, rz, w, ph, col, size) {
+    const j = algaeGI * 3
+    algaeCloud.pos[j] = rx; algaeCloud.pos[j + 1] = ry; algaeCloud.pos[j + 2] = rz
+    algaeCloud.col[j] = col[0]; algaeCloud.col[j + 1] = col[1]; algaeCloud.col[j + 2] = col[2]
+    algaeCloud.size[algaeGI] = size
+    algaeNodes.push({ i: algaeGI, rx, ry, rz, w, ph })
+    algaeGI++
+  }
+  for (let i = 0; i < P.algae; i++) {
+    // La mayoría arraiga en el lecho; algunas en la pared baja de la taza.
+    const base = q() < 0.28 ? wallPoint(q() * 0.14) : bedSpot(0.9)
+    const mataPh = q() * 6.2832
+    // Disco de fijación + estipe grueso del que salen las correas.
+    addAlgaNode(base.x, base.y, base.z, 0, mataPh, HOLD, 1.2)
+    const topY = base.y + 1.6
+    addAlgaNode(base.x, base.y + 0.7, base.z, 0.04, mataPh, STIPE_C, 1.0)
+    addAlgaNode(base.x, topY, base.z, 0.06, mataPh, STIPE_C, 0.95)
+    for (let s = 0; s < STRAPS; s++) {
+      const az = q() * 6.2832
+      const strapLen = 5 + q() * 5.5
+      const reach = 2 + q() * 2.5      // cuánto se arquea la correa hacia afuera
+      const ph = mataPh + s * 0.9
+      for (let k = 0; k < NODES; k++) {
+        const u = (k + 1) / NODES
+        const out = reach * u * u       // la correa se abre hacia la punta
+        const rx = base.x + Math.cos(az) * out + (q() - 0.5) * 0.3
+        const rz = base.z + Math.sin(az) * out + (q() - 0.5) * 0.3
+        const ry = Math.min(topY + strapLen * (0.9 * u + 0.1 * Math.sin(u * Math.PI)), ALGAE_CAP)
+        const w = 0.12 + 0.88 * u        // la base casi no se mueve; la punta, mucho
+        // Cuerpo grueso: olivo → dorado a lo largo de la correa.
+        const body = [
+          OLIVE[0] + (GOLD[0] - OLIVE[0]) * u,
+          OLIVE[1] + (GOLD[1] - OLIVE[1]) * u,
+          OLIVE[2] + (GOLD[2] - OLIVE[2]) * u,
+        ]
+        addAlgaNode(rx, ry, rz, w, ph, body, 0.78 - 0.44 * u)
+        // Franja húmeda por el centro: cadena más fina y clara, más dorada arriba.
+        const g = 0.5 + 0.5 * u
+        addAlgaNode(rx, ry, rz, w, ph, [SHEEN[0] * g, SHEEN[1] * g, SHEEN[2] * g], 0.32 - 0.18 * u)
       }
     }
-    for (let i = 0; i < P.algae; i++) {
-      const tall = q() < 0.2
-      // La mayoría de las matas van en el LECHO central (pradería que llena el
-      // cuadro); el resto trepa las paredes/repisas.
-      const base = q() < 0.72 ? bedSpot() : wallPoint(q() * 0.42)
-      const blades = tall ? 2 + (q() * 3 | 0) : 7 + (q() * 12 | 0)
-      const bendDir = q() * 6.2832
-      const leanX = Math.cos(bendDir), leanZ = Math.sin(bendDir)
-      const lo = tall ? KELP_LO : ALGAE_LO, hi = tall ? KELP_HI : ALGAE_HI
-      for (let b = 0; b < blades; b++) {
-        const h = tall ? 16 + q() * 18 : 4 + q() * 9
-        const rr = (tall ? 0.6 : 2.0) * q(), aa = q() * 6.2832
-        const bx = base.x + Math.cos(aa) * rr, bz = base.z + Math.sin(aa) * rr
-        const width = tall ? 1.8 + q() * 1.4 : 0.5 + q() * 0.6
-        pushBlade(bx, bz, base.y, h, width, leanX, leanZ, lo, hi)
-      }
+  }
+  scene.add(algaeCloud.mesh)
+  // Vaivén: una onda que viaja por la correa (la punta se retrasa respecto a la
+  // base) más el empuje de la corriente que entra por el portillo. La base, con
+  // peso ~0, queda clavada al holdfast.
+  function updateAlgae(agitation) {
+    const t = clock
+    const lean = agitation * 1.6
+    for (let n = 0; n < algaeNodes.length; n++) {
+      const nd = algaeNodes[n]
+      const w = nd.w
+      const s = t * 0.9 + nd.ph
+      const j = nd.i * 3
+      algaeCloud.pos[j] = nd.rx + Math.sin(s + w * 2.2) * 0.85 * w + CURRENT_X * lean * w
+      algaeCloud.pos[j + 1] = Math.min(nd.ry + Math.sin(s * 1.3 + w * 3.0) * 0.16 * w, ALGAE_CAP)
+      algaeCloud.pos[j + 2] = nd.rz + Math.cos(s * 0.85 + w * 2.2) * 0.85 * w + CURRENT_Z * lean * w
     }
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3))
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(col), 3))
-    geo.setAttribute('sway', new THREE.BufferAttribute(new Float32Array(sway), 1))
-    geo.setAttribute('phase', new THREE.BufferAttribute(new Float32Array(phs), 1))
-    geo.setIndex(idx)
-    const algaeUniforms = THREE.UniformsUtils.merge([THREE.UniformsLib.fog])
-    algaeUniforms.uTime = waterShared.uTime          // ya se actualiza cada frame
-    const algaeMat = new THREE.ShaderMaterial({
-      uniforms: algaeUniforms, fog: true, side: THREE.DoubleSide,
-      vertexShader: `
-        uniform float uTime;
-        attribute vec3 color; attribute float sway; attribute float phase;
-        varying vec3 vColor;
-        #include <fog_pars_vertex>
-        void main(){
-          vColor = color;
-          vec3 p = position;
-          p.x += sin(uTime * 1.1 + phase) * sway;
-          p.z += cos(uTime * 0.9 + phase * 1.3) * sway * 0.8;
-          vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
-          #include <fog_vertex>
-          gl_Position = projectionMatrix * mvPosition;
-        }`,
-      fragmentShader: `
-        precision mediump float;
-        varying vec3 vColor;
-        #include <fog_pars_fragment>
-        void main(){
-          gl_FragColor = vec4(vColor, 1.0);
-          #include <fog_fragment>
-        }`,
-    })
-    scene.add(new THREE.Mesh(geo, algaeMat))
+    algaeCloud.commit()
   }
 
   draw.finalizeLines(scene, new THREE.LineBasicMaterial({ vertexColors: true, fog: true }))
@@ -1070,6 +1066,7 @@ export function createTidepool(container, cfg, agentNames = []) {
     updateAnemones(agitation)
     updateLimpets(step)
     updateBarnacles()
+    updateAlgae(agitation)
     const light = eco ? Math.min(1, eco.gain * 0.85) : 1
     seaUniforms.uTime.value = clock
     seaUniforms.uLight.value = light
