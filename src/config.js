@@ -388,11 +388,14 @@ export const CONFIG = {
     // Agua "grado submarino" procedural (spec 2026-08-13-agua-poza-procedural).
     water: {
       // ~4 olas Gerstner (dir en rad, longitud de onda, amplitud, steepness 0..1).
+      // Amplitudes GENEROSAS: sobre un plano de ~166 u vistas a 15–30 de distancia,
+      // amplitudes chicas se leían como una banda plana. Ondas anchas y altas para
+      // que el techo tenga relieve real; las cortas rizan encima.
       gerstner: [
-        { dir: 0.3, wavelength: 26, amp: 0.5, steepness: 0.6 },
-        { dir: 1.9, wavelength: 17, amp: 0.34, steepness: 0.7 },
-        { dir: 3.4, wavelength: 11, amp: 0.22, steepness: 0.8 },
-        { dir: 5.0, wavelength: 7, amp: 0.14, steepness: 0.9 },
+        { dir: 0.3, wavelength: 34, amp: 1.5, steepness: 0.45 },
+        { dir: 1.9, wavelength: 22, amp: 0.95, steepness: 0.5 },
+        { dir: 3.4, wavelength: 14, amp: 0.55, steepness: 0.55 },
+        { dir: 5.0, wavelength: 9, amp: 0.3, steepness: 0.58 },
       ],
       choppiness: 1.0,          // el OLEAJE (eco.rain) lo escala en runtime
       causticScale: 0.08,       // escala espacial de la red de cáusticas

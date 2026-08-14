@@ -341,6 +341,7 @@ export function createTidepool(container, cfg, agentNames = []) {
       transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
       vertexShader: `
         #define N ${RIPPLES}
+        precision highp float;
         uniform float uTime, uAgitate, uChop;
         varying vec2 vWXZ; varying vec3 vView; varying vec3 vWNrm; varying float vCrest;
         ${HASH_NOISE_FBM}
@@ -351,7 +352,9 @@ export function createTidepool(container, cfg, agentNames = []) {
           vec2 p = position.xz;
           vWXZ = p;
           vec3 nrm;
-          float chop = uChop * (0.35 + uAgitate);
+          // Piso de amplitud en reposo (0.5): sin oleaje la superficie igual
+          // ondula con volumen; la agitación (uAgitate) la levanta más.
+          float chop = uChop * (0.5 + uAgitate * 1.0);
           vec3 disp = gerstnerSum(p, uTime, chop, nrm);
           vec3 pos = position + disp;
           vCrest = disp.y;
@@ -369,7 +372,7 @@ export function createTidepool(container, cfg, agentNames = []) {
         }`,
       fragmentShader: `
         #define N ${RIPPLES}
-        precision mediump float;
+        precision highp float;
         uniform float uTime, uAgitate, uLight, uSnell, uFoamT, uFoamI;
         uniform vec4 uRipples[N];
         uniform vec3 uSkyTint, uDeep, uCausticTint;
@@ -381,6 +384,11 @@ export function createTidepool(container, cfg, agentNames = []) {
           vec3 n = normalize(vWNrm);
           vec3 v = normalize(vView);   // fragmento → cámara (mira hacia arriba)
           float cosI = clamp(abs(dot(n, v)), 0.0, 1.0);
+          // Sol BAJO-lateral (no cenital): al no venir de frente, los flancos de
+          // cada ola se separan en claro/oscuro y el relieve se lee aun mirando la
+          // superficie casi de canto, que es como la ve la cámara sumergida.
+          vec3 L = normalize(vec3(0.42, 0.82, -0.30));
+          float ndl = clamp(dot(n, L), 0.0, 1.0);
           // Ventana de Snell ANCHA y suave: mirando casi vertical se ve el cielo.
           // El resto de la superficie NO es oscura vista desde abajo — es un ESPEJO
           // rizado y brillante del fondo iluminado, para que el techo SIEMPRE se
@@ -395,15 +403,39 @@ export function createTidepool(container, cfg, agentNames = []) {
           // Techo LUMINOSO: el espejo plateado tiene que ser claramente MÁS claro
           // que la niebla azul de fondo, si no se funde y desaparece. Ventana de
           // Snell casi blanca-cielo; el resto, plata-teal brillante siempre.
-          vec3 sky = uSkyTint * (1.05 + 0.30 * n.y);
-          vec3 sheen = mix(vec3(0.28, 0.52, 0.60), vec3(0.72, 0.94, 1.0), clamp(cau * 0.85 + 0.25, 0.0, 1.0));
-          vec3 tir = sheen * (0.80 + 0.35 * cosI);
-          vec3 col = vec3(mix(tir.r, sky.r, winR), mix(tir.g, sky.g, win), mix(tir.b, sky.b, winB));
-          col += uCausticTint * cau * uLight * 0.35;
+          // RELIEVE = motor del volumen. Combina la PENDIENTE de la ola (cuánto
+          // inclina la normal hacia/desde el sol) con la ALTURA real (vCrest):
+          // las caras al sol y las crestas van claras, los flancos de espalda y los
+          // senos van oscuros. Rango GRANDE (0..1) para que se lea como olas
+          // rodando, no como un tinte parejo sobre una lámina plana.
+          float slope = dot(n.xz, L.xz);          // + si la cara mira al sol
+          float relief = clamp(0.46 + slope * 1.9 + vCrest * 0.22, 0.0, 1.0);
+          // Gradiente fuerte seno→cresta: azul profundo en los valles, plata-cielo
+          // en las crestas. Esto solo ya esculpe el volumen del techo.
+          vec3 trough = uDeep * 1.25;
+          // Cresta plata-teal, MENOS blanca y con poco peso de cáustica: subir el
+          // cau la volvía lóbulos "de plumavit" vistos desde abajo. Queda lisa.
+          vec3 crestC = mix(vec3(0.28, 0.55, 0.64), vec3(0.60, 0.82, 0.92), clamp(cau * 0.35 + 0.35, 0.0, 1.0));
+          vec3 body = mix(trough, crestC, relief);
+          // Ventana de Snell: el cielo asoma donde la normal encara a la cámara.
+          vec3 sky = uSkyTint * (1.12 + 0.30 * n.y);
+          vec3 col = vec3(mix(body.r, sky.r, winR), mix(body.g, sky.g, win), mix(body.b, sky.b, winB));
+          // Cáustica del techo MUY tenue: la red lacé, subida, aplanaba el relieve.
+          // Queda como un velo, no como la textura dominante.
+          col += uCausticTint * cau * uLight * 0.12;
+          // Destello especular sobre las crestas encaradas al sol y a la cámara:
+          // los puntos de luz que corren por el relieve al ondular. Dos anchos —
+          // chispa fina + brillo suave — para que las crestas canten.
+          vec3 hlf = normalize(L + v);
+          float nh = clamp(dot(n, hlf), 0.0, 1.0);
+          float spec = pow(nh, 28.0);
+          float glint = pow(nh, 9.0);
+          col += vec3(0.58, 0.80, 0.94) * spec * uLight * 0.8;
+          col += vec3(0.12, 0.26, 0.32) * glint * uLight * 0.28;
           // MINI-OLEAJE: rizado fino y rápido de la superficie (líneas de luz
           // chiquitas que corren), más marcado cerca de la ventana de Snell.
           float mini = caustics(vWXZ * 0.34 + 7.0, uTime * 1.2);
-          col += vec3(0.16, 0.40, 0.46) * mini * (0.35 + win * 0.65) * uLight;
+          col += vec3(0.08, 0.20, 0.24) * mini * (0.2 + win * 0.5) * uLight;
           // Ondas de estela (bichos que rozan la superficie).
           float wake = 0.0;
           for (int i = 0; i < N; i++) {
