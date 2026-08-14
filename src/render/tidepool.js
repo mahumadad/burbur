@@ -710,15 +710,19 @@ export function createTidepool(container, cfg, agentNames = []) {
     // La mayoría arraiga en el lecho; algunas en la pared baja de la taza.
     const base = q() < 0.28 ? wallPoint(q() * 0.14) : bedSpot(0.9)
     const mataPh = q() * 6.2832
+    // Una de cada ~4 es una mata VIEJA: disco más ancho, estipe más alto y correas
+    // bastante más largas. Las matas de cochayuyo no son todas del mismo porte.
+    const big = q() < 0.26
+    const scale = big ? 1.7 + q() * 0.8 : 0.85 + q() * 0.35
     // Disco de fijación + estipe grueso del que salen las correas.
-    addAlgaNode(base.x, base.y, base.z, 0, mataPh, HOLD, 1.2)
-    const topY = base.y + 1.6
-    addAlgaNode(base.x, base.y + 0.7, base.z, 0.04, mataPh, STIPE_C, 1.0)
-    addAlgaNode(base.x, topY, base.z, 0.06, mataPh, STIPE_C, 0.95)
+    addAlgaNode(base.x, base.y, base.z, 0, mataPh, HOLD, 1.2 * (big ? 1.5 : 1))
+    const topY = base.y + 1.6 * scale
+    addAlgaNode(base.x, base.y + 0.7 * scale, base.z, 0.04, mataPh, STIPE_C, 1.0 * (big ? 1.35 : 1))
+    addAlgaNode(base.x, topY, base.z, 0.06, mataPh, STIPE_C, 0.95 * (big ? 1.3 : 1))
     for (let s = 0; s < STRAPS; s++) {
       const az = q() * 6.2832
-      const strapLen = 5 + q() * 5.5
-      const reach = 2 + q() * 2.5      // cuánto se arquea la correa hacia afuera
+      const strapLen = (5 + q() * 5.5) * scale
+      const reach = (2 + q() * 2.5) * (big ? 1.4 : 1) // cuánto se arquea hacia afuera
       const ph = mataPh + s * 0.9
       for (let k = 0; k < NODES; k++) {
         const u = (k + 1) / NODES
@@ -733,7 +737,7 @@ export function createTidepool(container, cfg, agentNames = []) {
           OLIVE[1] + (GOLD[1] - OLIVE[1]) * u,
           OLIVE[2] + (GOLD[2] - OLIVE[2]) * u,
         ]
-        addAlgaNode(rx, ry, rz, w, ph, body, 0.78 - 0.44 * u)
+        addAlgaNode(rx, ry, rz, w, ph, body, (0.78 - 0.44 * u) * (big ? 1.45 : 1))
         // Franja húmeda por el centro: cadena más fina y clara, más dorada arriba.
         const g = 0.5 + 0.5 * u
         addAlgaNode(rx, ry, rz, w, ph, [SHEEN[0] * g, SHEEN[1] * g, SHEEN[2] * g], 0.32 - 0.18 * u)
